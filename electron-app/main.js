@@ -5,7 +5,7 @@ let mainWindow = null;
 const childWindows = {};
 
 // Default URL to load inside the Electron shell.
-// This points to the live hosted instance of Krajden Grid.
+// IMPORTANT: This is a dev/preview URL — replace with stable production URL before launch.
 const defaultUrl = 'https://ais-dev-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/fullscreen?electron=1';
 
 function createMainWindow() {
