@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#0d0d0f" />
+        <meta name="description" content="Krajden Grid - Transparent grid overlay with real-time collaboration" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Krajden Grid" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+        <title>Krajden Grid</title>
+        <script>
+            // Only load visual edit scripts when inside an iframe
+            if (window.self !== window.top) {
+                // Configure Tailwind
+                window.tailwind = window.tailwind || {};
+                tailwind.config = {
+                    corePlugins: { preflight: false },
+                };
+
+                // Only load Tailwind CDN on local development to prevent production warning
+                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    var tailwindScript = document.createElement('script');
+                    tailwindScript.src = 'https://cdn.tailwindcss.com';
+                    document.head.appendChild(tailwindScript);
+                }
+            }
+        </script>
+    </head>
+    <body class="bg-[#0c0c0e] text-gray-100">
+        <noscript>You need to enable JavaScript to run this app.</noscript>
+        <div id="root"></div>
+        <script type="module" src="/src/index.js"></script>
+    </body>
+</html>

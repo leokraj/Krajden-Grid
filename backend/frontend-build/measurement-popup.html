@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OverGrid - Live Measurement</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Manrope', sans-serif;
+      background: rgba(10, 10, 10, 0.98);
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+    }
+    
+    .logo .accent { color: #00F0FF; }
+    
+    .measurement-display {
+      text-align: center;
+    }
+    
+    .measurement-type {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .measurement-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 48px;
+      font-weight: 700;
+      color: #00F0FF;
+      text-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+      transition: all 0.2s ease;
+    }
+    
+    .measurement-unit {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-left: 8px;
+    }
+    
+    .multiplier {
+      font-size: 14px;
+      color: #10B981;
+      margin-top: 8px;
+    }
+    
+    .cone-angle {
+      font-size: 14px;
+      color: #FF4444;
+      margin-top: 4px;
+    }
+    
+    .no-measurement {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.3);
+      text-align: center;
+    }
+    
+    .mode-indicator {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(0, 122, 255, 0.2);
+      border: 1px solid rgba(0, 122, 255, 0.4);
+      border-radius: 20px;
+      font-size: 11px;
+      color: #007AFF;
+      margin-bottom: 12px;
+    }
+    
+    .mode-indicator.line { background: rgba(0, 122, 255, 0.2); border-color: rgba(0, 122, 255, 0.4); color: #007AFF; }
+    .mode-indicator.radial { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.4); color: #10B981; }
+    .mode-indicator.cone { background: rgba(255, 68, 68, 0.2); border-color: rgba(255, 68, 68, 0.4); color: #FF4444; }
+  </style>
+</head>
+<body>
+  <div class="logo"><span>Over</span><span class="accent">Grid</span></div>
+  
+  <div id="content">
+    <div class="no-measurement">
+      Waiting for measurement...<br>
+      <small style="opacity: 0.5;">Click and drag on the grid to measure</small>
+    </div>
+  </div>
+
+  <script>
+    const contentEl = document.getElementById('content');
+    
+    // Listen for messages from the parent window
+    window.addEventListener('message', (event) => {
+      // Validate origin if needed
+      const data = event.data;
+      
+      if (data.type === 'measurement') {
+        updateMeasurement(data);
+      } else if (data.type === 'clear') {
+        showWaiting();
+      }
+    });
+    
+    function updateMeasurement(data) {
+      const { measureMode, value, multiplier, coneAngle } = data;
+      
+      if (!measureMode || value === undefined) {
+        showWaiting();
+        return;
+      }
+      
+      const modeLabel = measureMode === 'line' ? 'Distance' : 
+                        measureMode === 'radial' ? 'Radius' : 
+                        measureMode === 'cone' ? 'Cone Distance' : 'Measurement';
+      
+      const multiplierText = multiplier && multiplier !== 1 ? `(${multiplier}x multiplier applied)` : '';
+      const angleText = measureMode === 'cone' && coneAngle ? `@ ${coneAngle}°` : '';
+      
+      contentEl.innerHTML = `
+        <div class="measurement-display">
+          <div class="mode-indicator ${measureMode}">${measureMode.toUpperCase()}</div>
+          <div class="measurement-type">${modeLabel}</div>
+          <div class="measurement-value">
+            ${value.toFixed(2)}<span class="measurement-unit">units</span>
+          </div>
+          ${multiplierText ? `<div class="multiplier">${multiplierText}</div>` : ''}
+          ${angleText ? `<div class="cone-angle">${angleText}</div>` : ''}
+        </div>
+      `;
+    }
+    
+    function showWaiting() {
+      contentEl.innerHTML = `
+        <div class="no-measurement">
+          Waiting for measurement...<br>
+          <small style="opacity: 0.5;">Click and drag on the grid to measure</small>
+        </div>
+      `;
+    }
+    
+    // Notify parent that popup is ready
+    if (window.opener) {
+      window.opener.postMessage({ type: 'popup-ready' }, '*');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+{
+  "name": "krajden-grid-desktop",
+  "version": "1.0.0",
+  "description": "Desktop Companion for Krajden Grid - Transparent overlay",
+  "author": "Krajden Grid",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win --x64"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.krajden.grid",
+    "productName": "KrajdenGrid",
+    "copyright": "Copyright © 2026 Krajden Grid",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Krajden Grid",
+      "runAfterFinish": true,
+      "uninstallDisplayName": "Krajden Grid Uninstaller"
+    }
+  },
+  "private": true
+}

@@ -1,0 +1,124 @@
+{
+  "identity": {
+    "name": "E1",
+    "archetype": "The Performance Pro",
+    "vibe": "Technical, Precision, HUD, Cyber-minimalism",
+    "principles": [
+      "Fusion over Imitation: Mix architectural precision with digital fluidity.",
+      "Emotion First: Evoke a sense of control and accuracy.",
+      "Content is King: Data and units are the heroes.",
+      "Zoom In: Focus on the pixel-perfect details.",
+      "Negative Space: Don't clutter the view; the grid needs to breathe."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "JetBrains Mono, monospace",
+      "weights": ["700", "800"],
+      "usage": "Headings, Data Displays, Unit Labels, Coordinates"
+    },
+    "body": {
+      "family": "Manrope, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "UI Text, Descriptions, Tooltips, Settings"
+    },
+    "scale": {
+      "h1": "text-5xl md:text-7xl tracking-tight font-bold",
+      "h2": "text-3xl md:text-5xl tracking-tight font-bold",
+      "h3": "text-xl md:text-2xl font-bold",
+      "body": "text-base leading-relaxed text-muted-foreground",
+      "caption": "text-xs uppercase tracking-widest text-muted-foreground"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#0A0A0A",
+      "foreground": "#FFFFFF",
+      "primary": "#007AFF",
+      "secondary": "#1A1A1A",
+      "accent": "#00F0FF",
+      "muted": "#737373",
+      "border": "#262626",
+      "grid_lines": "rgba(0, 240, 255, 0.3)"
+    },
+    "semantic": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    },
+    "gradients": {
+      "hero": "linear-gradient(to bottom right, #0A0A0A, #111111)",
+      "glow": "radial-gradient(circle at center, rgba(0, 122, 255, 0.15), transparent 70%)"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "overlay": "bg-black/80 backdrop-blur-md border border-white/10 shadow-2xl",
+      "panel": "bg-[#111]/90 backdrop-blur-xl border border-white/5"
+    },
+    "borders": {
+      "subtle": "border border-white/10",
+      "highlight": "border-t border-t-white/20 border-b-0 border-x-0"
+    },
+    "shadows": {
+      "glow": "0 0 20px rgba(0, 122, 255, 0.2)",
+      "depth": "0 10px 30px -10px rgba(0, 0, 0, 0.5)"
+    }
+  },
+  "layout": {
+    "spacing": {
+      "container": "max-w-7xl mx-auto px-6 md:px-12",
+      "section": "py-24 md:py-32",
+      "gap": "gap-8 md:gap-12"
+    },
+    "grid_system": {
+      "web": "grid grid-cols-1 md:grid-cols-12 gap-8",
+      "dashboard": "grid grid-cols-1 md:grid-cols-4 gap-6"
+    }
+  },
+  "components": {
+    "OverlayDock": {
+      "description": "The floating control panel for the electron app.",
+      "style": "Fixed, draggable, glassmorphic. Minimal footprint.",
+      "elements": ["Grid Toggle", "Opacity Slider", "Color Picker", "Unit Input", "Monitor Switch"]
+    },
+    "GridCanvas": {
+      "description": "The transparent overlay layer.",
+      "style": "Pointer-events-none (unless measuring). Canvas-based rendering for performance.",
+      "features": ["Custom spacing", "Subdivisions", "Crosshairs"]
+    },
+    "MonitorSelector": {
+      "description": "Visual representation of connected displays.",
+      "style": "Miniature rectangles representing aspect ratios. Active state highlights the selected screen."
+    },
+    "RulerTool": {
+      "description": "Interactive measurement tool.",
+      "style": "Click and drag to measure. Shows pixel/unit distance in a tooltip."
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_bg": "https://images.unsplash.com/photo-1751200065697-4461cc2b43cb?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "grid_preview": "CSS Generated Grid"
+    },
+    "icons": "Lucide React (default) or Radix Icons"
+  },
+  "instructions_to_main_agent": [
+    "1. SETUP: Install 'lucide-react' and 'framer-motion' immediately.",
+    "2. THEME: Update 'tailwind.config.js' and 'index.css' to match the 'Performance Pro' color palette. Force Dark Mode.",
+    "3. FONTS: Import 'JetBrains Mono' and 'Manrope' from Google Fonts in 'index.css'.",
+    "4. WEB APP: Build the Landing Page first. Use the 'Hero' image as a subtle background with a heavy dark overlay.",
+    "5. ELECTRON: The 'Overlay' component must be transparent. Use 'rgba(0,0,0,0)' for the body background in the overlay window.",
+    "6. STATE: Use a global store (Zustand or Context) to manage Grid Settings (spacing, color, thickness) so the Preview on Web and the Actual Overlay in Electron share logic.",
+    "7. MEASUREMENT: Implement the 'Ruler' logic using mouse coordinates. It must snap to the grid if 'Snap' is enabled.",
+    "8. TESTING: Add 'data-testid' to all inputs in the Dock and Configuration panel."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Avoid 'AI Slop': No generic gradients, no centered text blocks without purpose.",
+    "Dark Mode Only: This is a pro tool. Do not build a light mode unless forced.",
+    "Micro-interactions: Buttons should glow on hover. Sliders should feel weighty.",
+    "Accessibility: Ensure high contrast for text (Gray-300 on Black, not Gray-600).",
+    "Code Quality: Use functional components, named exports for components, default exports for pages."
+  ]
+}

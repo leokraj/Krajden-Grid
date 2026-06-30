@@ -1,0 +1,18 @@
+{
+  "name": "krajden-grid-installer-builder",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "pkg": "^5.8.1"
+  },
+  "bin": "installer.js",
+  "scripts": {
+    "build": "pkg . --targets node18-win-x64 --output KrajdenGrid-Setup.exe"
+  },
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ]
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "summary": {
+    "tests_run": 12,
+    "tests_passed": 12,
+    "tests_failed": 0,
+    "success_rate": 100.0
+  },
+  "test_results": [
+    {
+      "test_name": "Root API",
+      "method": "GET",
+      "endpoint": "",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "message": "OverGrid API is running",
+        "version": "1.0.0"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Health Check",
+      "method": "GET",
+      "endpoint": "health",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "status": "healthy",
+        "timestamp": "2026-02-06T18:49:27.173053+00:00"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Get All Presets",
+      "method": "GET",
+      "endpoint": "presets",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": [
+        {
+          "name": "Test Preset",
+          "description": "1080p design grid",
+          "settings": {
+            "screen_width": 1920,
+            "screen_height": 1080,
+            "unit_width": 66,
+            "unit_height": 33,
+            "grid_color": "#00F0FF",
+            "line_thickness": 1.0,
+            "opacity": 0.3,
+            "show_subdivisions": false,
+            "subdivision_count": 2
+          },
+          "id": "5f90ac81-7049-465c-ad47-d94d161c721b",
+          "created_at": "2026-02-06T18:29:25.669274+00:00",
+          "updated_at": "2026-02-06T18:29:25.669286+00:00"
+        }
+      ],
+      "error": null
+    },
+    {
+      "test_name": "Create Preset",
+      "method": "POST",
+      "endpoint": "presets",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "name": "Test Preset 184927",
+        "description": "Test preset for API testing",
+        "settings": {
+          "screen_width": 1920,
+          "screen_height": 1080,
+          "unit_width": 66,
+          "unit_height": 33,
+          "grid_color": "#00F0FF",
+          "line_thickness": 1.0,
+          "opacity": 0.3,
+          "show_subdivisions": false,
+          "subdivision_count": 2
+        },
+        "id": "c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+        "created_at": "2026-02-06T18:49:27.251192+00:00",
+        "updated_at": "2026-02-06T18:49:27.251201+00:00"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Get Specific Preset",
+      "method": "GET",
+      "endpoint": "presets/c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "name": "Test Preset 184927",
+        "description": "Test preset for API testing",
+        "settings": {
+          "screen_width": 1920,
+          "screen_height": 1080,
+          "unit_width": 66,
+          "unit_height": 33,
+          "grid_color": "#00F0FF",
+          "line_thickness": 1.0,
+          "opacity": 0.3,
+          "show_subdivisions": false,
+          "subdivision_count": 2
+        },
+        "id": "c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+        "created_at": "2026-02-06T18:49:27.251192+00:00",
+        "updated_at": "2026-02-06T18:49:27.251201+00:00"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Update Preset",
+      "method": "PUT",
+      "endpoint": "presets/c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "name": "Updated Test Preset 184927",
+        "description": "Updated description",
+        "settings": {
+          "screen_width": 1920,
+          "screen_height": 1080,
+          "unit_width": 66,
+          "unit_height": 33,
+          "grid_color": "#00F0FF",
+          "line_thickness": 1.0,
+          "opacity": 0.3,
+          "show_subdivisions": false,
+          "subdivision_count": 2
+        },
+        "id": "c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+        "created_at": "2026-02-06T18:49:27.251192+00:00",
+        "updated_at": "2026-02-06T18:49:27.334573+00:00"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Delete Preset",
+      "method": "DELETE",
+      "endpoint": "presets/c48f79fe-5ae0-43d3-a3bc-98f90718fafe",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "message": "Preset deleted successfully",
+        "id": "c48f79fe-5ae0-43d3-a3bc-98f90718fafe"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Get Non-existent Preset",
+      "method": "GET",
+      "endpoint": "presets/non-existent-id",
+      "expected_status": 404,
+      "actual_status": 404,
+      "success": true,
+      "response_data": {
+        "detail": "Preset not found"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Get All Measurements",
+      "method": "GET",
+      "endpoint": "measurements",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": [],
+      "error": null
+    },
+    {
+      "test_name": "Create Measurement",
+      "method": "POST",
+      "endpoint": "measurements",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "id": "9b002fe6-7949-4d32-85af-4d593b06f0fd",
+        "start_x": 100.0,
+        "start_y": 100.0,
+        "end_x": 200.0,
+        "end_y": 200.0,
+        "pixel_distance": 141.42,
+        "unit_distance": 2.14,
+        "unit_label": "units",
+        "created_at": "2026-02-06T18:49:27.483543+00:00"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Delete Measurement",
+      "method": "DELETE",
+      "endpoint": "measurements/9b002fe6-7949-4d32-85af-4d593b06f0fd",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "message": "Measurement deleted successfully",
+        "id": "9b002fe6-7949-4d32-85af-4d593b06f0fd"
+      },
+      "error": null
+    },
+    {
+      "test_name": "Get Default Settings",
+      "method": "GET",
+      "endpoint": "default-settings",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response_data": {
+        "screen_width": 1920,
+        "screen_height": 1080,
+        "unit_width": 66,
+        "unit_height": 33,
+        "grid_color": "#00F0FF",
+        "line_thickness": 1.0,
+        "opacity": 0.3,
+        "show_subdivisions": false,
+        "subdivision_count": 2
+      },
+      "error": null
+    }
+  ],
+  "timestamp": "2026-02-06T18:49:27.589146"
+}
