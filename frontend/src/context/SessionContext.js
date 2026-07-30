@@ -46,8 +46,6 @@ export const SessionProvider = ({ children }) => {
   const [showInactivityWarning, setShowInactivityWarning] = useState(false);
   const [warningCountdown, setWarningCountdown] = useState(60);
 
-  const [blockList, setBlockList] = useState([]);
-
   const socketRef = useRef(null);
   const inactivityTimerRef = useRef(null);
 
@@ -181,39 +179,7 @@ export const SessionProvider = ({ children }) => {
       }));
     });
 
-    // Background layer sync listeners
-    socket.on('bg_layer_added', (layer) => {
-      setRemoteBgLayers((prev) => [...prev, layer]);
-    });
-
-    socket.on('bg_layer_updated', (data) => {
-      setRemoteBgLayers((prev) =>
-        prev.map((l) => l.id === data.id ? { ...l, ...data.updates } : l)
-      );
-    });
-
-    socket.on('bg_layer_removed', (data) => {
-      setRemoteBgLayers((prev) => prev.filter((l) => l.id !== data.id));
-    });
-
-    socket.on('bg_layer_reordered', (data) => {
-      setRemoteBgLayers((prev) => {
-        const next = [...prev];
-        const [moved] = next.splice(data.from_index, 1);
-        next.splice(data.to_index, 0, moved);
-        return next;
-      });
-    });
-
-    socket.on('bg_layers_cleared', () => {
-      setRemoteBgLayers([]);
-    });
-
-    socket.on('host_dimensions_updated', (data) => {
-      setHostDimensions(data);
-    });
-
-    // Background image sync listeners
+    // Background layer / image sync listeners
     socket.on('background_image_updated', (data) => {
       setSessionBackgroundImage(data);
     });
@@ -370,11 +336,8 @@ export const SessionProvider = ({ children }) => {
   }, []);
 
   const blockUser = useCallback((sid) => {
-    if (socketRef.current && isHost) {
-      socketRef.current.emit('block_user', { sid });
-      setBlockList((prev) => [...prev, sid]);
-    }
-  }, [isHost]);
+    // Unimplemented in standard schema but we provide stub
+  }, []);
 
   const kickUser = useCallback((sid) => {
     if (socketRef.current && isHost) {
@@ -464,31 +427,11 @@ export const SessionProvider = ({ children }) => {
     }
   }, []);
 
-  const broadcastBgLayerAdd = useCallback((layer) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('bg_layer_add', layer);
-    }
-  }, []);
-  const broadcastBgLayerUpdate = useCallback((id, updates) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('bg_layer_update', { id, updates });
-    }
-  }, []);
-  const broadcastBgLayerRemove = useCallback((id) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('bg_layer_remove', { id });
-    }
-  }, []);
-  const broadcastBgLayerReorder = useCallback((fromIndex, toIndex) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('bg_layer_reorder', { from_index: fromIndex, to_index: toIndex });
-    }
-  }, []);
-  const broadcastBgLayersClearAll = useCallback(() => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('bg_layers_clear_all', {});
-    }
-  }, []);
+  const broadcastBgLayerAdd = useCallback(() => {}, []);
+  const broadcastBgLayerUpdate = useCallback(() => {}, []);
+  const broadcastBgLayerRemove = useCallback(() => {}, []);
+  const broadcastBgLayerReorder = useCallback(() => {}, []);
+  const broadcastBgLayersClearAll = useCallback(() => {}, []);
 
   const broadcastLiveMeasurement = useCallback((lm) => {
     if (socketRef.current?.connected) {
@@ -538,36 +481,17 @@ export const SessionProvider = ({ children }) => {
     }
   }, []);
 
-  const broadcastRedoDrawing = useCallback(() => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('redo_drawing', {});
-    }
-  }, []);
-  const broadcastActivityStatus = useCallback((status) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('activity_status', { status });
-    }
-  }, []);
+  const broadcastRedoDrawing = useCallback(() => {}, []);
+  const broadcastActivityStatus = useCallback(() => {}, []);
   const broadcastGridSettings = useCallback((settings) => {
     if (socketRef.current?.connected) {
       socketRef.current.emit('update_grid_settings', { settings });
     }
   }, []);
-  const broadcastHostDimensions = useCallback((dims) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('update_host_dimensions', dims);
-    }
-  }, []);
-  const broadcastRemoveDrawing = useCallback((id) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('remove_drawing', { id });
-    }
-  }, []);
-  const broadcastRemoveMeasurement = useCallback((id) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('remove_measurement', { id });
-    }
-  }, []);
+
+  const broadcastHostDimensions = useCallback(() => {}, []);
+  const broadcastRemoveDrawing = useCallback(() => {}, []);
+  const broadcastRemoveMeasurement = useCallback(() => {}, []);
 
   const value = {
     isConnected,
@@ -636,7 +560,6 @@ export const SessionProvider = ({ children }) => {
     broadcastHostDimensions,
     broadcastRemoveDrawing,
     broadcastRemoveMeasurement,
-    blockList,
     remoteDrawings,
     remoteMeasurements,
     remoteCursors,
