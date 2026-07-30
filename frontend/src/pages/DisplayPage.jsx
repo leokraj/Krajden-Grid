@@ -185,7 +185,7 @@ const DisplayJoin = () => {
   );
 };
 
-export default function DisplayPage() {
+export function DisplayPage() {
   return (
     <GridProvider>
       <SessionProvider>
@@ -194,3 +194,5 @@ export default function DisplayPage() {
     </GridProvider>
   );
 }
+
+export default DisplayPage;

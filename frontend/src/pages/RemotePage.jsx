@@ -298,26 +298,26 @@ const MOBILE_CLIPART_CATEGORIES = [
 
 const BUILT_IN_CLIPARTS = [
   // D&D Hero Token Images (realistic circular/standard RPG tokens)
-  { id: 'token_fighter', name: 'Fighter (Alistair)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_wizard', name: 'Wizard (Gandalf)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1514894780887-121968d00567?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_rogue', name: 'Rogue (Sylas)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1535663116191-497793d58da3?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_cleric', name: 'Cleric (Vesper)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_ranger', name: 'Ranger (Lyra)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_paladin', name: 'Paladin (Gideon)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1559827291-72ee739d0d9a?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_druid', name: 'Druid (Elowen)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_bard', name: 'Bard (Lumina)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_barbarian', name: 'Barbarian (Krog)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1558224494-ef3b3b7a1704?w=128&auto=format&fit=crop&q=80' },
+  { id: 'token_fighter', name: 'Fighter (Alistair)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Fighter&backgroundColor=b6e3f4' },
+  { id: 'token_wizard', name: 'Wizard (Gandalf)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Wizard&backgroundColor=c0aede' },
+  { id: 'token_rogue', name: 'Rogue (Sylas)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Rogue&backgroundColor=d1d4f9' },
+  { id: 'token_cleric', name: 'Cleric (Vesper)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Cleric&backgroundColor=ffdfc4' },
+  { id: 'token_ranger', name: 'Ranger (Lyra)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Ranger&backgroundColor=ffd5dc' },
+  { id: 'token_paladin', name: 'Paladin (Gideon)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Paladin&backgroundColor=f1f2f6' },
+  { id: 'token_druid', name: 'Druid (Elowen)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Druid&backgroundColor=d2f1d2' },
+  { id: 'token_bard', name: 'Bard (Lumina)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Bard&backgroundColor=ffd3b6' },
+  { id: 'token_barbarian', name: 'Barbarian (Krog)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Barbarian&backgroundColor=ffaaa5' },
 
   // D&D Monster Token Images (realistic circular/standard RPG tokens)
-  { id: 'token_goblin', name: 'Goblin Scout', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_orc', name: 'Orc Berserker', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1605721911519-3dfeb3be25e7?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_dragon', name: 'Red Dragon', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_skeleton', name: 'Skeleton Warrior', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_beholder', name: 'Beholder', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_lich', name: 'Lich Lord', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_vampire', name: 'Vampire Noble', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_golem', name: 'Stone Golem', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_mimic', name: 'Mimic Chest', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1519074002996-a69e7ac46a42?w=128&auto=format&fit=crop&q=80' },
+  { id: 'token_goblin', name: 'Goblin Scout', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=goblin&backgroundColor=c0d6e4' },
+  { id: 'token_orc', name: 'Orc Berserker', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=orc&backgroundColor=e2f0d9' },
+  { id: 'token_dragon', name: 'Red Dragon', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=dragon&backgroundColor=fce4d6' },
+  { id: 'token_skeleton', name: 'Skeleton Warrior', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=skeleton&backgroundColor=f2f2f2' },
+  { id: 'token_beholder', name: 'Beholder', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=beholder&backgroundColor=e1d5e7' },
+  { id: 'token_lich', name: 'Lich Lord', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=lich&backgroundColor=d5e8d4' },
+  { id: 'token_vampire', name: 'Vampire Noble', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=vampire&backgroundColor=fff2cc' },
+  { id: 'token_golem', name: 'Stone Golem', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=golem&backgroundColor=dae8fc' },
+  { id: 'token_mimic', name: 'Mimic Chest', category: 'dnd_monsters', type: 'image', imageUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=mimic&backgroundColor=ffe6cc' },
 
   // D&D Animated Spell & Effect Gifs (high-quality transparent background Giphy assets)
   { id: 'gif_fireball', name: 'Animated Fireball', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3g0Y2xrdjVpbmk4eHN1N3U5OHg4OHV6czhpMHVyN3B5ZnJhODRtNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o72F8t9TDi2xVnxOE/giphy.gif' },
@@ -421,13 +421,43 @@ const MobileClipartPanel = ({ onOpenCommunity }) => {
     setTimeout(() => setPlacedMsg(null), 1500);
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
-    files.forEach((file, i) => {
+    if (files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const backendUrl = window.location.origin;
+        const res = await fetch(`${backendUrl}/api/cliparts/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          addCustomClipart({
+            id: `custom_${Date.now()}_${i}`,
+            name: data.name || file.name.replace(/\.[^/.]+$/, ''),
+            category: 'custom',
+            type: 'image',
+            imageUrl: data.url,
+            isCustom: true,
+          });
+          continue; // successfully uploaded, proceed
+        }
+      } catch (err) {
+        console.warn('Mobile upload failed, falling back to base64:', err);
+      }
+
+      // Fallback
       const reader = new FileReader();
       reader.onload = (ev) => {
         addCustomClipart({
-          id: `custom_${Date.now()}_${i}`,
+          id: `custom_${Date.now()}_${i}_fb`,
           name: file.name.replace(/\.[^/.]+$/, ''),
           category: 'custom',
           type: 'image',
@@ -436,7 +466,7 @@ const MobileClipartPanel = ({ onOpenCommunity }) => {
         });
       };
       reader.readAsDataURL(file);
-    });
+    }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -935,7 +965,7 @@ const RemoteContent = () => {
   );
 };
 
-export default function RemotePage() {
+export function RemotePage() {
   const { isAuthenticated, loading } = useAuth();
   const isElectron = !!window.electronAPI?.isElectron;
 
@@ -948,3 +978,5 @@ export default function RemotePage() {
     </GridProvider>
   );
 }
+
+export default RemotePage;

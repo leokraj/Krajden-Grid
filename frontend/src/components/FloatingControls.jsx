@@ -13,7 +13,9 @@ import { SessionControls } from './SessionControls';
 import { ClipartLibrary } from './ClipartLibrary';
 import { CommunityBrowser } from './CommunityBrowser';
 import BackgroundLayersPanel from './BackgroundLayersPanel';
+import SceneEditorPanel from './SceneEditorPanel';
 import { FloatingWindow } from './FloatingWindow';
+import { CustomizationModal } from './CustomizationModal';
 import { 
   Grid3X3, 
   Ruler, 
@@ -47,6 +49,12 @@ import {
   EyeOff,
   Dices,
   Sword,
+  Keyboard,
+  Settings,
+  Zap,
+  Radio,
+  MapPin,
+  Film,
 } from 'lucide-react';
 
 export const FloatingControls = ({ onClose }) => {
@@ -70,6 +78,12 @@ export const FloatingControls = ({ onClose }) => {
     loadMask,
     deleteSavedMask,
     toggleBgLayersLocked,
+    pings,
+    addPing,
+    removePing,
+    clearPings,
+    showClipartLibrary,
+    setShowClipartLibrary,
   } = useGrid();
   
   // Session context for clipart sync and VTT tools
@@ -138,13 +152,15 @@ export const FloatingControls = ({ onClose }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [measurementPopup, setMeasurementPopup] = useState(null);
-  const [showClipartLibrary, setShowClipartLibrary] = useState(false);
   const [showCommunityBrowser, setShowCommunityBrowser] = useState(false);
   const [showLayersPanel, setShowLayersPanel] = useState(false);
+  const [showScenePanel, setShowScenePanel] = useState(false);
+  const [showCustomizationModal, setShowCustomizationModal] = useState(false);
   const [maskSaveName, setMaskSaveName] = useState('');
   const [collapsedSections, setCollapsedSections] = useState({
     geometry: true,
     measure: true,
+    ping: true,
     draw: true,
     mask: true,
     appearance: true,
@@ -152,6 +168,7 @@ export const FloatingControls = ({ onClose }) => {
     resolution: true,
     clipart: true,
     bgimage: true,
+    scenes: true,
     dice: true,
     initiative: true,
     session: true,
@@ -159,7 +176,54 @@ export const FloatingControls = ({ onClose }) => {
   const [undockedPanels, setUndockedPanels] = useState({
     layers: false,
     clipart: false,
+    scenes: false,
   });
+  const [displays, setDisplays] = useState([]);
+  const [currentDisplayId, setCurrentDisplayId] = useState(null);
+
+  useEffect(() => {
+    if (window.electronAPI?.getDisplays) {
+      const fetchDisplays = async () => {
+        try {
+          const list = await window.electronAPI.getDisplays();
+          setDisplays(list);
+          const currentId = await window.electronAPI.getCurrentDisplayId();
+          setCurrentDisplayId(currentId);
+        } catch (err) {
+          console.error('Failed to fetch displays from electron:', err);
+        }
+      };
+
+      fetchDisplays();
+
+      if (window.electronAPI.on) {
+        const cleanupDisplayUpdate = window.electronAPI.on('display-updated', (data) => {
+          if (data && data.displayId !== undefined) {
+            setCurrentDisplayId(data.displayId);
+          }
+        });
+        return () => {
+          if (typeof cleanupDisplayUpdate === 'function') {
+            cleanupDisplayUpdate();
+          }
+        };
+      }
+    }
+  }, []);
+
+  const handleSelectDisplay = async (displayId) => {
+    if (window.electronAPI?.setDisplayId) {
+      try {
+        const success = await window.electronAPI.setDisplayId(displayId);
+        if (success) {
+          setCurrentDisplayId(displayId);
+        }
+      } catch (err) {
+        console.error('Failed to set display in electron:', err);
+      }
+    }
+  };
+
   const fileInputRef = useRef(null);
   const isElectronWindow = !!window.electronAPI?.isElectron && new URLSearchParams(window.location.search).get('mode') === 'controls';
 
@@ -442,27 +506,6 @@ export const FloatingControls = ({ onClose }) => {
 
       {/* Content */}
       <div className={`p-4 space-y-4 overflow-y-auto ${isElectronWindow ? 'max-h-[calc(100vh-50px)]' : 'max-h-[calc(90vh-50px)]'}`} id="floating-controls-scroll" data-testid="floating-controls-panel">
-        {/* Quick Nav Tabs */}
-        <div className="flex gap-1 flex-wrap">
-          {!isGuest && (
-            <>
-              <button onClick={() => document.getElementById('section-resolution')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Resolution</button>
-              <button onClick={() => document.getElementById('section-geometry')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Layout</button>
-              <button onClick={() => document.getElementById('section-appearance')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Appearance</button>
-              <button onClick={() => document.getElementById('section-mask')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Mask</button>
-            </>
-          )}
-          <button onClick={() => document.getElementById('section-draw')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Draw</button>
-          <button onClick={() => document.getElementById('section-measure')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Measure</button>
-          {!isGuest && (
-            <button onClick={() => document.getElementById('section-bgcolor')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">BG Color</button>
-          )}
-          <button onClick={() => document.getElementById('section-clipart')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Tokens</button>
-          {!isGuest && (
-            <button onClick={() => document.getElementById('section-bgimage')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Map Importer</button>
-          )}
-          <button onClick={() => document.getElementById('section-session')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} className="text-[9px] uppercase font-cinzel tracking-wider px-2.5 py-1 rounded-[4px] border border-[#caa055]/25 bg-[#caa055]/5 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 transition-all duration-200 cursor-pointer">Session</button>
-        </div>
         
         {isGuest && (
           <div className="text-[10px] text-[#caa055]/70 bg-[#caa055]/5 border border-[#caa055]/20 rounded-[4px] px-2 py-1.5 uppercase font-mono tracking-wider">
@@ -546,6 +589,50 @@ export const FloatingControls = ({ onClose }) => {
                       </button>
                     ))}
                   </div>
+
+                  {/* Electron Monitor Selection */}
+                  {!!window.electronAPI && displays.length > 0 && (
+                    <div className="space-y-2 bg-black/20 border border-[#caa055]/15 rounded-[4px] p-3 mt-3">
+                      <Label className="text-[9px] uppercase tracking-[0.12em] text-[#caa055] font-cinzel font-bold block mb-1">
+                        Active Monitor / Screen
+                      </Label>
+                      <div className="space-y-1.5">
+                        {displays.map((display) => {
+                          const isActive = currentDisplayId?.toString() === display.id.toString();
+                          return (
+                            <button
+                              key={display.id}
+                              onClick={() => handleSelectDisplay(display.id)}
+                              className={`w-full flex items-center justify-between text-left p-2 rounded-[4px] border transition-all text-xs cursor-pointer ${
+                                isActive
+                                  ? 'bg-[#caa055]/10 border-[#caa055] text-white font-semibold'
+                                  : 'bg-black/30 border-[#caa055]/10 hover:border-[#caa055]/30 text-[#caa055]/70 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Monitor className={`w-3.5 h-3.5 ${isActive ? 'text-[#caa055]' : 'text-[#caa055]/50'}`} />
+                                <span className="font-sans text-[11px]">{display.name}</span>
+                              </div>
+                              {isActive ? (
+                                <span className="text-[8px] font-mono bg-[#caa055] text-[#111214] font-bold px-1.5 py-0.5 rounded-[2px] tracking-wider uppercase">
+                                  Active
+                                </span>
+                              ) : (
+                                display.isPrimary && (
+                                  <span className="text-[8px] font-mono border border-[#caa055]/20 text-[#caa055]/60 px-1.5 py-0.5 rounded-[2px] tracking-wider uppercase">
+                                    Primary
+                                  </span>
+                                )
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[8.5px] text-slate-muted font-sans leading-normal">
+                        Select which screen/monitor the transparent tabletop grid overlay should be displayed on.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
               <Separator className="bg-[#caa055]/15" />
@@ -963,6 +1050,111 @@ export const FloatingControls = ({ onClose }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
+        {/* Map Beacons & Pings Section */}
+        <div className="space-y-3" id="section-ping">
+          <button onClick={() => toggleSection('ping')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+              <Radio className={`w-3.5 h-3.5 text-[#caa055]/80 ${settings.pingMode ? 'animate-pulse' : ''}`} />
+              Map Beacons & Pings
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] font-mono text-slate-muted">P KEY</span>
+              {collapsedSections.ping ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+            </div>
+          </button>
+          {!collapsedSections.ping && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
+                <div className="flex items-center gap-2">
+                  <Radio className={`w-4 h-4 ${settings.pingMode ? 'text-[#caa055]' : 'text-slate-cool'}`} />
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-cool font-outfit font-semibold block">Ping Beacon Mode</span>
+                    <span className="text-[9px] text-slate-muted">Click map to drop beacon (or Alt+Click anytime)</span>
+                  </div>
+                </div>
+                <Switch
+                  checked={!!settings.pingMode}
+                  onCheckedChange={(val) => updateSettings({ pingMode: val })}
+                  data-testid="ping-mode-toggle"
+                />
+              </div>
+
+              {/* Beacon Color & Label Controls */}
+              <div className="grid grid-cols-2 gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-2.5">
+                <div>
+                  <Label className="text-[9px] text-slate-cool uppercase tracking-wider font-outfit font-semibold mb-1 block">Beacon Color</Label>
+                  <div className="flex gap-1.5 items-center flex-wrap pt-0.5">
+                    {['#FFD700', '#FF4444', '#00F0FF', '#00FF66', '#FF00FF', '#FFFFFF'].map((colorHex) => (
+                      <button
+                        key={colorHex}
+                        onClick={() => updateSettings({ pingColor: colorHex })}
+                        className={`w-5 h-5 rounded-full border cursor-pointer transition-transform ${settings.pingColor === colorHex ? 'scale-125 border-white shadow-lg' : 'border-black/40 opacity-80 hover:opacity-100'}`}
+                        style={{ backgroundColor: colorHex }}
+                        title={colorHex}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-[9px] text-slate-cool uppercase tracking-wider font-outfit font-semibold mb-1 block">Beacon Label</Label>
+                  <Input
+                    type="text"
+                    value={settings.pingLabel || ''}
+                    onChange={(e) => updateSettings({ pingLabel: e.target.value })}
+                    placeholder="e.g. Danger / Trap"
+                    className="h-7 text-[11px] bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
+                  />
+                </div>
+              </div>
+
+              {/* Active Pings Summary & Clear All */}
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <span className="text-[10px] text-slate-muted font-mono">
+                  Active Beacons: <strong className="text-[#caa055]">{pings?.length || 0}</strong>
+                </span>
+                {pings && pings.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearPings}
+                    className="h-7 text-[10px] border-red-500/30 text-red-400 hover:bg-red-500/10 font-cinzel rounded-[4px]"
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Clear All Beacons
+                  </Button>
+                )}
+              </div>
+
+              {/* Active Pings Pill List */}
+              {pings && pings.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                  {pings.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-[4px] bg-black/40 border border-[#caa055]/20 text-[10px]"
+                    >
+                      <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: p.color || '#FFD700' }} />
+                      <span className="text-slate-200 font-mono font-medium truncate max-w-[80px]">
+                        {p.name || `Beacon #${idx + 1}`}
+                      </span>
+                      <button
+                        onClick={() => removePing(p.id)}
+                        className="text-slate-400 hover:text-red-400 cursor-pointer ml-1 text-xs font-bold"
+                        title="Delete this beacon"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <Separator className="bg-[#caa055]/15" />
+
         {/* Drawing Mode */}
         <div className="space-y-3" id="section-draw">
           <button onClick={() => toggleSection('draw')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
@@ -1199,9 +1391,21 @@ export const FloatingControls = ({ onClose }) => {
                   isOpen={true}
                   isDocked={true}
                   onDockChange={(docked) => {
-                    setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
-                    if (!docked) {
-                      setShowClipartLibrary(true);
+                    if (window.electronAPI?.isElectron) {
+                      try {
+                        window.electronAPI.openClipartWindow();
+                        setUndockedPanels(prev => ({ ...prev, clipart: true }));
+                      } catch (e) {
+                        setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
+                        if (!docked) {
+                          setShowClipartLibrary(true);
+                        }
+                      }
+                    } else {
+                      setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
+                      if (!docked) {
+                        setShowClipartLibrary(true);
+                      }
                     }
                   }}
                   onClose={() => {}}
@@ -1357,6 +1561,7 @@ export const FloatingControls = ({ onClose }) => {
                     onClick={() => {
                       if (window.electronAPI?.openLayersWindow) {
                         window.electronAPI.openLayersWindow();
+                        setUndockedPanels(prev => ({ ...prev, layers: true }));
                       } else {
                         setShowLayersPanel(prev => !prev);
                       }
@@ -1383,6 +1588,45 @@ export const FloatingControls = ({ onClose }) => {
           )}
         </div>
         )}
+
+        <Separator className="bg-[#caa055]/15" />
+
+        {/* Scene Editor & Manager */}
+        <div id="section-scenes" className="space-y-3">
+          <button onClick={() => toggleSection('scenes')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+              <Film className="w-3.5 h-3.5 text-[#caa055]/80" />
+              Scene Editor & Scenes
+            </span>
+            {collapsedSections.scenes ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+          </button>
+          {!collapsedSections.scenes && (
+            <div className="space-y-2 pt-1">
+              {undockedPanels.scenes ? (
+                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3 text-center">
+                  <p className="text-[10px] text-slate-muted font-outfit">
+                    Scene Editor window is currently undocked.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setUndockedPanels(prev => ({ ...prev, scenes: false }));
+                      setShowScenePanel(true);
+                    }}
+                    className="h-7 text-[10px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel"
+                  >
+                    <Minimize2 className="w-3 h-3 mr-1" /> Dock Scene Editor
+                  </Button>
+                </div>
+              ) : (
+                <div className="border border-[#caa055]/20 rounded-[4px] overflow-hidden">
+                  <SceneEditorPanel onUndock={() => setUndockedPanels(prev => ({ ...prev, scenes: true }))} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <Separator className="bg-[#caa055]/15" />
 
@@ -1452,11 +1696,23 @@ export const FloatingControls = ({ onClose }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
+        {/* Customization & Hotkeys / Macros Setting Tab */}
+        <div className="pt-1">
+          <Button
+            onClick={() => setShowCustomizationModal(true)}
+            className="w-full h-9 text-xs bg-gradient-to-r from-[#caa055]/20 via-[#caa055]/30 to-[#caa055]/20 hover:from-[#caa055]/40 hover:to-[#caa055]/40 border border-[#caa055]/50 text-[#caa055] font-cinzel font-bold tracking-wider rounded-[4px] cursor-pointer transition-all flex items-center justify-center gap-2 shadow-sm hover:shadow-[#caa055]/20"
+            data-testid="open-customization-btn"
+          >
+            <Keyboard className="w-4 h-4 text-[#caa055]" />
+            <span>⚙️ Hotkeys & Macros Settings</span>
+          </Button>
+        </div>
+
         {/* Reset */}
         <Button 
           variant="outline" 
           onClick={resetSettings} 
-          className="w-full h-9 text-xs border-red-500/20 hover:border-red-500/50 hover:bg-red-500/10 text-red-400 font-cinzel tracking-wider rounded-[4px] cursor-pointer mt-2"
+          className="w-full h-9 text-xs border-red-500/20 hover:border-red-500/50 hover:bg-red-500/10 text-red-400 font-cinzel tracking-wider rounded-[4px] cursor-pointer mt-1"
           data-testid="reset-floating"
         >
           <RotateCcw className="w-3.5 h-3.5 mr-2" />
@@ -1464,11 +1720,17 @@ export const FloatingControls = ({ onClose }) => {
         </Button>
       </div>
     </div>
+
+    {/* Customization Workshop Modal */}
+    <CustomizationModal
+      isOpen={showCustomizationModal}
+      onClose={() => setShowCustomizationModal(false)}
+    />
     
     {/* Clipart Library Modal (Floating Window) */}
-    {undockedPanels.clipart && (
+    {showClipartLibrary && (
       <ClipartLibrary
-        isOpen={showClipartLibrary}
+        isOpen={true}
         onClose={() => setShowClipartLibrary(false)}
         isDocked={false}
         onDockChange={(docked) => {
@@ -1521,6 +1783,22 @@ export const FloatingControls = ({ onClose }) => {
         dataTestId="layers-floating-window"
       >
         <BackgroundLayersPanel />
+      </FloatingWindow>
+    )}
+
+    {/* Scene Editor (Floating Window) */}
+    {showScenePanel && undockedPanels.scenes && (
+      <FloatingWindow
+        title="🎬 Scene Editor & Manager"
+        onClose={() => setShowScenePanel(false)}
+        onDock={() => {
+          setUndockedPanels(prev => ({ ...prev, scenes: false }));
+        }}
+        initialPosition={{ x: 450, y: 120 }}
+        width="360px"
+        dataTestId="scenes-floating-window"
+      >
+        <SceneEditorPanel />
       </FloatingWindow>
     )}
 

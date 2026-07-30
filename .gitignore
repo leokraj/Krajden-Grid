@@ -28,7 +28,11 @@ next-env.d.ts
 # Production builds
 /build
 dist/
-dist
+**/dist/
+electron-app/dist/
+electron-app/release-builds/
+electron-app/web-build/
+*.asar
 
 # Environment files (comprehensive coverage)
 
@@ -60,6 +64,7 @@ chainlit.md
 
 # Deployment
 .vercel
+temp-repo/
 
 # Data and databases
 agenthub/agents/youtube/db

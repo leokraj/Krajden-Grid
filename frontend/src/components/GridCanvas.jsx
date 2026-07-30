@@ -1,8 +1,10 @@
 import { useRef, useEffect, useState, useCallback, useContext, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useGrid } from '../context/GridContext';
 import SessionContext from '../context/SessionContext';
 import { PlacedClipart } from './ClipartLibrary';
 import { PlacedBackgroundImage } from './PlacedBackgroundImage';
+import { RadialContextMenu } from './RadialContextMenu';
 
 export const GridCanvas = ({ className = '', interactive = false, fullscreen = false }) => {
   const canvasRef = useRef(null);
@@ -11,17 +13,21 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
   const containerRef = useRef(null);
   const { 
     settings, 
+    updateSettings,
+    measurements,
     addMeasurement, 
     addDrawingPath,
     eraseAt,
     setLiveMeasurement,
     pixelsPerUnitX, 
     pixelsPerUnitY, 
-    calculateDistance,
     updatePlacedClipart,
     removePlacedClipart,
     selectedClipartId,
     setSelectedClipartId,
+    selectedClipartIds = [],
+    setSelectedClipartIds,
+    updateMultiplePlacedCliparts,
     addPlacedClipart,
     addMaskPath,
     addMaskRect,
@@ -29,6 +35,13 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     removeBackgroundLayer,
     selectedBgLayerId,
     setSelectedBgLayerId,
+    pings,
+    addPing,
+    removePing,
+    clearPings,
+    clearMeasurements,
+    openRadialMenu,
+    addCustomClipart,
   } = useGrid();
   
   // Session context (may not exist if not in SessionProvider)
@@ -64,11 +77,13 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
   const broadcastBgLayerRemove = sessionContext?.broadcastBgLayerRemove;
   const broadcastPing = sessionContext?.broadcastPing;
   const broadcastActivityStatus = sessionContext?.broadcastActivityStatus;
+  const remoteMeasurements = useMemo(() => sessionContext?.remoteMeasurements || [], [sessionContext?.remoteMeasurements]);
   
   const [isDrawing, setIsDrawing] = useState(false);
   const [isErasing, setIsErasing] = useState(false);
   const [startPoint, setStartPoint] = useState(null);
   const [currentPoint, setCurrentPoint] = useState(null);
+  const [measureWaypoints, setMeasureWaypoints] = useState([]);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 450 });
   const [currentDrawingPath, setCurrentDrawingPath] = useState([]);
   const [bgImage, setBgImage] = useState(null);
@@ -84,39 +99,409 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
   // Cursor circle position for tool size indicator
   const [cursorPos, setCursorPos] = useState(null);
 
-  // Handle drop event for cliparts
+  // Marquee selection box state & Group drag state
+  const [marqueeState, setMarqueeState] = useState({ active: false, start: null, current: null, isShift: false });
+  const [groupDragOffset, setGroupDragOffset] = useState({ dx: 0, dy: 0 });
+  const groupDragStartPositionsRef = useRef({});
+
+  // Physical cell sizes matching exactly how the grid is drawn on the canvas
+  const physicalCellSize = useMemo(() => {
+    const width = canvasSize.width;
+    const height = canvasSize.height;
+
+    let cellWidth, cellHeight;
+    if (settings.lockRatio) {
+      const gridSize = Math.max(1, settings.gridSize || 1);
+      const cellSize = Math.max(5, Math.min(width, height) / gridSize);
+      cellWidth = cellSize;
+      cellHeight = cellSize;
+    } else {
+      // Normal mode cell sizes on canvas
+      const pxPerUnitX = settings.screenWidth / (settings.unitWidth || 1);
+      const pxPerUnitY = settings.screenHeight / (settings.unitHeight || 1);
+      const scaleX = width / settings.screenWidth;
+      const scaleY = height / settings.screenHeight;
+      cellWidth = Math.max(5, pxPerUnitX * scaleX);
+      cellHeight = Math.max(5, pxPerUnitY * scaleY);
+    }
+    return { cellWidth, cellHeight };
+  }, [canvasSize, settings]);
+
+  const handleClipartSelect = useCallback((clipart, e) => {
+    if (setSelectedBgLayerId) setSelectedBgLayerId(null);
+    const isShift = e && e.shiftKey;
+
+    if (isShift) {
+      if (setSelectedClipartIds) {
+        setSelectedClipartIds(prev => {
+          if (prev.includes(clipart.instanceId)) {
+            return prev.filter(id => id !== clipart.instanceId);
+          } else {
+            return [...prev, clipart.instanceId];
+          }
+        });
+      }
+    } else {
+      if (clipart.groupId) {
+        const groupMembers = (settings.placedCliparts || [])
+          .filter(cp => cp.groupId === clipart.groupId)
+          .map(cp => cp.instanceId);
+        if (setSelectedClipartIds) setSelectedClipartIds(groupMembers);
+      } else {
+        if (selectedClipartIds.includes(clipart.instanceId) && selectedClipartIds.length > 1) {
+          // Keep current selection for group dragging
+        } else {
+          if (setSelectedClipartIds) setSelectedClipartIds([clipart.instanceId]);
+        }
+      }
+    }
+  }, [setSelectedBgLayerId, setSelectedClipartIds, settings.placedCliparts, selectedClipartIds]);
+
+  const handleGroupDragStart = useCallback((leadClipart) => {
+    const allCliparts = settings.placedCliparts || [];
+    let targets = [];
+
+    if (leadClipart.groupId) {
+      targets = allCliparts.filter(cp => cp.groupId === leadClipart.groupId);
+    } else if (selectedClipartIds.includes(leadClipart.instanceId) && selectedClipartIds.length > 1) {
+      targets = allCliparts.filter(cp => selectedClipartIds.includes(cp.instanceId));
+    } else {
+      targets = [leadClipart];
+    }
+
+    const startMap = {};
+    targets.forEach(cp => {
+      startMap[cp.instanceId] = { x: cp.x, y: cp.y };
+    });
+    groupDragStartPositionsRef.current = startMap;
+    setGroupDragOffset({ dx: 0, dy: 0 });
+  }, [settings.placedCliparts, selectedClipartIds]);
+
+  const handleGroupDragMove = useCallback((dx, dy) => {
+    setGroupDragOffset({ dx, dy });
+  }, []);
+
+  const handleGroupDragEnd = useCallback((dx, dy) => {
+    const startMap = groupDragStartPositionsRef.current;
+    const instanceIds = Object.keys(startMap);
+
+    if (instanceIds.length > 0 && (dx !== 0 || dy !== 0)) {
+      const updatesMap = {};
+      instanceIds.forEach(id => {
+        const startPos = startMap[id];
+        let newX = startPos.x + dx;
+        let newY = startPos.y + dy;
+
+        if (settings.snapClipartsToGrid && physicalCellSize) {
+          newX = Math.round(newX / physicalCellSize.cellWidth) * physicalCellSize.cellWidth;
+          newY = Math.round(newY / physicalCellSize.cellHeight) * physicalCellSize.cellHeight;
+        }
+
+        updatesMap[id] = { x: newX, y: newY };
+
+        if (sessionCode && broadcastUpdateClipart) {
+          broadcastUpdateClipart({ instanceId: id, x: newX, y: newY });
+        }
+      });
+
+      if (updateMultiplePlacedCliparts) {
+        updateMultiplePlacedCliparts(updatesMap);
+      }
+    }
+
+    groupDragStartPositionsRef.current = {};
+    setGroupDragOffset({ dx: 0, dy: 0 });
+  }, [settings.snapClipartsToGrid, physicalCellSize, sessionCode, broadcastUpdateClipart, updateMultiplePlacedCliparts]);
+
+  // Animation frame loop for continuous beacon ping animations
+  const [animTime, setAnimTime] = useState(0);
+  useEffect(() => {
+    const allActivePings = [...(pings || []), ...(pingMarkers || [])];
+    if (allActivePings.length === 0) return;
+
+    let reqId;
+    const animate = () => {
+      setAnimTime(Date.now());
+      reqId = requestAnimationFrame(animate);
+    };
+    reqId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(reqId);
+  }, [pings, pingMarkers]);
+
+  // Calculate accurate, non-distorted grid distance based on the physical grid on the canvas
+  const calculateAccurateDistance = useCallback((x1, y1, x2, y2) => {
+    const { cellWidth, cellHeight } = physicalCellSize;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const pixelDistance = Math.sqrt(dx * dx + dy * dy);
+    
+    const dx_cells = cellWidth > 0 ? dx / cellWidth : 0;
+    const dy_cells = cellHeight > 0 ? dy / cellHeight : 0;
+    const rawUnitDistance = Math.sqrt(dx_cells * dx_cells + dy_cells * dy_cells);
+
+    return {
+      pixelDistance,
+      unitDistance: rawUnitDistance * (settings.measureMultiplier || 1),
+      rawUnitDistance
+    };
+  }, [physicalCellSize, settings.measureMultiplier]);
+
+  // Combine local and remote saved measurements
+  const allSavedMeasurements = useMemo(() => {
+    const map = new Map();
+    (measurements || []).forEach(m => { if (m && m.id) map.set(m.id, m); });
+    (remoteMeasurements || []).forEach(m => { if (m && m.id) map.set(m.id, m); });
+    return Array.from(map.values());
+  }, [measurements, remoteMeasurements]);
+
+  // Helper function to render a measurement tape (active or saved)
+  const drawMeasurementTape = useCallback((ctx, m, isLive = false) => {
+    if (!m) return;
+    const waypoints = m.waypoints || (m.startX !== undefined ? [{ x: m.startX, y: m.startY }, { x: m.endX, y: m.endY }] : []);
+    if (waypoints.length < 2) return;
+
+    const isSaved = !isLive;
+    const strokeColor = isLive ? '#FF4444' : (m.color || '#FFD700');
+    const badgeBg = 'rgba(18, 19, 22, 0.92)';
+    const badgeBorder = isLive ? 'rgba(255, 68, 68, 0.8)' : 'rgba(255, 215, 0, 0.8)';
+    const textColor = isLive ? '#FF7777' : '#FFD700';
+
+    ctx.save();
+    ctx.lineWidth = isLive ? 2.5 : 3;
+    ctx.strokeStyle = strokeColor;
+    ctx.fillStyle = strokeColor;
+
+    if (m.type === 'line' || !m.type) {
+      // Glow effect for saved tapes
+      if (isSaved) {
+        ctx.save();
+        ctx.shadowColor = strokeColor;
+        ctx.shadowBlur = 8;
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = strokeColor + '88';
+        ctx.beginPath();
+        ctx.moveTo(waypoints[0].x, waypoints[0].y);
+        for (let i = 1; i < waypoints.length; i++) {
+          ctx.lineTo(waypoints[i].x, waypoints[i].y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Line segments
+      ctx.setLineDash(isLive ? [6, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(waypoints[0].x, waypoints[0].y);
+      for (let i = 1; i < waypoints.length; i++) {
+        ctx.lineTo(waypoints[i].x, waypoints[i].y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Waypoint nodes & segment badges
+      let accumDist = 0;
+      waypoints.forEach((pt, idx) => {
+        // Waypoint dot
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, idx === 0 || idx === waypoints.length - 1 ? 5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = strokeColor;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#000000';
+        ctx.stroke();
+
+        if (idx > 0) {
+          const prevPt = waypoints[idx - 1];
+          const { unitDistance } = calculateAccurateDistance(prevPt.x, prevPt.y, pt.x, pt.y);
+          accumDist += unitDistance;
+
+          const midX = (prevPt.x + pt.x) / 2;
+          const midY = (prevPt.y + pt.y) / 2;
+          const labelText = `${unitDistance.toFixed(1)}u`;
+
+          ctx.font = 'bold 10px monospace';
+          const textWidth = ctx.measureText(labelText).width;
+          const padding = 4;
+
+          ctx.fillStyle = badgeBg;
+          ctx.strokeStyle = badgeBorder;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16, 4);
+          } else {
+            ctx.rect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = textColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(labelText, midX, midY);
+        }
+      });
+
+      // Total tape length badge at final waypoint
+      const lastPt = waypoints[waypoints.length - 1];
+      const displayTotal = m.totalDistance || accumDist || m.unitDistance || 0;
+      const totalText = isLive ? `Tape: ${displayTotal.toFixed(2)}u` : `Tape: ${displayTotal.toFixed(2)} units`;
+      ctx.font = 'bold 11px sans-serif';
+      const totalWidth = ctx.measureText(totalText).width;
+
+      ctx.fillStyle = badgeBg;
+      ctx.strokeStyle = badgeBorder;
+      ctx.lineWidth = 1.5;
+      const tPad = 6;
+      const badgeX = lastPt.x + 10;
+      const badgeY = lastPt.y - 10;
+
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(badgeX, badgeY, totalWidth + tPad * 2, 20, 6);
+      } else {
+        ctx.rect(badgeX, badgeY, totalWidth + tPad * 2, 20);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(totalText, badgeX + tPad, badgeY + 10);
+
+    } else if (m.type === 'radial') {
+      const startPt = waypoints[0];
+      const endPt = waypoints[waypoints.length - 1];
+      const dx = endPt.x - startPt.x;
+      const dy = endPt.y - startPt.y;
+      const radius = Math.sqrt(dx * dx + dy * dy);
+
+      ctx.fillStyle = isLive ? 'rgba(255, 68, 68, 0.15)' : 'rgba(255, 215, 0, 0.15)';
+      ctx.beginPath();
+      ctx.arc(startPt.x, startPt.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(startPt.x, startPt.y);
+      ctx.lineTo(endPt.x, endPt.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.arc(startPt.x, startPt.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (m.type === 'cone') {
+      const startPt = waypoints[0];
+      const endPt = waypoints[waypoints.length - 1];
+      const dx = endPt.x - startPt.x;
+      const dy = endPt.y - startPt.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const baseAngle = Math.atan2(dy, dx);
+      const halfAngle = ((m.coneAngle || settings.coneAngle || 60) * Math.PI / 180) / 2;
+
+      ctx.fillStyle = isLive ? 'rgba(255, 68, 68, 0.15)' : 'rgba(255, 215, 0, 0.15)';
+      ctx.beginPath();
+      ctx.moveTo(startPt.x, startPt.y);
+      ctx.arc(startPt.x, startPt.y, distance, baseAngle - halfAngle, baseAngle + halfAngle);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.arc(startPt.x, startPt.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }, [calculateAccurateDistance, settings.coneAngle]);
+
+  // Handle drop event for cliparts and direct file drops
   const handleDrop = useCallback((e) => {
     e.preventDefault();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const dropX = e.clientX - rect.left;
+    const dropY = e.clientY - rect.top;
+
+    // Handle dropped files directly onto the map (GIFs, images)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      files.forEach((file, index) => {
+        if (!file.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const customItem = {
+              id: `custom_${Date.now()}_${index}`,
+              name: file.name.replace(/\.[^/.]+$/, ''),
+              category: 'custom',
+              type: 'image',
+              imageData: event.target.result,
+              width: img.width,
+              height: img.height,
+              isCustom: true,
+            };
+            
+            // Save to custom clipart library
+            addCustomClipart?.(customItem);
+
+            // Place on map canvas at drop position
+            const newClipart = {
+              ...customItem,
+              x: dropX + index * 20,
+              y: dropY + index * 20,
+              scale: 50,
+              rotation: 0,
+            };
+            const instanceId = addPlacedClipart(newClipart);
+
+            if (sessionCode && broadcastAddClipart) {
+              broadcastAddClipart({ ...newClipart, instanceId });
+            }
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+      return;
+    }
+
+    // Handle dropping clipart items from the library
     const data = e.dataTransfer.getData('application/json');
     if (!data) return;
     
     try {
       const clipart = JSON.parse(data);
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (rect) {
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const newClipart = {
-          ...clipart,
-          x,
-          y,
-          scale: 50,
-          rotation: 0,
-        };
-        const instanceId = addPlacedClipart(newClipart);
-        
-        // Broadcast to session if in one
-        if (sessionCode && broadcastAddClipart) {
-          console.log('[GridCanvas] Broadcasting clipart add:', instanceId, 'session:', sessionCode);
-          broadcastAddClipart({ ...newClipart, instanceId });
-        } else {
-          console.log('[GridCanvas] Not broadcasting clipart - sessionCode:', sessionCode, 'broadcastAddClipart:', !!broadcastAddClipart);
-        }
+      const url = clipart.imageUrl || clipart.url || clipart.imageData || clipart.image_data || clipart.src || '';
+      const newClipart = {
+        ...clipart,
+        imageUrl: url,
+        imageData: clipart.imageData || (url.startsWith('data:') ? url : undefined),
+        x: dropX,
+        y: dropY,
+        scale: 50,
+        rotation: 0,
+      };
+      const instanceId = addPlacedClipart(newClipart);
+      
+      // Broadcast to session if in one
+      if (sessionCode && broadcastAddClipart) {
+        console.log('[GridCanvas] Broadcasting clipart add:', instanceId, 'session:', sessionCode);
+        broadcastAddClipart({ ...newClipart, instanceId });
       }
     } catch (err) {
       console.error('Error dropping clipart:', err);
     }
-  }, [addPlacedClipart, sessionCode, broadcastAddClipart]);
+  }, [addPlacedClipart, sessionCode, broadcastAddClipart, addCustomClipart]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -325,12 +710,12 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       const cursor = remoteCursors[sid];
       if (!cursor) return;
       
-      const now = Date.now();
+      const currentNow = Date.now();
       const maxAge = 600; // ms
       ctx.lineCap = 'round';
       
       for (let i = 1; i < trail.length; i++) {
-        const age = now - trail[i].t;
+        const age = currentNow - trail[i].t;
         if (age > maxAge) continue;
         const alpha = Math.max(0, 1 - age / maxAge) * 0.4;
         const width = Math.max(1, (1 - age / maxAge) * 4);
@@ -392,44 +777,179 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       }
     });
 
-    // Draw ping markers
-    const now = Date.now();
-    pingMarkers.forEach(ping => {
-      const age = now - ping.timestamp;
-      if (age > 3000) return;
-      
-      const alpha = Math.max(0, 1 - age / 3000);
-      const pulseScale = 1 + Math.sin(age / 150) * 0.3;
-      const radius = 20 * pulseScale;
+    // Draw animated spinning glowing rune circle pings
+    const animNow = animTime || Date.now();
+    const allPings = [...(pings || []), ...(pingMarkers || [])];
+    
+    allPings.forEach(ping => {
       const color = ping.color || '#FFD700';
-      
-      // Outer ring (pulsing)
-      ctx.strokeStyle = color + Math.round(alpha * 200).toString(16).padStart(2, '0');
-      ctx.lineWidth = 3;
+      const labelText = (ping.name ?? ping.label ?? '').trim();
+
+      ctx.save();
+      ctx.translate(ping.x, ping.y);
+
+      // Setup glowing aura
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 12 + Math.sin(animNow / 150) * 4;
+
+      // 1. Expanding Pulse Wave (Aura expanding outwards)
+      const pulseWaveRadius = ((animNow / 18) % 52) + 8;
+      const pulseWaveAlpha = Math.max(0, 1 - pulseWaveRadius / 52);
+      ctx.strokeStyle = color + Math.round(pulseWaveAlpha * 220).toString(16).padStart(2, '0');
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-      ctx.arc(ping.x, ping.y, radius, 0, Math.PI * 2);
+      ctx.arc(0, 0, pulseWaveRadius, 0, Math.PI * 2);
       ctx.stroke();
-      
-      // Inner fill
-      ctx.fillStyle = color + Math.round(alpha * 50).toString(16).padStart(2, '0');
+
+      // 2. Spinning Outer Rune Ring (Clockwise rotation)
+      const rotAngle1 = (animNow / 1200) % (Math.PI * 2);
+      ctx.save();
+      ctx.rotate(rotAngle1);
+
+      // Outer boundary double circle
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.arc(ping.x, ping.y, radius * 0.5, 0, Math.PI * 2);
-      ctx.fill();
-      
-      // Center dot
-      ctx.fillStyle = color + Math.round(alpha * 255).toString(16).padStart(2, '0');
+      ctx.arc(0, 0, 24, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(ping.x, ping.y, 4, 0, Math.PI * 2);
+      ctx.arc(0, 0, 20, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 8 Rotating Radial Rune Ticks & Sigil Nodes around outer ring
+      const numTicks = 8;
+      for (let i = 0; i < numTicks; i++) {
+        const tickAngle = (i * Math.PI * 2) / numTicks;
+        ctx.save();
+        ctx.rotate(tickAngle);
+
+        // Radial tick line crossing the double ring
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(18, 0);
+        ctx.lineTo(26, 0);
+        ctx.stroke();
+
+        // Rune dot or diamond on alternating ticks
+        if (i % 2 === 0) {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(22, 0, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+
+      // 3. Counter-Rotating Inner Arcane Star / Hexagram Sigil (Counter-clockwise rotation)
+      const rotAngle2 = (-animNow / 900) % (Math.PI * 2);
+      ctx.save();
+      ctx.rotate(rotAngle2);
+
+      // Inner 6-pointed rune star
+      ctx.strokeStyle = color + 'CC';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      const numPoints = 6;
+      for (let i = 0; i < numPoints; i++) {
+        const angle = (i * Math.PI * 2) / numPoints;
+        const rad = 14;
+        const px = Math.cos(angle) * rad;
+        const py = Math.sin(angle) * rad;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Inverted inner triangle
+      ctx.beginPath();
+      for (let i = 0; i < numPoints; i++) {
+        const angle = ((i + 0.5) * Math.PI * 2) / numPoints;
+        const rad = 14;
+        const px = Math.cos(angle) * rad;
+        const py = Math.sin(angle) * rad;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+
+      // 4. Center Glowing Pulsing Rune Jewel
+      const jewelPulse = 1 + Math.sin(animNow / 180) * 0.22;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, -6 * jewelPulse);
+      ctx.lineTo(5 * jewelPulse, 0);
+      ctx.lineTo(0, 6 * jewelPulse);
+      ctx.lineTo(-5 * jewelPulse, 0);
+      ctx.closePath();
       ctx.fill();
-      
-      // Name label
-      if (ping.user_name) {
-        ctx.font = 'bold 10px sans-serif';
-        ctx.fillStyle = color + Math.round(alpha * 255).toString(16).padStart(2, '0');
-        ctx.fillText(ping.user_name, ping.x + radius + 5, ping.y + 4);
+
+      ctx.restore(); // Restore translate(ping.x, ping.y)
+
+      // 5. Beacon Badge Label
+      if (labelText) {
+        ctx.font = 'bold 11px sans-serif';
+        const textMetrics = ctx.measureText(labelText);
+        const textWidth = textMetrics.width;
+        const badgePaddingX = 6;
+        const badgeHeight = 16;
+        const badgeX = ping.x + 22;
+        const badgeY = ping.y - 8;
+
+        // Badge background
+        ctx.fillStyle = 'rgba(17, 18, 20, 0.88)';
+        ctx.strokeStyle = color + 'AA';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(badgeX, badgeY, textWidth + badgePaddingX * 2 + 12, badgeHeight, 4);
+        } else {
+          ctx.rect(badgeX, badgeY, textWidth + badgePaddingX * 2 + 12, badgeHeight);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Beacon dot in badge
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(badgeX + 8, badgeY + badgeHeight / 2, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Text
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(labelText, badgeX + 15, badgeY + 12);
       }
     });
-  }, [settings.drawingPaths, settings.drawingEnabled, settings.drawingColor, settings.drawingThickness, currentDrawingPath, canvasSize, remoteDrawings, remoteCursors, cursorTrails, pingMarkers, settings.maskPaths, settings.maskRects, isMaskPainting, currentMaskPath, maskRectPreview]);
+
+    // Render all saved/kept measurement tapes on the map
+    allSavedMeasurements.forEach(m => {
+      drawMeasurementTape(ctx, m, false);
+    });
+
+    // Render active measurement tape in progress
+    if (settings.measureMode && measureWaypoints.length > 0 && currentPoint) {
+      const activeTape = {
+        type: settings.measureMode,
+        waypoints: [...measureWaypoints, currentPoint],
+        coneAngle: settings.coneAngle,
+      };
+      drawMeasurementTape(ctx, activeTape, true);
+    }
+
+    // Render remote live measurements from session
+    if (sessionCode) {
+      Object.values(remoteLiveMeasurements).forEach(m => {
+        if (!m) return;
+        drawMeasurementTape(ctx, m, true);
+      });
+    }
+  }, [settings, canvasSize, remoteDrawings, remoteCursors, cursorTrails, pingMarkers, pings, animTime, isMaskPainting, currentMaskPath, maskRectPreview, currentDrawingPath, allSavedMeasurements, measureWaypoints, currentPoint, remoteLiveMeasurements, sessionCode, drawMeasurementTape]);
 
   // Draw grid
   useEffect(() => {
@@ -455,20 +975,14 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     const scaleY = height / settings.screenHeight;
 
     // Calculate cell sizes based on lock ratio mode
-    let cellWidth, cellHeight, numCellsX, numCellsY;
+    let { cellWidth, cellHeight } = physicalCellSize;
+    let numCellsX, numCellsY;
     
     if (settings.lockRatio) {
-      // Perfect squares mode - cells are square
-      const gridSize = Math.max(1, settings.gridSize || 1);
-      const cellSize = Math.max(5, Math.min(width, height) / gridSize);
-      cellWidth = cellSize;
-      cellHeight = cellSize;
-      numCellsX = Math.min(500, Math.ceil(width / cellSize));
-      numCellsY = Math.min(500, Math.ceil(height / cellSize));
+      numCellsX = Math.min(500, Math.ceil(width / cellWidth));
+      numCellsY = Math.min(500, Math.ceil(height / cellHeight));
     } else {
       // Normal mode
-      cellWidth = Math.max(5, pixelsPerUnitX * scaleX);
-      cellHeight = Math.max(5, pixelsPerUnitY * scaleY);
       numCellsX = Math.min(500, settings.unitWidth || 1);
       numCellsY = Math.min(500, settings.unitHeight || 1);
     }
@@ -746,7 +1260,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         }
       });
     }
-  }, [settings, canvasSize, pixelsPerUnitX, pixelsPerUnitY, isDrawing, startPoint, currentPoint, sessionCode, remoteLiveMeasurements]);
+  }, [settings, canvasSize, pixelsPerUnitX, pixelsPerUnitY, isDrawing, startPoint, currentPoint, sessionCode, remoteLiveMeasurements, physicalCellSize]);
 
   const getCanvasCoords = useCallback((e) => {
     const canvas = canvasRef.current;
@@ -764,17 +1278,179 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
 
   const handleMouseDown = useCallback((e) => {
     if (!interactive) return;
-    
-    // Block drawing/erasing if user is blocked in session
-    if (isBlocked && (settings.eraserEnabled || settings.drawingEnabled || settings.measureMode)) {
-      return;
-    }
-    
-    const coords = getCanvasCoords(e);
-    
+
     // Track activity for session
     if (resetInactivityTimer) {
       resetInactivityTimer();
+    }
+
+    const canvasCoords = getCanvasCoords(e);
+    const coords = canvasCoords;
+
+    // Measure mode interaction
+    if (settings.measureMode) {
+      // Left click (button 0): Start measuring or add a breakpoint
+      if (e.button === 0) {
+        if (measureWaypoints.length === 0) {
+          setMeasureWaypoints([canvasCoords]);
+          setCurrentPoint(canvasCoords);
+          setIsDrawing(true);
+          if (broadcastActivityStatus) broadcastActivityStatus('measuring');
+        } else {
+          const lastPt = measureWaypoints[measureWaypoints.length - 1];
+          const dx = canvasCoords.x - lastPt.x;
+          const dy = canvasCoords.y - lastPt.y;
+          if (Math.sqrt(dx * dx + dy * dy) > 3) {
+            setMeasureWaypoints(prev => [...prev, canvasCoords]);
+            setCurrentPoint(canvasCoords);
+          }
+        }
+        return;
+      }
+
+      // Middle click (button 1): Pin / keep the measurement tape & start new one
+      if (e.button === 1) {
+        e.preventDefault();
+        if (measureWaypoints.length > 0) {
+          let allPoints = [...measureWaypoints];
+          if (currentPoint) {
+            const last = allPoints[allPoints.length - 1];
+            const dx = currentPoint.x - last.x;
+            const dy = currentPoint.y - last.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 5) {
+              allPoints.push(currentPoint);
+            }
+          }
+
+          if (allPoints.length >= 2) {
+            let totalDistance = 0;
+            let totalPixelDistance = 0;
+            const segmentDistances = [];
+
+            for (let i = 0; i < allPoints.length - 1; i++) {
+              const p1 = allPoints[i];
+              const p2 = allPoints[i + 1];
+              const { unitDistance, pixelDistance } = calculateAccurateDistance(p1.x, p1.y, p2.x, p2.y);
+              segmentDistances.push(unitDistance);
+              totalDistance += unitDistance;
+              totalPixelDistance += pixelDistance;
+            }
+
+            const scaleX = settings.screenWidth / canvasSize.width;
+            const scaleY = settings.screenHeight / canvasSize.height;
+
+            const screenWaypoints = allPoints.map(pt => ({
+              x: pt.x * scaleX,
+              y: pt.y * scaleY,
+            }));
+
+            const measurementData = {
+              id: Date.now().toString(),
+              type: settings.measureMode,
+              waypoints: allPoints,
+              screenWaypoints,
+              startX: allPoints[0].x,
+              startY: allPoints[0].y,
+              endX: allPoints[allPoints.length - 1].x,
+              endY: allPoints[allPoints.length - 1].y,
+              pixelDistance: totalPixelDistance,
+              unitDistance: totalDistance,
+              totalDistance,
+              segmentDistances,
+              coneAngle: settings.measureMode === 'cone' ? settings.coneAngle : null,
+              color: '#FFD700',
+              timestamp: Date.now(),
+            };
+
+            addMeasurement(measurementData);
+            if (broadcastMeasurement) {
+              broadcastMeasurement(measurementData);
+            }
+          }
+
+          // Reset active measurement state for new measurement
+          setMeasureWaypoints([]);
+          setCurrentPoint(null);
+          setIsDrawing(false);
+          setLiveMeasurement(null);
+          if (clearLiveMeasurement) clearLiveMeasurement();
+          if (broadcastActivityStatus) broadcastActivityStatus('idle');
+        }
+        return;
+      }
+
+      // Right click (button 2): Reset active tool & clear pinned measurements
+      if (e.button === 2) {
+        e.preventDefault();
+        setMeasureWaypoints([]);
+        setCurrentPoint(null);
+        setIsDrawing(false);
+        setLiveMeasurement(null);
+        if (clearLiveMeasurement) clearLiveMeasurement();
+        if (broadcastActivityStatus) broadcastActivityStatus('idle');
+        if (clearMeasurements) clearMeasurements();
+        return;
+      }
+    }
+
+    // Check if user clicked directly on an existing ping beacon to delete it
+    const allExistingPings = [...(pings || []), ...(pingMarkers || [])];
+    const clickedPing = allExistingPings.find(p => {
+      const dx = p.x - canvasCoords.x;
+      const dy = p.y - canvasCoords.y;
+      return Math.sqrt(dx * dx + dy * dy) <= 22;
+    });
+
+    // Middle click (button 1): Clear all ping beacons & exit Beacon Mode
+    if (e.button === 1) {
+      e.preventDefault();
+      if (clearPings) clearPings();
+      if (settings.pingMode) {
+        updateSettings({ pingMode: false });
+      }
+      toast.success('Cleared all beacons');
+      return;
+    }
+
+    // Handle Right Click
+    if (e.button === 2) {
+      e.preventDefault();
+      if (settings.pingMode) {
+        updateSettings({ pingMode: false });
+        toast.info('Exited Beacon Mode');
+        return;
+      }
+
+      if (openRadialMenu) {
+        openRadialMenu({
+          x: e.clientX,
+          y: e.clientY,
+          mapX: canvasCoords.x,
+          mapY: canvasCoords.y
+        });
+      }
+      return;
+    }
+    
+    // Block drawing/erasing if user is blocked in session
+    if (isBlocked && (settings.eraserEnabled || settings.drawingEnabled)) {
+      return;
+    }
+
+    if (clickedPing && e.button === 0) {
+      if (removePing) removePing(clickedPing.id);
+      return;
+    }
+
+    // Ping mode or Alt+Click (Left click e.button === 0): Drop a persistent animated ping beacon
+    if (e.button === 0 && (settings.pingMode || e.altKey)) {
+      if (addPing) {
+        addPing(coords.x, coords.y, settings.pingColor, settings.pingLabel || '');
+      }
+      if (sessionCode && broadcastPing) {
+        broadcastPing(coords.x, coords.y, settings.pingColor || '#FFD700', settings.pingLabel || '');
+      }
+      return;
     }
     
     // Mask painting mode
@@ -813,27 +1489,32 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       if (broadcastActivityStatus) broadcastActivityStatus('drawing');
       return;
     }
-    
-    // Measure mode
-    if (settings.measureMode) {
-      setStartPoint(coords);
-      setCurrentPoint(coords);
-      setIsDrawing(true);
-      if (sessionCode && broadcastCursor && showMyCursor) {
-        broadcastCursor(coords.x, coords.y, true);
-      }
-      if (broadcastActivityStatus) broadcastActivityStatus('measuring');
+
+    // Start Marquee Box Selection if left clicking on empty canvas space
+    if (e.button === 0 && !settings.drawingEnabled && !settings.eraserEnabled && !settings.maskEnabled && !settings.measureMode && !settings.pingMode) {
+      setMarqueeState({
+        active: true,
+        start: coords,
+        current: coords,
+        isShift: e.shiftKey
+      });
     }
-  }, [interactive, isBlocked, settings.measureMode, settings.drawingEnabled, settings.eraserEnabled, settings.eraserSize, settings.maskEnabled, settings.maskTool, settings.maskBrushSize, getCanvasCoords, eraseAt, broadcastErase, resetInactivityTimer, sessionCode, broadcastCursor, showMyCursor]);
+  }, [interactive, isBlocked, settings, updateSettings, pings, pingMarkers, removePing, addPing, clearPings, clearMeasurements, broadcastPing, getCanvasCoords, eraseAt, broadcastErase, resetInactivityTimer, sessionCode, broadcastCursor, showMyCursor, measureWaypoints, currentPoint, calculateAccurateDistance, addMeasurement, broadcastMeasurement, setLiveMeasurement, clearLiveMeasurement, broadcastActivityStatus, openRadialMenu, canvasSize]);
 
   const handleMouseMove = useCallback((e) => {
     const coords = getCanvasCoords(e);
     
     // Track cursor position for tool size circle indicator
     setCursorPos({ x: coords.x, y: coords.y });
+
+    // Active marquee drag selection box
+    if (marqueeState.active) {
+      setMarqueeState(prev => ({ ...prev, current: coords }));
+      return;
+    }
     
     // Determine if user is actively interacting (clicking/dragging)
-    const isClicking = isDrawing || isErasing || isMaskPainting || !!maskRectStart;
+    const isClicking = isDrawing || isErasing || isMaskPainting || !!maskRectStart || measureWaypoints.length > 0;
     
     // Always broadcast cursor position to session for cursor trails
     if (sessionCode && broadcastCursor && showMyCursor) {
@@ -860,13 +1541,57 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     // Eraser mode
     if (isErasing && settings.eraserEnabled) {
       eraseAt(coords.x, coords.y, settings.eraserSize || 20);
-      // Broadcast erase to session
       if (broadcastErase) {
         broadcastErase(coords.x, coords.y, settings.eraserSize || 20);
       }
       return;
     }
     
+    // Measure mode - update active trailing line and live distance
+    if (settings.measureMode && measureWaypoints.length > 0) {
+      setCurrentPoint(coords);
+
+      let totalUnitDistance = 0;
+      let totalPixelDistance = 0;
+
+      for (let i = 0; i < measureWaypoints.length - 1; i++) {
+        const p1 = measureWaypoints[i];
+        const p2 = measureWaypoints[i + 1];
+        const { unitDistance, pixelDistance } = calculateAccurateDistance(p1.x, p1.y, p2.x, p2.y);
+        totalUnitDistance += unitDistance;
+        totalPixelDistance += pixelDistance;
+      }
+
+      const lastWay = measureWaypoints[measureWaypoints.length - 1];
+      const activeDist = calculateAccurateDistance(lastWay.x, lastWay.y, coords.x, coords.y);
+      totalUnitDistance += activeDist.unitDistance;
+      totalPixelDistance += activeDist.pixelDistance;
+
+      setLiveMeasurement({
+        unitDistance: totalUnitDistance,
+        pixelDistance: totalPixelDistance,
+        activeSegmentDistance: activeDist.unitDistance,
+        waypointCount: measureWaypoints.length,
+      });
+
+      const now = Date.now();
+      if (broadcastLiveMeasurement && now - liveMeasureThrottleRef.current > 33) {
+        liveMeasureThrottleRef.current = now;
+        broadcastLiveMeasurement({
+          waypoints: [...measureWaypoints, coords],
+          startX: measureWaypoints[0].x,
+          startY: measureWaypoints[0].y,
+          endX: coords.x,
+          endY: coords.y,
+          type: settings.measureMode,
+          coneAngle: settings.measureMode === 'cone' ? settings.coneAngle : null,
+          color: '#FF4444',
+          unitDistance: totalUnitDistance,
+        });
+      }
+      return;
+    }
+
     if (!isDrawing) return;
     
     // Drawing mode
@@ -874,52 +1599,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       setCurrentDrawingPath(prev => [...prev, coords]);
       return;
     }
-    
-    // Measure mode - update live measurement for popup window
-    setCurrentPoint(coords);
-    
-    if (startPoint && settings.measureMode) {
-      // Calculate and send live measurement
-      const scaleX = settings.screenWidth / canvasSize.width;
-      const scaleY = settings.screenHeight / canvasSize.height;
-      
-      const screenStart = {
-        x: startPoint.x * scaleX,
-        y: startPoint.y * scaleY,
-      };
-      const screenEnd = {
-        x: coords.x * scaleX,
-        y: coords.y * scaleY,
-      };
-      
-      const { unitDistance, rawUnitDistance } = calculateDistance(
-        screenStart.x, screenStart.y,
-        screenEnd.x, screenEnd.y
-      );
-      
-      setLiveMeasurement({
-        unitDistance: rawUnitDistance,
-        pixelDistance: Math.sqrt(
-          Math.pow(screenEnd.x - screenStart.x, 2) + Math.pow(screenEnd.y - screenStart.y, 2)
-        ),
-      });
-      
-      // Broadcast live measurement to session (throttled to 30fps)
-      const now = Date.now();
-      if (broadcastLiveMeasurement && now - liveMeasureThrottleRef.current > 33) {
-        liveMeasureThrottleRef.current = now;
-        broadcastLiveMeasurement({
-          startX: startPoint.x,
-          startY: startPoint.y,
-          endX: coords.x,
-          endY: coords.y,
-          type: settings.measureMode,
-          coneAngle: settings.measureMode === 'cone' ? settings.coneAngle : null,
-          color: '#FF4444',
-        });
-      }
-    }
-  }, [isDrawing, isErasing, isMaskPainting, maskRectStart, startPoint, settings.drawingEnabled, settings.eraserEnabled, settings.eraserSize, settings.measureMode, settings.maskEnabled, settings.maskTool, settings.screenWidth, settings.screenHeight, canvasSize, getCanvasCoords, eraseAt, broadcastErase, sessionCode, broadcastCursor, showMyCursor, calculateDistance, setLiveMeasurement]);
+  }, [isDrawing, isErasing, isMaskPainting, maskRectStart, measureWaypoints, marqueeState.active, settings.drawingEnabled, settings.eraserEnabled, settings.eraserSize, settings.measureMode, settings.maskEnabled, settings.maskTool, getCanvasCoords, eraseAt, broadcastErase, sessionCode, broadcastCursor, showMyCursor, calculateAccurateDistance, setLiveMeasurement, broadcastLiveMeasurement]);
 
   const handleMouseLeave = useCallback(() => {
     setCursorPos(null);
@@ -935,6 +1615,45 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
   }, [sessionCode, broadcastPing, getCanvasCoords]);
 
   const handleMouseUp = useCallback(() => {
+    // Process Marquee Box Selection
+    if (marqueeState.active) {
+      if (marqueeState.start && marqueeState.current) {
+        const minX = Math.min(marqueeState.start.x, marqueeState.current.x);
+        const maxX = Math.max(marqueeState.start.x, marqueeState.current.x);
+        const minY = Math.min(marqueeState.start.y, marqueeState.current.y);
+        const maxY = Math.max(marqueeState.start.y, marqueeState.current.y);
+
+        if (maxX - minX > 5 && maxY - minY > 5) {
+          const foundCliparts = (settings.placedCliparts || []).filter(cp => {
+            return cp.x >= minX && cp.x <= maxX && cp.y >= minY && cp.y <= maxY;
+          });
+          const foundIds = foundCliparts.map(cp => cp.instanceId);
+
+          if (marqueeState.isShift) {
+            if (setSelectedClipartIds) {
+              setSelectedClipartIds(prev => Array.from(new Set([...prev, ...foundIds])));
+            }
+          } else {
+            if (setSelectedClipartIds) {
+              setSelectedClipartIds(foundIds);
+            }
+          }
+
+          if (foundIds.length > 0) {
+            toast.info(`Selected ${foundIds.length} token(s). Right-click to open Radial Menu to Group.`);
+          }
+        } else if (!marqueeState.isShift) {
+          if (setSelectedClipartIds) setSelectedClipartIds([]);
+        }
+      }
+      setMarqueeState({ active: false, start: null, current: null, isShift: false });
+      return;
+    }
+
+    if (settings.measureMode) {
+      return; // Clicks add waypoints, middle-click keeps tape, right-click resets
+    }
+
     // Mask brush - save the path
     if (isMaskPainting && currentMaskPath.length > 1) {
       addMaskPath({ points: currentMaskPath, size: settings.maskBrushSize || 30 });
@@ -980,9 +1699,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       };
       addDrawingPath(pathData);
       
-      // Broadcast to session
       if (broadcastDrawPath) {
-        console.log('[GridCanvas] Broadcasting draw path, points:', currentDrawingPath.length);
         broadcastDrawPath(pathData);
       }
       
@@ -991,91 +1708,36 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       if (broadcastActivityStatus) broadcastActivityStatus('idle');
       return;
     }
-    
-    // Measure mode
-    if (!startPoint || !currentPoint) {
-      setIsDrawing(false);
-      return;
-    }
-
-    // Convert canvas coords to screen coords
-    const scaleX = settings.screenWidth / canvasSize.width;
-    const scaleY = settings.screenHeight / canvasSize.height;
-
-    const screenStart = {
-      x: startPoint.x * scaleX,
-      y: startPoint.y * scaleY,
-    };
-    const screenEnd = {
-      x: currentPoint.x * scaleX,
-      y: currentPoint.y * scaleY,
-    };
-
-    const { pixelDistance, unitDistance } = calculateDistance(
-      screenStart.x, screenStart.y,
-      screenEnd.x, screenEnd.y
-    );
-
-    if (pixelDistance > 5) {
-      const measurementData = {
-        startX: screenStart.x,
-        startY: screenStart.y,
-        endX: screenEnd.x,
-        endY: screenEnd.y,
-        pixelDistance,
-        unitDistance,
-        type: settings.measureMode,
-        coneAngle: settings.measureMode === 'cone' ? settings.coneAngle : null,
-      };
-      addMeasurement(measurementData);
-      
-      // Broadcast to session
-      if (broadcastMeasurement) {
-        broadcastMeasurement(measurementData);
-      }
-    }
-
-    setIsDrawing(false);
-    setStartPoint(null);
-    setCurrentPoint(null);
-    
-    // Clear live measurement
-    setLiveMeasurement(null);
-    if (clearLiveMeasurement) {
-      clearLiveMeasurement();
-    }
-    
-    // Set status back to idle
-    if (broadcastActivityStatus) broadcastActivityStatus('idle');
-    
-    // Hide cursor when mouse is released
-    if (sessionCode && hideCursor) {
-      hideCursor();
-    }
-  }, [isDrawing, isErasing, isMaskPainting, currentMaskPath, maskRectStart, maskRectPreview, startPoint, currentPoint, settings, canvasSize, calculateDistance, addMeasurement, currentDrawingPath, addDrawingPath, addMaskPath, addMaskRect, broadcastDrawPath, broadcastMeasurement, setLiveMeasurement, sessionCode, hideCursor, clearLiveMeasurement, broadcastActivityStatus]);
+  }, [isDrawing, isErasing, isMaskPainting, currentMaskPath, maskRectStart, maskRectPreview, marqueeState, setSelectedClipartIds, settings, currentDrawingPath, addDrawingPath, addMaskPath, addMaskRect, broadcastDrawPath, broadcastActivityStatus]);
 
   const getMeasurementInfo = useCallback(() => {
-    if (!startPoint || !currentPoint) return null;
+    if (measureWaypoints.length === 0 || !currentPoint) return null;
 
-    const scaleX = settings.screenWidth / canvasSize.width;
-    const scaleY = settings.screenHeight / canvasSize.height;
-    
-    const { unitDistance } = calculateDistance(
-      startPoint.x * scaleX, startPoint.y * scaleY,
-      currentPoint.x * scaleX, currentPoint.y * scaleY
-    );
+    let totalUnitDistance = 0;
+    for (let i = 0; i < measureWaypoints.length - 1; i++) {
+      const p1 = measureWaypoints[i];
+      const p2 = measureWaypoints[i + 1];
+      const { unitDistance } = calculateAccurateDistance(p1.x, p1.y, p2.x, p2.y);
+      totalUnitDistance += unitDistance;
+    }
+    const lastWay = measureWaypoints[measureWaypoints.length - 1];
+    const { unitDistance: segDist } = calculateAccurateDistance(lastWay.x, lastWay.y, currentPoint.x, currentPoint.y);
+    totalUnitDistance += segDist;
 
     const multiplierText = settings.measureMultiplier !== 1 ? ` (${settings.measureMultiplier}x)` : '';
 
     if (settings.measureMode === 'line') {
-      return `${unitDistance.toFixed(2)} units${multiplierText}`;
+      if (measureWaypoints.length > 1) {
+        return `Total: ${totalUnitDistance.toFixed(2)} units (Seg: ${segDist.toFixed(1)}u)${multiplierText}`;
+      }
+      return `${totalUnitDistance.toFixed(2)} units${multiplierText}`;
     } else if (settings.measureMode === 'radial') {
-      return `R: ${unitDistance.toFixed(2)} units${multiplierText}`;
+      return `R: ${totalUnitDistance.toFixed(2)} units${multiplierText}`;
     } else if (settings.measureMode === 'cone') {
-      return `${unitDistance.toFixed(2)} units @ ${settings.coneAngle}°${multiplierText}`;
+      return `${totalUnitDistance.toFixed(2)} units @ ${settings.coneAngle}°${multiplierText}`;
     }
     return null;
-  }, [startPoint, currentPoint, settings, canvasSize, calculateDistance]);
+  }, [measureWaypoints, currentPoint, settings, calculateAccurateDistance]);
 
   // Determine cursor style
   const getCursorStyle = () => {
@@ -1084,6 +1746,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     if (settings.drawingEnabled) return 'none';
     if (settings.maskEnabled) return 'crosshair';
     if (settings.measureMode) return 'crosshair';
+    if (settings.pingMode) return 'crosshair';
     return 'default';
   };
 
@@ -1094,6 +1757,38 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       style={fullscreen ? { background: 'transparent' } : {}}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const coords = getCanvasCoords(e);
+        if (settings.pingMode) {
+          const allExistingPings = [...(pings || []), ...(pingMarkers || [])];
+          const clickedPing = allExistingPings.find(p => {
+            const dx = p.x - coords.x;
+            const dy = p.y - coords.y;
+            return Math.sqrt(dx * dx + dy * dy) <= 22;
+          });
+          if (clickedPing) {
+            if (removePing) removePing(clickedPing.id);
+            return;
+          }
+          if (addPing) {
+            addPing(coords.x, coords.y, settings.pingColor, settings.pingLabel || '');
+          }
+          if (sessionCode && broadcastPing) {
+            broadcastPing(coords.x, coords.y, settings.pingColor || '#FFD700', settings.pingLabel || '');
+          }
+          return;
+        }
+
+        if (openRadialMenu) {
+          openRadialMenu({
+            x: e.clientX,
+            y: e.clientY,
+            mapX: coords.x,
+            mapY: coords.y
+          });
+        }
+      }}
       data-testid="grid-canvas-container"
     >
       {/* Layer 0: Background image layers (below grid) */}
@@ -1163,38 +1858,49 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         data-testid="cliparts-layer"
       >
         {/* Local Placed Cliparts */}
-        {settings.placedCliparts?.map((clipart) => (
-          <PlacedClipart
-            key={clipart.instanceId}
-            clipart={clipart}
-            isSelected={selectedClipartId === clipart.instanceId}
-            onSelect={() => { setSelectedClipartId(clipart.instanceId); setSelectedBgLayerId(null); }}
-            onUpdate={(updated) => {
-              updatePlacedClipart(clipart.instanceId, updated);
-              if (sessionCode && broadcastUpdateClipart) {
-                broadcastUpdateClipart({ ...updated, instanceId: clipart.instanceId });
-              }
-            }}
-            onLiveMove={(pos) => {
-              // Broadcast live position during drag for real-time sync
-              if (sessionCode && broadcastLiveClipartMove) {
-                broadcastLiveClipartMove({ ...pos, instanceId: clipart.instanceId });
-              }
-            }}
-            onDelete={() => {
-              removePlacedClipart(clipart.instanceId);
-              setSelectedClipartId(null);
-              if (sessionCode && broadcastRemoveClipart) {
-                broadcastRemoveClipart(clipart.instanceId);
-              }
-            }}
-            canEdit={interactive && !isBlocked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode}
-            disabled={settings.drawingEnabled || settings.eraserEnabled || !!settings.measureMode}
-            snapToGrid={settings.snapClipartsToGrid}
-            gridCellWidth={settings.lockRatio ? settings.squareSize : settings.gridSize}
-            gridCellHeight={settings.lockRatio ? settings.squareSize : settings.gridSize}
-          />
-        ))}
+        {settings.placedCliparts?.map((clipart) => {
+          const isSelected = selectedClipartIds.includes(clipart.instanceId);
+          const isPartMap = groupDragStartPositionsRef.current && groupDragStartPositionsRef.current[clipart.instanceId];
+          const activeGroupOffset = isPartMap ? groupDragOffset : null;
+
+          return (
+            <PlacedClipart
+              key={clipart.instanceId}
+              clipart={clipart}
+              isSelected={isSelected}
+              onSelect={(e) => handleClipartSelect(clipart, e)}
+              onUpdate={(updated) => {
+                updatePlacedClipart(clipart.instanceId, updated);
+                if (sessionCode && broadcastUpdateClipart) {
+                  broadcastUpdateClipart({ ...updated, instanceId: clipart.instanceId });
+                }
+              }}
+              onLiveMove={(pos) => {
+                if (sessionCode && broadcastLiveClipartMove) {
+                  broadcastLiveClipartMove({ ...pos, instanceId: clipart.instanceId });
+                }
+              }}
+              onDelete={() => {
+                removePlacedClipart(clipart.instanceId);
+                if (setSelectedClipartIds) {
+                  setSelectedClipartIds(prev => prev.filter(id => id !== clipart.instanceId));
+                }
+                if (sessionCode && broadcastRemoveClipart) {
+                  broadcastRemoveClipart(clipart.instanceId);
+                }
+              }}
+              canEdit={interactive && !isBlocked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode}
+              disabled={settings.drawingEnabled || settings.eraserEnabled || !!settings.measureMode}
+              snapToGrid={settings.snapClipartsToGrid}
+              gridCellWidth={physicalCellSize.cellWidth}
+              gridCellHeight={physicalCellSize.cellHeight}
+              groupDragOffset={activeGroupOffset}
+              onDragStartExtra={handleGroupDragStart}
+              onDragMoveExtra={handleGroupDragMove}
+              onDragEndExtra={handleGroupDragEnd}
+            />
+          );
+        })}
         
         {/* Remote Cliparts from Session */}
         {remoteCliparts?.map((clipart) => {
@@ -1225,8 +1931,8 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         data-testid="drawing-canvas"
       />
       
-      {/* Layer 5: Measurement interaction layer (highest - captures all mouse events for measuring) */}
-      {(settings.measureMode || settings.drawingEnabled || settings.eraserEnabled || settings.maskEnabled) && (
+      {/* Layer 5: Measurement interaction layer (highest - captures all mouse events for measuring/pinging) */}
+      {(settings.measureMode || settings.drawingEnabled || settings.eraserEnabled || settings.maskEnabled || settings.pingMode) && (
         <div
           className="absolute inset-0 w-full h-full"
           style={{ 
@@ -1249,7 +1955,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       
       {/* Layer 6: UI Elements (tooltips, indicators, cursors) */}
       {/* Measurement tooltip */}
-      {interactive && settings.measureMode && isDrawing && startPoint && currentPoint && (
+      {interactive && settings.measureMode && measureWaypoints.length > 0 && currentPoint && (
         <div
           className="absolute px-3 py-2 bg-black/90 text-white text-sm font-mono rounded-lg pointer-events-none border border-white/20"
           style={{
@@ -1319,6 +2025,26 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
           />
         );
       })()}
+
+      {/* Marquee Drag Selection Box Overlay */}
+      {marqueeState.active && marqueeState.start && marqueeState.current && (
+        <div
+          className="absolute border-2 border-dashed border-[#caa055] bg-[#caa055]/15 rounded pointer-events-none z-30 shadow-[0_0_15px_rgba(202,160,85,0.3)] animate-in fade-in duration-75"
+          style={{
+            left: Math.min(marqueeState.start.x, marqueeState.current.x),
+            top: Math.min(marqueeState.start.y, marqueeState.current.y),
+            width: Math.abs(marqueeState.current.x - marqueeState.start.x),
+            height: Math.abs(marqueeState.current.y - marqueeState.start.y),
+          }}
+        >
+          <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-black/80 text-[#caa055] text-[10px] font-mono rounded border border-[#caa055]/40 font-bold select-none">
+            Select Box
+          </div>
+        </div>
+      )}
+
+      {/* Radial Context Menu */}
+      <RadialContextMenu />
     </div>
   );
 };

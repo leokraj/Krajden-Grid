@@ -1,8 +1,10 @@
 import "@/App.css";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { LicenseProvider } from "./context/LicenseContext";
 import { TrialBanner, ExpiredGate, LicenseSuccessPage } from "./components/LicenseGate";
+import ErrorBoundary from "./components/ErrorBoundary";
 import HomePage from "./pages/HomePage";
 import AppPage from "./pages/AppPage";
 import DownloadPage from "./pages/DownloadPage";
@@ -38,7 +40,7 @@ function AppRouter() {
 
   // Mobile remote + display + electron overlay don't need license gate
   const noGateRoutes = ['/', '/download', '/remote', '/display'];
-  const isElectronMode = new URLSearchParams(window.location.search).get('electron') === '1';
+  const isElectronMode = new URLSearchParams(window.location.search).get('electron') === '1' || !!window.electronAPI?.isElectron;
   const needsGate = !isElectronMode && !noGateRoutes.includes(location.pathname) && !location.pathname.startsWith('/join/');
 
   return (
@@ -72,22 +74,30 @@ function AppRouter() {
 }
 
 function App() {
-  const isElectron = new URLSearchParams(window.location.search).get('electron') === '1';
+  const isElectron = new URLSearchParams(window.location.search).get('electron') === '1' || !!window.electronAPI?.isElectron;
+
+  useEffect(() => {
+    if (isElectron) {
+      document.documentElement.classList.add('electron-app');
+      document.body.classList.add('electron-app');
+      document.documentElement.style.background = '#0d0f12';
+      document.body.style.background = '#0d0f12';
+      document.documentElement.style.backgroundColor = '#0d0f12';
+      document.body.style.backgroundColor = '#0d0f12';
+    }
+  }, [isElectron]);
   
   return (
-    <div className="App">
-      <BrowserRouter basename={process.env.PUBLIC_URL || ''}>
-        <AuthProvider>
-          {isElectron ? (
-            // Electron windows: skip license provider entirely
-            <AppRouter />
-          ) : (
+    <div className={`App ${isElectron ? 'electron-app bg-[#0d0f12]' : ''}`}>
+      <ErrorBoundary>
+        <BrowserRouter basename={process.env.PUBLIC_URL || ''}>
+          <AuthProvider>
             <LicenseProvider>
               <AppRouter />
             </LicenseProvider>
-          )}
-        </AuthProvider>
-      </BrowserRouter>
+          </AuthProvider>
+        </BrowserRouter>
+      </ErrorBoundary>
     </div>
   );
 }

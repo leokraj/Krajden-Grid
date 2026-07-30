@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener(channel, subscription);
     };
   },
+
+  getDisplays: () => ipcRenderer.invoke('get-displays'),
+  setDisplayId: (id) => ipcRenderer.invoke('set-display', id),
+  getCurrentDisplayId: () => ipcRenderer.invoke('get-current-display'),
   
   googleAuth: (authUrl) => {
     ipcRenderer.send('google-auth', authUrl);

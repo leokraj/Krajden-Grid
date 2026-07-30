@@ -1,38 +1,108 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu } = require('electron');
 const path = require('path');
+const http = require('http');
+const fs = require('fs');
+
+// Hide default application menu bar
+Menu.setApplicationMenu(null);
+
+// CRITICAL Windows Configuration:
+// Standard solid dark background window (#0d0f12) ensures 100% reliable rendering across all Windows graphics drivers and DWM compositors without black screen issues.
 
 let mainWindow = null;
 const childWindows = {};
 
-// Default URL to load inside the Electron shell.
-// IMPORTANT: This is a dev/preview URL — replace with stable production URL before launch.
-const defaultUrl = 'https://ais-dev-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/fullscreen?electron=1';
+let currentAppUrl = '';
 
-function createMainWindow() {
-  const displays = screen.getAllDisplays();
-  
-  // Calculate a bounding box that spans all active displays/monitors
-  let minX = 0, minY = 0, maxX = 0, maxY = 0;
-  displays.forEach(display => {
-    const { x, y, width, height } = display.bounds;
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + width);
-    maxY = Math.max(maxY, y + height);
+function startLocalWebServer() {
+  const webDistPath = path.join(__dirname, 'web_dist');
+  if (!fs.existsSync(webDistPath)) {
+    console.log('[Electron] web_dist not found');
+    return Promise.resolve(null);
+  }
+
+  const mimeTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.mp3': 'audio/mpeg',
+    '.webm': 'video/webm'
+  };
+
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      let reqPath = req.url.split('?')[0];
+      let filePath = path.join(webDistPath, reqPath);
+
+      // Prevent directory traversal
+      if (!filePath.startsWith(webDistPath)) {
+        res.writeHead(403);
+        return res.end('Forbidden');
+      }
+
+      fs.stat(filePath, (err, stats) => {
+        if (err || !stats.isFile()) {
+          // SPA fallback to index.html
+          filePath = path.join(webDistPath, 'index.html');
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+        fs.readFile(filePath, (readErr, content) => {
+          if (readErr) {
+            res.writeHead(500);
+            return res.end('Error loading file');
+          }
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.end(content);
+        });
+      });
+    });
+
+    server.on('error', (err) => {
+      console.error('[Electron] Local web server error:', err);
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      console.log(`[Electron] Local web server running on http://127.0.0.1:${port}`);
+      resolve(`http://127.0.0.1:${port}`);
+    });
   });
-  
-  const totalWidth = maxX - minX;
-  const totalHeight = maxY - minY;
+}
+
+function createMainWindow(targetUrl) {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { x, y, width, height } = primaryDisplay.bounds;
+
+  if (targetUrl) {
+    currentAppUrl = targetUrl;
+  }
 
   mainWindow = new BrowserWindow({
-    x: minX,
-    y: minY,
-    width: totalWidth,
-    height: totalHeight,
-    transparent: true,
+    x,
+    y,
+    width,
+    height,
+    title: 'Krajden Grid',
     frame: false,
-    alwaysOnTop: true,
-    hasShadow: false,
+    resizable: true,
+    maximizeable: true,
+    backgroundColor: '#0d0f12',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -40,8 +110,58 @@ function createMainWindow() {
     }
   });
 
-  // Load the transparent full screen tabletop grid
-  mainWindow.loadURL(defaultUrl);
+  // Load the full tabletop grid app
+  mainWindow.loadURL(currentAppUrl);
+
+  // Fallback and recovery if URL loading fails
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error(`[Electron] Failed to load URL: ${errorCode} - ${errorDescription}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const offlineHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Krajden Grid - Loading Error</title>
+          <style>
+            body {
+              background: #0d0f12;
+              color: #caa055;
+              font-family: system-ui, -apple-system, sans-serif;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              margin: 0;
+              text-align: center;
+            }
+            h2 { font-size: 22px; margin-bottom: 8px; color: #fff; }
+            p { color: #a0a0a0; font-size: 13px; max-width: 420px; line-height: 1.5; margin-bottom: 16px; }
+            button {
+              background: #caa055;
+              color: #000;
+              border: none;
+              padding: 10px 24px;
+              font-size: 13px;
+              font-weight: bold;
+              border-radius: 6px;
+              cursor: pointer;
+              transition: background 0.2s;
+            }
+            button:hover { background: #d5b271; }
+          </style>
+        </head>
+        <body>
+          <h2>Krajden Grid Desktop App</h2>
+          <p>Could not load the application bundle. Please click retry to reload.</p>
+          <button onclick="window.location.reload()">Retry Loading</button>
+        </body>
+        </html>
+      `;
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlineHtml)}`);
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -59,12 +179,14 @@ function createChildWindow(mode, title, width = 450, height = 650) {
   }
 
   const win = new BrowserWindow({
+    parent: mainWindow || undefined,
     width,
     height,
     title,
     frame: true,
     alwaysOnTop: true,
-    backgroundColor: '#0d0d0f',
+    hasShadow: true,
+    backgroundColor: '#0d0f12',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -73,7 +195,7 @@ function createChildWindow(mode, title, width = 450, height = 650) {
   });
 
   // Extract base domain to target the sub-routes in the SPA
-  const baseUrl = defaultUrl.split('/fullscreen')[0];
+  const baseUrl = currentAppUrl.split('/fullscreen')[0];
   const modeUrl = `${baseUrl}/fullscreen?electron=1&mode=${mode}`;
   win.loadURL(modeUrl);
 
@@ -95,6 +217,61 @@ ipcMain.on('broadcast', (event, channel, data) => {
       win.webContents.send(channel, data);
     }
   });
+});
+
+// IPC Screen / Display management
+ipcMain.handle('get-displays', () => {
+  try {
+    const displays = screen.getAllDisplays();
+    const primaryId = screen.getPrimaryDisplay().id;
+    return displays.map((d, index) => ({
+      id: d.id,
+      name: d.label || `Display ${index + 1} (${d.bounds.width}x${d.bounds.height})`,
+      bounds: d.bounds,
+      isPrimary: d.id === primaryId
+    }));
+  } catch (err) {
+    console.error('Error in get-displays:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('get-current-display', () => {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    const winBounds = mainWindow.getBounds();
+    const display = screen.getDisplayMatching(winBounds);
+    return display ? display.id : null;
+  } catch (err) {
+    console.error('Error in get-current-display:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('set-display', (event, displayId) => {
+  try {
+    const displays = screen.getAllDisplays();
+    const targetDisplay = displays.find(d => d.id === Number(displayId) || d.id.toString() === displayId.toString());
+    if (targetDisplay && mainWindow && !mainWindow.isDestroyed()) {
+      const { x, y, width, height } = targetDisplay.bounds;
+      
+      // Update bounds to position the transparent overlay perfectly on the chosen monitor
+      mainWindow.setBounds({ x, y, width, height });
+      
+      // Let all windows know about the monitor update
+      mainWindow.webContents.send('display-updated', { displayId, bounds: targetDisplay.bounds });
+      Object.values(childWindows).forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('display-updated', { displayId, bounds: targetDisplay.bounds });
+        }
+      });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Error in set-display:', err);
+    return false;
+  }
 });
 
 // Google & Social Auth flow interceptor
@@ -152,11 +329,14 @@ ipcMain.on('open-layers-window', () => {
   createChildWindow('layers', 'Krajden Grid - Layers', 400, 600);
 });
 
-app.whenReady().then(() => {
-  createMainWindow();
+app.whenReady().then(async () => {
+  const localHostUrl = await startLocalWebServer();
+  const initialUrl = localHostUrl ? `${localHostUrl}/fullscreen?electron=1` : 'http://127.0.0.1:3000/fullscreen?electron=1';
+  
+  createMainWindow(initialUrl);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(initialUrl);
   });
 });
 

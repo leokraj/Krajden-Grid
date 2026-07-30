@@ -128,7 +128,7 @@ function AppContent() {
   );
 }
 
-export default function AppPage() {
+export function AppPage() {
   const { isAuthenticated, loading } = useAuth();
   const [guestBypass, setGuestBypass] = useState(false);
 
@@ -160,3 +160,5 @@ export default function AppPage() {
     </GridProvider>
   );
 }
+
+export default AppPage;

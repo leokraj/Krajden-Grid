@@ -103,7 +103,7 @@ function LongArrowRight({ className = "w-4 h-4" }) {
   );
 }
 
-export default function HomePage() {
+export function HomePage() {
   const [sessionCode, setSessionCode] = useState('');
   const navigate = useNavigate();
 
@@ -426,3 +426,5 @@ export default function HomePage() {
     </div>
   );
 }
+
+export default HomePage;

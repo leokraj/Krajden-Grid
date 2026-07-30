@@ -1,4 +1,76 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { toast } from 'sonner';
+
+export const DEFAULT_ACTIONS = [
+  { id: 'toggle_grid', name: 'Toggle Grid', category: 'Grid & Canvas', defaultHotkey: 'G', description: 'Show or hide grid lines' },
+  { id: 'toggle_measure', name: 'Toggle Measurement Mode', category: 'Grid & Canvas', defaultHotkey: 'M', description: 'Enable distance & cone measuring tools' },
+  { id: 'clear_measurements', name: 'Clear All Measurements', category: 'Grid & Canvas', defaultHotkey: 'Shift+M', description: 'Remove active measurements from canvas' },
+  { id: 'toggle_subdivisions', name: 'Toggle Grid Subdivisions', category: 'Grid & Canvas', defaultHotkey: 'S', description: 'Show or hide grid cell subdivisions' },
+  
+  { id: 'toggle_ping_mode', name: 'Toggle Ping Mode', category: 'Grid & Canvas', defaultHotkey: 'P', description: 'Enable clicking on map to place animated ping beacon' },
+  { id: 'clear_pings', name: 'Clear All Map Pings', category: 'Grid & Canvas', defaultHotkey: 'Shift+P', description: 'Remove all ping beacons from map' },
+  
+  { id: 'toggle_drawing', name: 'Toggle Drawing Mode', category: 'Drawing & Fog', defaultHotkey: 'D', description: 'Enable or disable drawing tools' },
+  { id: 'toggle_eraser', name: 'Toggle Eraser Mode', category: 'Drawing & Fog', defaultHotkey: 'E', description: 'Switch between drawing pen and eraser' },
+  { id: 'clear_drawings', name: 'Clear All Drawings', category: 'Drawing & Fog', defaultHotkey: 'Ctrl+D', description: 'Erase all pen lines from canvas' },
+  { id: 'clear_mask', name: 'Clear Fog of War', category: 'Drawing & Fog', defaultHotkey: 'Ctrl+Shift+M', description: 'Clear all fog of war mask shapes' },
+  
+  { id: 'clear_cliparts', name: 'Clear All Tokens', category: 'Tokens & Map', defaultHotkey: 'Ctrl+Shift+K', description: 'Remove all placed cliparts and tokens' },
+  { id: 'clear_background', name: 'Clear Background Image', category: 'Tokens & Map', defaultHotkey: 'Ctrl+Shift+B', description: 'Remove active background map' },
+  
+  { id: 'roll_d20', name: 'Quick Roll 1d20', category: 'Dice & Combat', defaultHotkey: 'R', description: 'Roll a d20 in virtual dice roller' },
+  { id: 'next_turn', name: 'Next Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'N', description: 'Advance turn in initiative tracker' },
+  { id: 'prev_turn', name: 'Previous Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'P', description: 'Go back one turn in initiative tracker' },
+  
+  { id: 'toggle_controls', name: 'Toggle Control Dashboard', category: 'System & View', defaultHotkey: 'Ctrl+Shift+C', description: 'Show or hide floating control panel' },
+  { id: 'reset_settings', name: 'Reset Grid Settings', category: 'System & View', defaultHotkey: 'Alt+R', description: 'Restore default grid settings' },
+];
+
+const DEFAULT_MACROS = [
+  {
+    id: 'macro_clear_all',
+    name: 'Clear Canvas & Reset',
+    hotkey: 'Ctrl+Shift+R',
+    description: 'Clears all drawings, measurements, and fog of war',
+    steps: [
+      { actionId: 'clear_drawings' },
+      { actionId: 'clear_measurements' },
+      { actionId: 'clear_mask' }
+    ]
+  },
+  {
+    id: 'macro_combat_ready',
+    name: 'Combat Start Routine',
+    hotkey: 'Ctrl+Shift+S',
+    description: 'Rolls 1d20 and enables measurement mode',
+    steps: [
+      { actionId: 'roll_d20' },
+      { actionId: 'toggle_measure' }
+    ]
+  }
+];
+
+function formatKeyboardEvent(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push('Meta');
+
+  let key = e.key;
+  if (!key) return '';
+
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {
+    return '';
+  }
+
+  if (key === ' ') key = 'Space';
+  else if (key.length === 1) key = key.toUpperCase();
+  else if (key.startsWith('Arrow')) key = key.replace('Arrow', '');
+
+  parts.push(key);
+  return parts.join('+');
+}
 
 const defaultSettings = {
   screenWidth: 1920,
@@ -44,7 +116,10 @@ const defaultSettings = {
   maskTool: 'brush',
   maskBrushSize: 30,
   maskPaths: [],
-  maskRects: []
+  maskRects: [],
+  pingMode: false,
+  pingColor: '#FFD700',
+  pingLabel: ''
 };
 
 const GridContext = createContext(undefined);
@@ -108,7 +183,68 @@ export const GridProvider = ({ children }) => {
     return [];
   });
 
-  const [selectedClipartId, setSelectedClipartId] = useState(null);
+  // Scenes State Management
+  const [scenes, setScenes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_scenes');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Failed to load scenes from localStorage:", e);
+    }
+    return [];
+  });
+
+  const [activeSceneId, setActiveSceneId] = useState(() => {
+    try {
+      return localStorage.getItem('overgrid_active_scene_id') || null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('overgrid_scenes', JSON.stringify(scenes));
+    } catch (e) {
+      console.warn("Failed to persist scenes:", e);
+    }
+  }, [scenes]);
+
+  useEffect(() => {
+    try {
+      if (activeSceneId) {
+        localStorage.setItem('overgrid_active_scene_id', activeSceneId);
+      } else {
+        localStorage.removeItem('overgrid_active_scene_id');
+      }
+    } catch (e) {
+      console.warn("Failed to persist activeSceneId:", e);
+    }
+  }, [activeSceneId]);
+
+  const [selectedClipartIds, setSelectedClipartIds] = useState([]);
+
+  const selectedClipartId = useMemo(() => (
+    selectedClipartIds.length > 0 ? selectedClipartIds[0] : null
+  ), [selectedClipartIds]);
+
+  const setSelectedClipartId = useCallback((val) => {
+    if (val === null || val === undefined) {
+      setSelectedClipartIds([]);
+    } else if (Array.isArray(val)) {
+      setSelectedClipartIds(val);
+    } else if (typeof val === 'function') {
+      setSelectedClipartIds((prev) => {
+        const first = prev.length > 0 ? prev[0] : null;
+        const res = val(first);
+        if (res === null || res === undefined) return [];
+        if (Array.isArray(res)) return res;
+        return [res];
+      });
+    } else {
+      setSelectedClipartIds([val]);
+    }
+  }, []);
   const isUpdatingFromRemoteRef = useRef(false);
   const clipartDebounceRef = useRef(null);
 
@@ -199,6 +335,25 @@ export const GridProvider = ({ children }) => {
         isUpdatingFromRemoteRef.current = false;
       }
     });
+  }, []);
+
+  // Listen for localStorage changes to sync cliparts across child windows
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'overgrid_clipart_library') {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed) {
+            if (parsed.favorites) setClipartFavorites(parsed.favorites);
+            if (parsed.customCliparts) setCustomCliparts(parsed.customCliparts);
+          }
+        } catch (err) {
+          console.error('Failed to parse storage update:', err);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const resetSettings = useCallback(() => {
@@ -407,35 +562,123 @@ export const GridProvider = ({ children }) => {
       scale: clipart.scale || 50,
       rotation: clipart.rotation || 0
     };
-    setSettings((prev) => ({
-      ...prev,
-      placedCliparts: [...(prev.placedCliparts || []), newPlaced]
-    }));
+    setSettings((prev) => {
+      const nextPlaced = [...(prev.placedCliparts || []), newPlaced];
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
     return newPlaced.instanceId;
   }, []);
 
   const updatePlacedClipart = useCallback((instanceId, updates) => {
-    setSettings((prev) => ({
-      ...prev,
-      placedCliparts: (prev.placedCliparts || []).map((cp) => {
+    setSettings((prev) => {
+      const nextPlaced = (prev.placedCliparts || []).map((cp) => {
         if (cp.instanceId === instanceId) {
           return { ...cp, ...updates };
         }
         return cp;
-      })
-    }));
+      });
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
   }, []);
 
   const removePlacedClipart = useCallback((instanceId) => {
-    setSettings((prev) => ({
-      ...prev,
-      placedCliparts: (prev.placedCliparts || []).filter((cp) => cp.instanceId !== instanceId)
-    }));
+    setSettings((prev) => {
+      const nextPlaced = (prev.placedCliparts || []).filter((cp) => cp.instanceId !== instanceId);
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
     setSelectedClipartId((curr) => (curr === instanceId ? null : curr));
   }, []);
 
+  const groupSelectedCliparts = useCallback(() => {
+    if (selectedClipartIds.length < 2) return null;
+    const groupId = 'group_' + Date.now();
+    setSettings((prev) => {
+      const nextPlaced = (prev.placedCliparts || []).map((cp) => {
+        if (selectedClipartIds.includes(cp.instanceId)) {
+          return { ...cp, groupId };
+        }
+        return cp;
+      });
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
+    return groupId;
+  }, [selectedClipartIds]);
+
+  const ungroupSelectedCliparts = useCallback(() => {
+    if (selectedClipartIds.length === 0) return;
+    setSettings((prev) => {
+      const targetGroupIds = new Set(
+        (prev.placedCliparts || [])
+          .filter((cp) => selectedClipartIds.includes(cp.instanceId) && cp.groupId)
+          .map((cp) => cp.groupId)
+      );
+
+      const nextPlaced = (prev.placedCliparts || []).map((cp) => {
+        if (selectedClipartIds.includes(cp.instanceId) || (cp.groupId && targetGroupIds.has(cp.groupId))) {
+          const { groupId, ...rest } = cp;
+          return rest;
+        }
+        return cp;
+      });
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
+  }, [selectedClipartIds]);
+
+  const updateMultiplePlacedCliparts = useCallback((updatesMap) => {
+    setSettings((prev) => {
+      const nextPlaced = (prev.placedCliparts || []).map((cp) => {
+        if (updatesMap[cp.instanceId]) {
+          return { ...cp, ...updatesMap[cp.instanceId] };
+        }
+        return cp;
+      });
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
+      }
+      return {
+        ...prev,
+        placedCliparts: nextPlaced
+      };
+    });
+  }, []);
+
   const clearAllCliparts = useCallback(() => {
-    setSettings((prev) => ({ ...prev, placedCliparts: [] }));
+    setSettings((prev) => {
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: [] } });
+      }
+      return { ...prev, placedCliparts: [] };
+    });
     setSelectedClipartId(null);
   }, []);
 
@@ -454,6 +697,222 @@ export const GridProvider = ({ children }) => {
 
   const removeCustomClipart = useCallback((id) => {
     setCustomCliparts((prev) => prev.filter((cp) => cp.id !== id));
+  }, []);
+
+  const captureCanvasData = useCallback(() => {
+    return {
+      placedCliparts: JSON.parse(JSON.stringify(settings.placedCliparts || [])),
+      drawingPaths: JSON.parse(JSON.stringify(settings.drawingPaths || [])),
+      maskPaths: JSON.parse(JSON.stringify(settings.maskPaths || [])),
+      maskRects: JSON.parse(JSON.stringify(settings.maskRects || [])),
+      backgroundLayers: JSON.parse(JSON.stringify(settings.backgroundLayers || [])),
+      backgroundImage: settings.backgroundImage || null,
+      backgroundImageData: settings.backgroundImageData || null,
+      backgroundImageScale: settings.backgroundImageScale ?? 100,
+      backgroundImageX: settings.backgroundImageX ?? 0,
+      backgroundImageY: settings.backgroundImageY ?? 0,
+      backgroundImageRotation: settings.backgroundImageRotation ?? 0,
+      useBackgroundImage: !!settings.useBackgroundImage,
+      measurements: JSON.parse(JSON.stringify(measurements || [])),
+      gridType: settings.gridType,
+      gridColor: settings.gridColor,
+      gridSize: settings.gridSize,
+      gridOpacity: settings.gridOpacity,
+    };
+  }, [settings, measurements]);
+
+  const saveNewScene = useCallback((name, description = '') => {
+    const data = captureCanvasData();
+    const sceneName = name?.trim() || `Scene ${scenes.length + 1}`;
+    const newScene = {
+      id: 'scene_' + Date.now(),
+      name: sceneName,
+      description: description || '',
+      active: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      data,
+    };
+
+    setScenes((prev) => [
+      ...prev.map((s) => ({ ...s, active: false })),
+      newScene,
+    ]);
+    setActiveSceneId(newScene.id);
+    toast.success(`Saved scene: "${sceneName}"`);
+    return newScene;
+  }, [captureCanvasData, scenes.length]);
+
+  const updateActiveScene = useCallback(() => {
+    if (!activeSceneId) {
+      toast.error('No active scene selected. Click "Save New Scene" first.');
+      return;
+    }
+    const data = captureCanvasData();
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.id === activeSceneId) {
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            data,
+          };
+        }
+        return s;
+      })
+    );
+    toast.success('Active scene updated with current canvas changes.');
+  }, [activeSceneId, captureCanvasData]);
+
+  const updateScene = useCallback((id, updates) => {
+    setScenes((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates, updatedAt: Date.now() } : s))
+    );
+  }, []);
+
+  const loadScene = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        active: s.id === sceneId,
+      }))
+    );
+    setActiveSceneId(sceneId);
+
+    const d = scene.data || {};
+    if (d.measurements) {
+      setMeasurements(d.measurements);
+    } else {
+      setMeasurements([]);
+    }
+
+    setSettings((prev) => {
+      const nextSettings = {
+        ...prev,
+        placedCliparts: d.placedCliparts || [],
+        drawingPaths: d.drawingPaths || [],
+        maskPaths: d.maskPaths || [],
+        maskRects: d.maskRects || [],
+        backgroundLayers: d.backgroundLayers || [],
+        backgroundImage: d.backgroundImage || null,
+        backgroundImageData: d.backgroundImageData || null,
+        backgroundImageScale: d.backgroundImageScale ?? prev.backgroundImageScale,
+        backgroundImageX: d.backgroundImageX ?? prev.backgroundImageX,
+        backgroundImageY: d.backgroundImageY ?? prev.backgroundImageY,
+        backgroundImageRotation: d.backgroundImageRotation ?? prev.backgroundImageRotation,
+        useBackgroundImage: d.useBackgroundImage ?? prev.useBackgroundImage,
+      };
+      if (d.gridType) nextSettings.gridType = d.gridType;
+      if (d.gridColor) nextSettings.gridColor = d.gridColor;
+      if (d.gridSize) nextSettings.gridSize = d.gridSize;
+
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: nextSettings });
+      }
+      return nextSettings;
+    });
+
+    toast.success(`Loaded scene: "${scene.name}"`);
+  }, [scenes]);
+
+  const toggleSceneActive = useCallback((sceneId) => {
+    const target = scenes.find((s) => s.id === sceneId);
+    if (!target) return;
+
+    if (target.active) {
+      // Toggle OFF
+      setScenes((prev) =>
+        prev.map((s) => (s.id === sceneId ? { ...s, active: false } : s))
+      );
+      if (activeSceneId === sceneId) {
+        setActiveSceneId(null);
+        setMeasurements([]);
+        setSettings((prev) => ({
+          ...prev,
+          placedCliparts: [],
+          drawingPaths: [],
+          maskPaths: [],
+          maskRects: [],
+          backgroundLayers: [],
+          backgroundImage: null,
+          backgroundImageData: null,
+          useBackgroundImage: false,
+        }));
+      }
+      toast.info(`Disabled scene: "${target.name}"`);
+    } else {
+      // Toggle ON
+      loadScene(sceneId);
+    }
+  }, [scenes, activeSceneId, loadScene]);
+
+  const deleteScene = useCallback((sceneId) => {
+    setScenes((prev) => prev.filter((s) => s.id !== sceneId));
+    if (activeSceneId === sceneId) {
+      setActiveSceneId(null);
+    }
+    toast.success('Scene deleted');
+  }, [activeSceneId]);
+
+  const duplicateScene = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+    const cloned = {
+      ...JSON.parse(JSON.stringify(scene)),
+      id: 'scene_' + Date.now(),
+      name: `${scene.name} (Copy)`,
+      active: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setScenes((prev) => [...prev, cloned]);
+    toast.success(`Duplicated scene: "${cloned.name}"`);
+  }, [scenes]);
+
+  const clearCanvasState = useCallback(() => {
+    setActiveSceneId(null);
+    setScenes((prev) => prev.map((s) => ({ ...s, active: false })));
+    setMeasurements([]);
+    setSettings((prev) => ({
+      ...prev,
+      placedCliparts: [],
+      drawingPaths: [],
+      maskPaths: [],
+      maskRects: [],
+      backgroundLayers: [],
+      backgroundImage: null,
+      backgroundImageData: null,
+      useBackgroundImage: false,
+    }));
+    toast.info('Canvas cleared');
+  }, []);
+
+  const exportScenes = useCallback(() => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(scenes, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `overgrid_scenes_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    toast.success("Exported scenes to JSON file");
+  }, [scenes]);
+
+  const importScenes = useCallback((importedData) => {
+    try {
+      const parsed = typeof importedData === 'string' ? JSON.parse(importedData) : importedData;
+      if (Array.isArray(parsed)) {
+        setScenes((prev) => [...prev, ...parsed]);
+        toast.success(`Imported ${parsed.length} scene(s)`);
+      } else {
+        toast.error('Invalid scene format');
+      }
+    } catch (e) {
+      toast.error('Failed to import scenes');
+    }
   }, []);
 
   const addMaskPath = useCallback((path) => {
@@ -527,6 +986,357 @@ export const GridProvider = ({ children }) => {
     };
   }, [settings.lockRatio, settings.screenWidth, settings.screenHeight, settings.gridSize, settings.unitWidth, settings.unitHeight]);
 
+  // HOTKEYS & MACROS SYSTEM
+  const [customHotkeys, setCustomHotkeys] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_hotkeys');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    const defaults = {};
+    DEFAULT_ACTIONS.forEach(action => {
+      defaults[action.id] = action.defaultHotkey;
+    });
+    return defaults;
+  });
+
+  const [macros, setMacros] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_macros');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return DEFAULT_MACROS;
+  });
+
+  const [recordingMacro, setRecordingMacro] = useState(false);
+  const [recordedSteps, setRecordedSteps] = useState([]);
+
+  const updateHotkey = useCallback((actionId, newHotkey) => {
+    setCustomHotkeys((prev) => {
+      const updated = { ...prev, [actionId]: newHotkey };
+      try {
+        localStorage.setItem('overgrid_hotkeys', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const resetHotkeysToDefault = useCallback(() => {
+    const defaults = {};
+    DEFAULT_ACTIONS.forEach(action => {
+      defaults[action.id] = action.defaultHotkey;
+    });
+    setCustomHotkeys(defaults);
+    try {
+      localStorage.setItem('overgrid_hotkeys', JSON.stringify(defaults));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const saveMacro = useCallback((macroObj) => {
+    setMacros((prev) => {
+      const index = prev.findIndex(m => m.id === macroObj.id);
+      let updated;
+      if (index >= 0) {
+        updated = [...prev];
+        updated[index] = macroObj;
+      } else {
+        updated = [...prev, macroObj];
+      }
+      try {
+        localStorage.setItem('overgrid_macros', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const deleteMacro = useCallback((macroId) => {
+    setMacros((prev) => {
+      const updated = prev.filter(m => m.id !== macroId);
+      try {
+        localStorage.setItem('overgrid_macros', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const startMacroRecording = useCallback(() => {
+    setRecordingMacro(true);
+    setRecordedSteps([]);
+    toast.info('🔴 Live Macro Recording Started! Actions will be captured.');
+  }, []);
+
+  const stopMacroRecording = useCallback(() => {
+    setRecordingMacro(false);
+    const steps = [...recordedSteps];
+    return steps;
+  }, [recordedSteps]);
+
+  // RADIAL CONTEXT MENU STATE
+  const [radialMenuOpen, setRadialMenuOpen] = useState(false);
+  const [radialMenuPos, setRadialMenuPos] = useState(null); // { x, y, mapX, mapY }
+  const [showClipartLibrary, setShowClipartLibrary] = useState(false);
+
+  const [radialMenuConfig, setRadialMenuConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_radial_config');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return {
+      enabled: true,
+      holdDelay: 150,
+      topAction: 'measure',
+      rightAction: 'beacon',
+      bottomAction: 'library',
+      leftAction: 'draw'
+    };
+  });
+
+  const openRadialMenu = useCallback((pos) => {
+    if (!radialMenuConfig.enabled) return;
+    setRadialMenuPos(pos);
+    setRadialMenuOpen(true);
+  }, [radialMenuConfig.enabled]);
+
+  const closeRadialMenu = useCallback(() => {
+    setRadialMenuOpen(false);
+    setRadialMenuPos(null);
+  }, []);
+
+  const updateRadialConfig = useCallback((updates) => {
+    setRadialMenuConfig(prev => {
+      const updated = { ...prev, ...updates };
+      try {
+        localStorage.setItem('overgrid_radial_config', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const resetRadialConfig = useCallback(() => {
+    const defaultConfig = {
+      enabled: true,
+      holdDelay: 150,
+      topAction: 'measure',
+      rightAction: 'beacon',
+      bottomAction: 'library',
+      leftAction: 'draw'
+    };
+    setRadialMenuConfig(defaultConfig);
+    try {
+      localStorage.setItem('overgrid_radial_config', JSON.stringify(defaultConfig));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // PINGS & MAP BEACONS STATE
+  const [pings, setPings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_pings');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  const addPing = useCallback((x, y, color = null, label = null) => {
+    const newPing = {
+      id: 'ping_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      x,
+      y,
+      color: color || settings.pingColor || '#FFD700',
+      name: label !== null && label !== undefined ? label : (settings.pingLabel || ''),
+      timestamp: Date.now()
+    };
+    setPings(prev => {
+      const updated = [...prev, newPing];
+      try {
+        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+    return newPing;
+  }, [settings.pingColor, settings.pingLabel]);
+
+  const removePing = useCallback((id) => {
+    setPings(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      try {
+        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const clearPings = useCallback(() => {
+    setPings([]);
+    try {
+      localStorage.setItem('overgrid_pings', JSON.stringify([]));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // Execute a single action by actionId
+  const executeAction = useCallback((actionId) => {
+    if (recordingMacro) {
+      setRecordedSteps(prev => [...prev, { actionId }]);
+    }
+
+    switch (actionId) {
+      case 'toggle_grid':
+        updateSettings({ gridEnabled: !settings.gridEnabled });
+        toast.info(`Grid ${!settings.gridEnabled ? 'Enabled' : 'Disabled'}`);
+        break;
+      case 'toggle_measure':
+        updateSettings({ measureMode: !settings.measureMode });
+        toast.info(`Measurement Tool ${!settings.measureMode ? 'Active' : 'Deactivated'}`);
+        break;
+      case 'clear_measurements':
+        clearMeasurements();
+        toast.success('Cleared all measurements from canvas');
+        break;
+      case 'toggle_subdivisions':
+        updateSettings({ showSubdivisions: !settings.showSubdivisions });
+        toast.info(`Subdivisions ${!settings.showSubdivisions ? 'Enabled' : 'Disabled'}`);
+        break;
+      case 'toggle_ping_mode':
+        updateSettings({ pingMode: !settings.pingMode });
+        toast.info(`Ping Beacon Mode ${!settings.pingMode ? 'Active (Click map to drop ping)' : 'Deactivated'}`);
+        break;
+      case 'clear_pings':
+        clearPings();
+        toast.success('Cleared all ping beacons');
+        break;
+      case 'toggle_drawing':
+        updateSettings({ drawingEnabled: !settings.drawingEnabled });
+        toast.info(`Drawing Mode ${!settings.drawingEnabled ? 'Enabled' : 'Disabled'}`);
+        break;
+      case 'toggle_eraser':
+        updateSettings({ eraserEnabled: !settings.eraserEnabled });
+        toast.info(`Eraser ${!settings.eraserEnabled ? 'Active' : 'Inactive'}`);
+        break;
+      case 'clear_drawings':
+        clearDrawings();
+        toast.success('Cleared all drawings');
+        break;
+      case 'clear_mask':
+        clearMask();
+        toast.success('Cleared Fog of War');
+        break;
+      case 'clear_cliparts':
+        clearAllCliparts();
+        toast.success('Cleared all tokens');
+        break;
+      case 'clear_background':
+        clearBackgroundImage();
+        toast.success('Cleared background image');
+        break;
+      case 'roll_d20':
+        const roll = Math.floor(Math.random() * 20) + 1;
+        toast.success(`🎲 Quick Roll 1d20: Result = ${roll}`, {
+          duration: 4000,
+        });
+        break;
+      case 'next_turn':
+        toast.info('⏩ Next turn in initiative order');
+        break;
+      case 'prev_turn':
+        toast.info('⏪ Previous turn in initiative order');
+        break;
+      case 'toggle_controls':
+        updateSettings({ showControls: !settings.showControls });
+        toast.info(`Controls Dashboard ${!settings.showControls ? 'Visible' : 'Hidden'}`);
+        break;
+      case 'reset_settings':
+        resetSettings();
+        toast.success('Reset grid settings to defaults');
+        break;
+      default:
+        console.warn('Unknown action:', actionId);
+        break;
+    }
+  }, [settings, updateSettings, clearMeasurements, clearDrawings, clearMask, clearAllCliparts, clearBackgroundImage, resetSettings, recordingMacro, clearPings]);
+
+  // Execute a macro sequentially
+  const executeMacro = useCallback((macroOrId) => {
+    const macroObj = typeof macroOrId === 'string'
+      ? macros.find(m => m.id === macroOrId)
+      : macroOrId;
+
+    if (!macroObj || !macroObj.steps || macroObj.steps.length === 0) {
+      toast.error('Cannot run macro: Macro is empty or invalid');
+      return;
+    }
+
+    toast.success(`⚡ Running Macro: "${macroObj.name}"`);
+    macroObj.steps.forEach((step, idx) => {
+      setTimeout(() => {
+        executeAction(step.actionId);
+      }, idx * 100);
+    });
+  }, [macros, executeAction]);
+
+  // Global Keydown Hotkey Interceptor
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+         activeElement.tagName === 'TEXTAREA' ||
+         activeElement.tagName === 'SELECT' ||
+         activeElement.isContentEditable)
+      ) {
+        return;
+      }
+
+      const combo = formatKeyboardEvent(e);
+      if (!combo) return;
+
+      // 1. Check if combo matches any Macro hotkey
+      const matchedMacro = macros.find(m => m.hotkey && m.hotkey.toUpperCase() === combo.toUpperCase());
+      if (matchedMacro) {
+        e.preventDefault();
+        executeMacro(matchedMacro);
+        return;
+      }
+
+      // 2. Check if combo matches any Action hotkey
+      for (const actionId of Object.keys(customHotkeys)) {
+        const boundHotkey = customHotkeys[actionId];
+        if (boundHotkey && boundHotkey.toUpperCase() === combo.toUpperCase()) {
+          e.preventDefault();
+          executeAction(actionId);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [customHotkeys, macros, executeAction, executeMacro]);
+
   const { x: pixelsPerUnitX, y: pixelsPerUnitY } = getPixelsPerUnit();
 
   const pixelToUnit = useCallback((px, py) => {
@@ -578,11 +1388,29 @@ export const GridProvider = ({ children }) => {
     clearAllCliparts,
     selectedClipartId,
     setSelectedClipartId,
+    selectedClipartIds,
+    setSelectedClipartIds,
+    groupSelectedCliparts,
+    ungroupSelectedCliparts,
+    updateMultiplePlacedCliparts,
     clipartFavorites,
     toggleClipartFavorite,
     customCliparts,
     addCustomClipart,
     removeCustomClipart,
+    scenes,
+    activeSceneId,
+    captureCanvasData,
+    saveNewScene,
+    updateActiveScene,
+    updateScene,
+    loadScene,
+    toggleSceneActive,
+    deleteScene,
+    duplicateScene,
+    clearCanvasState,
+    exportScenes,
+    importScenes,
     addBackgroundLayer,
     updateBackgroundLayer,
     removeBackgroundLayer,
@@ -598,7 +1426,32 @@ export const GridProvider = ({ children }) => {
     savedMasks,
     saveMask,
     loadMask,
-    deleteSavedMask
+    deleteSavedMask,
+    customHotkeys,
+    updateHotkey,
+    resetHotkeysToDefault,
+    macros,
+    saveMacro,
+    deleteMacro,
+    executeAction,
+    executeMacro,
+    recordingMacro,
+    startMacroRecording,
+    stopMacroRecording,
+    recordedSteps,
+    pings,
+    addPing,
+    removePing,
+    clearPings,
+    radialMenuOpen,
+    radialMenuPos,
+    openRadialMenu,
+    closeRadialMenu,
+    radialMenuConfig,
+    updateRadialConfig,
+    resetRadialConfig,
+    showClipartLibrary,
+    setShowClipartLibrary
   };
 
   return (

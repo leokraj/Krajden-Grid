@@ -117,7 +117,7 @@ const JoinContent = () => {
   );
 };
 
-const JoinPage = () => {
+export const JoinPage = () => {
   return (
     <GridProvider>
       <SessionProvider>

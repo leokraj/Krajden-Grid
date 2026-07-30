@@ -1,7 +1,72 @@
 import { useState, useCallback, useRef, useEffect, useContext } from 'react';
 import SessionContext from '../context/SessionContext';
+import { DEFAULT_VAULT_CLIPARTS } from '../data/vaultPresets';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { toast } from 'sonner';
+
+export const getFallbackTokenSvg = (name = 'Token') => {
+  const initial = (name || 'Token').trim().charAt(0).toUpperCase() || 'T';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="30" fill="#1e293b" stroke="#38bdf8" stroke-width="3"/>
+    <circle cx="32" cy="32" r="25" fill="none" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="4,2"/>
+    <text x="32" y="39" font-family="system-ui, sans-serif" font-size="22" font-weight="bold" fill="#ffffff" text-anchor="middle">${initial}</text>
+  </svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+};
+
+export const resolveAssetUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  if (typeof window !== 'undefined' && (window.location.protocol === 'file:' || window.location.origin === 'null')) {
+    const backendHost = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3000';
+    return `${backendHost}${url.startsWith('/') ? url : '/' + url}`;
+  }
+  return url.startsWith('/') ? url : `/${url}`;
+};
+
+export const isGifAsset = (item) => {
+  if (!item) return false;
+  const url = String(item.imageUrl || item.url || item.imageData || item.image_data || item.src || '').toLowerCase();
+  const cat = String(item.category || '').toLowerCase();
+  const name = String(item.name || '').toLowerCase();
+  const id = String(item.id || '').toLowerCase();
+  const tags = Array.isArray(item.tags) ? item.tags.map(t => String(t).toLowerCase()) : [];
+
+  return (
+    cat === 'animated_fx' ||
+    cat === 'gif' ||
+    cat === 'gifs' ||
+    item.type === 'gif' ||
+    id.startsWith('gif_') ||
+    tags.includes('animated_fx') ||
+    tags.includes('gif') ||
+    tags.includes('gifs') ||
+    url.includes('.gif') ||
+    url.startsWith('data:image/gif') ||
+    name.includes('gif') ||
+    name.includes('animated')
+  );
+};
+
+export const isTokenAsset = (item) => {
+  if (!item) return false;
+  if (isGifAsset(item)) return false;
+  const cat = String(item.category || '').toLowerCase();
+  const id = String(item.id || '').toLowerCase();
+  return (
+    cat === 'tokens' ||
+    cat === 'dnd_heroes' ||
+    cat === 'dnd_monsters' ||
+    cat === 'hero_tokens' ||
+    cat === 'monster_tokens' ||
+    id.startsWith('token_') ||
+    id.startsWith('preset_hero_') ||
+    id.startsWith('preset_monster_')
+  );
+};
 import { 
   X, 
   Star,
@@ -12,109 +77,278 @@ import {
   Trash2,
   GripVertical,
   ExternalLink,
-  Minimize2
+  Minimize2,
+  Layers
 } from 'lucide-react';
 
-// D&D Hero Token Images (realistic circular/standard RPG tokens)
+// Helper to generate crisp, dark fantasy circular RPG tokens (SVG data URLs)
+const makeTokenSvg = (ringColor, bg1, bg2, label, iconSvg) => {
+  const labelClean = label.replace(/[^a-z0-9]/gi, '_');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+    <defs>
+      <radialGradient id="bg_${labelClean}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${bg1}" />
+        <stop offset="100%" stop-color="${bg2}" />
+      </radialGradient>
+      <linearGradient id="ring_${labelClean}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${ringColor}" />
+        <stop offset="50%" stop-color="#ffffff" stop-opacity="0.8" />
+        <stop offset="100%" stop-color="${ringColor}" />
+      </linearGradient>
+      <filter id="shadow_${labelClean}">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.8"/>
+      </filter>
+    </defs>
+    <!-- Metallic Beveled Ring -->
+    <circle cx="60" cy="60" r="58" fill="url(#ring_${labelClean})" stroke="#000" stroke-width="2"/>
+    <circle cx="60" cy="60" r="51" fill="#090a0c" stroke="${ringColor}" stroke-dasharray="3,2" stroke-width="1.5"/>
+    <!-- Inner Background Field -->
+    <circle cx="60" cy="60" r="48" fill="url(#bg_${labelClean})"/>
+    <circle cx="60" cy="60" r="46" fill="none" stroke="${ringColor}" stroke-opacity="0.3" stroke-width="1"/>
+    <!-- Icon/Symbol -->
+    <g transform="translate(60, 48)" filter="url(#shadow_${labelClean})">
+      ${iconSvg}
+    </g>
+    <!-- Class/Monster Badge Banner -->
+    <rect x="20" y="88" width="80" height="18" rx="4" fill="#08090b" stroke="${ringColor}" stroke-width="1.2"/>
+    <text x="60" y="100.5" fill="${ringColor}" font-family="Cinzel, Georgia, serif, sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">${label.toUpperCase()}</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+// D&D Hero Token Images (realistic dark fantasy RPG tokens)
 const DND_HERO_TOKENS = [
-  { id: 'token_fighter', name: 'Fighter (Alistair)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_wizard', name: 'Wizard (Gandalf)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1514894780887-121968d00567?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_rogue', name: 'Rogue (Sylas)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1535663116191-497793d58da3?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_cleric', name: 'Cleric (Vesper)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_ranger', name: 'Ranger (Lyra)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_paladin', name: 'Paladin (Gideon)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1559827291-72ee739d0d9a?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_druid', name: 'Druid (Elowen)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_bard', name: 'Bard (Lumina)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_barbarian', name: 'Barbarian (Krog)', category: 'dnd_heroes', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1558224494-ef3b3b7a1704?w=128&auto=format&fit=crop&q=80' },
+  { 
+    id: 'token_fighter', 
+    name: 'Fighter (Alistair)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#d4af37', '#3a1c1c', '#150808', 'Fighter', `<g fill="none" stroke="#d4af37" stroke-width="2.5" stroke-linecap="round"><path d="M-16,-16 L16,16 M-12,-16 L-16,-12 M12,16 L16,12 M-16,16 L16,-16 M-16,12 L-12,16 M16,-12 L12,-16"/></g>`)
+  },
+  { 
+    id: 'token_wizard', 
+    name: 'Wizard (Gandalf)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#38bdf8', '#1e1b4b', '#09081a', 'Wizard', `<g fill="none" stroke="#38bdf8" stroke-width="2.2"><circle cx="0" cy="-12" r="7" fill="#38bdf8" fill-opacity="0.3"/><path d="M0,2 L0,20 M-6,-12 L6,-12 M0,-19 L0,-5"/></g>`)
+  },
+  { 
+    id: 'token_rogue', 
+    name: 'Rogue (Sylas)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#a3e635', '#142a18', '#071009', 'Rogue', `<g fill="none" stroke="#a3e635" stroke-width="2.2"><path d="M-10,-16 L0,-4 L-10,16 M10,-16 L0,-4 L10,16"/></g>`)
+  },
+  { 
+    id: 'token_cleric', 
+    name: 'Cleric (Vesper)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#facc15', '#332308', '#110c03', 'Cleric', `<g fill="none" stroke="#facc15" stroke-width="2.2"><path d="M-12,-14 Q0,-18 12,-14 Q12,2 0,16 Q-12,2 -12,-14 Z"/><circle cx="0" cy="-1" r="4" fill="#facc15"/></g>`)
+  },
+  { 
+    id: 'token_ranger', 
+    name: 'Ranger (Lyra)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#4ade80', '#112e1a', '#051109', 'Ranger', `<g fill="none" stroke="#4ade80" stroke-width="2.2"><path d="M-12,-16 Q0,0 -12,16 M-12,-16 L12,0 L-12,16 M-16,0 L12,0"/></g>`)
+  },
+  { 
+    id: 'token_paladin', 
+    name: 'Paladin (Gideon)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#e2e8f0', '#1e293b', '#080c14', 'Paladin', `<g fill="none" stroke="#e2e8f0" stroke-width="2.2"><path d="M0,-16 L0,16 M-8,-8 L8,-8 M-6,10 L0,18 L6,10"/></g>`)
+  },
+  { 
+    id: 'token_druid', 
+    name: 'Druid (Elowen)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#86efac', '#143821', '#06140b', 'Druid', `<g fill="none" stroke="#86efac" stroke-width="2.2"><path d="M0,16 C-14,4 -12,-14 0,-18 C12,-14 14,4 0,16 Z M0,-18 L0,16"/></g>`)
+  },
+  { 
+    id: 'token_bard', 
+    name: 'Bard (Lumina)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#f472b6', '#3b0764', '#120221', 'Bard', `<g fill="none" stroke="#f472b6" stroke-width="2.2"><path d="M-9,-14 Q0,-6 9,-14 Q7,10 -9,10 Z M-3,-8 L-3,7 M0,-6 L0,8 M3,-8 L3,7"/></g>`)
+  },
+  { 
+    id: 'token_barbarian', 
+    name: 'Barbarian (Krog)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#f87171', '#450a0a', '#170303', 'Barbarian', `<g fill="none" stroke="#f87171" stroke-width="2.2"><path d="M-14,-14 Q-2,-6 -14,2 L-14,-14 Z M14,-14 Q2,-6 14,2 L14,-14 Z M0,-18 L0,18"/></g>`)
+  },
+  { 
+    id: 'token_sorcerer', 
+    name: 'Sorcerer (Ignis)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#fb923c', '#431407', '#170602', 'Sorcerer', `<g fill="none" stroke="#fb923c" stroke-width="2.2"><path d="M0,14 Q-10,2 -3,-8 Q-10,-14 0,-20 Q10,-14 3,-8 Q10,2 0,14 Z" fill="#fb923c" fill-opacity="0.3"/></g>`)
+  },
+  { 
+    id: 'token_warlock', 
+    name: 'Warlock (Malakor)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#c084fc', '#2e1065', '#0f0424', 'Warlock', `<g fill="none" stroke="#c084fc" stroke-width="2.2"><path d="M-14,0 Q0,-12 14,0 Q0,12 -14,0 Z"/><circle cx="0" cy="0" r="4" fill="#c084fc"/></g>`)
+  },
+  { 
+    id: 'token_monk', 
+    name: 'Monk (Shen)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#fbbf24', '#3b2f05', '#120e01', 'Monk', `<g fill="none" stroke="#fbbf24" stroke-width="2.2"><circle cx="0" cy="0" r="13"/><path d="M0,-13 A6.5,6.5 0 0,1 0,0 A6.5,6.5 0 0,0 0,13"/></g>`)
+  },
+  { 
+    id: 'token_artificer', 
+    name: 'Artificer (Tink)', 
+    category: 'dnd_heroes', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#2dd4bf', '#042f2e', '#011212', 'Artificer', `<g fill="none" stroke="#2dd4bf" stroke-width="2.2"><path d="M-5,-12 L5,-12 L5,-5 L10,7 Q12,14 0,14 Q-12,14 -10,7 L-5,-5 Z"/></g>`)
+  },
 ];
 
-// D&D Monster Token Images (realistic circular/standard RPG tokens)
-// D&D Monster Token Images (realistic circular/standard RPG tokens)
+// D&D Monster Token Images (realistic dark fantasy RPG tokens)
 const DND_MONSTER_TOKENS = [
-  { id: 'token_goblin', name: 'Goblin Scout', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_orc', name: 'Orc Berserker', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1605721911519-3dfeb3be25e7?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_dragon', name: 'Red Dragon', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_skeleton', name: 'Skeleton Warrior', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_beholder', name: 'Beholder', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_lich', name: 'Lich Lord', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_vampire', name: 'Vampire Noble', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_golem', name: 'Stone Golem', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=128&auto=format&fit=crop&q=80' },
-  { id: 'token_mimic', name: 'Mimic Chest', category: 'dnd_monsters', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1519074002996-a69e7ac46a42?w=128&auto=format&fit=crop&q=80' },
+  { 
+    id: 'token_dragon', 
+    name: 'Red Dragon (Ancient)', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#ef4444', '#450a0a', '#110101', 'Red Dragon', `<g fill="none" stroke="#ef4444" stroke-width="2.2"><path d="M-12,12 Q-14,-10 0,-18 Q14,-10 12,12 Q0,16 -12,12 Z M-8,-8 L-14,-16 M8,-8 L14,-16"/><circle cx="0" cy="0" r="3" fill="#ef4444"/></g>`)
+  },
+  { 
+    id: 'token_beholder', 
+    name: 'Beholder', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#a855f7', '#3b0764', '#10011f', 'Beholder', `<g fill="none" stroke="#a855f7" stroke-width="2.2"><circle cx="0" cy="2" r="10"/><circle cx="0" cy="2" r="4" fill="#a855f7"/><path d="M-10,-4 L-14,-14 M-4,-8 L-6,-16 M4,-8 L6,-16 M10,-4 L14,-14"/></g>`)
+  },
+  { 
+    id: 'token_illithid', 
+    name: 'Mind Flayer (Illithid)', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#818cf8', '#1e1b4b', '#070617', 'Illithid', `<g fill="none" stroke="#818cf8" stroke-width="2.2"><path d="M-10,-12 Q0,-18 10,-12 Q8,0 0,14 Q-8,0 -10,-12 Z M-6,0 Q-8,14 -4,18 M-2,2 Q-2,14 0,18 M2,2 Q2,14 0,18 M6,0 Q8,14 4,18"/></g>`)
+  },
+  { 
+    id: 'token_lich', 
+    name: 'Lich Lord', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#10b981', '#064e3b', '#011710', 'Lich Lord', `<g fill="none" stroke="#10b981" stroke-width="2.2"><path d="M-8,-6 Q0,-14 8,-6 Q10,4 0,12 Q-10,4 -8,-6 Z M-10,-14 L-4,-6 L0,-16 L4,-6 L10,-14"/><circle cx="-3" cy="-2" r="2" fill="#10b981"/><circle cx="3" cy="-2" r="2" fill="#10b981"/></g>`)
+  },
+  { 
+    id: 'token_goblin', 
+    name: 'Goblin Scout', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#84cc16', '#1a2e05', '#080e01', 'Goblin', `<g fill="none" stroke="#84cc16" stroke-width="2.2"><path d="M-12,-4 L-18,-14 L-6,-6 L6,-6 L18,-14 L12,-4 L0,12 Z"/><circle cx="-4" cy="-2" r="2" fill="#84cc16"/><circle cx="4" cy="-2" r="2" fill="#84cc16"/></g>`)
+  },
+  { 
+    id: 'token_orc', 
+    name: 'Orc Berserker', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#65a30d', '#142804', '#060c01', 'Orc', `<g fill="none" stroke="#65a30d" stroke-width="2.2"><path d="M-10,-10 L10,-10 L12,4 L0,14 L-12,4 Z M-6,8 L-6,2 M6,8 L6,2"/></g>`)
+  },
+  { 
+    id: 'token_skeleton', 
+    name: 'Skeleton Warrior', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#cbd5e1', '#0f172a', '#030712', 'Skeleton', `<g fill="none" stroke="#cbd5e1" stroke-width="2.2"><path d="M-8,-10 Q0,-16 8,-10 Q10,2 0,10 Q-10,2 -8,-10 Z M-6,10 L6,10 M-4,14 L4,14"/><circle cx="-3" cy="-4" r="2" fill="#cbd5e1"/><circle cx="3" cy="-4" r="2" fill="#cbd5e1"/></g>`)
+  },
+  { 
+    id: 'token_vampire', 
+    name: 'Vampire Noble', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#f43f5e', '#4c0519', '#140106', 'Vampire', `<g fill="none" stroke="#f43f5e" stroke-width="2.2"><path d="M-16,-10 Q0,-18 16,-10 Q8,4 0,14 Q-8,4 -16,-10 Z M-4,4 L-2,10 M4,4 L2,10"/></g>`)
+  },
+  { 
+    id: 'token_golem', 
+    name: 'Stone Golem', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#94a3b8', '#1e293b', '#070b12', 'Stone Golem', `<g fill="none" stroke="#94a3b8" stroke-width="2.5"><rect x="-10" y="-12" width="20" height="24" rx="3"/><line x1="-6" y1="-4" x2="6" y2="-4"/><line x1="-3" y1="4" x2="3" y2="4"/></g>`)
+  },
+  { 
+    id: 'token_mimic', 
+    name: 'Mimic Chest', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#d97706', '#451a03', '#140701', 'Mimic', `<g fill="none" stroke="#d97706" stroke-width="2.2"><rect x="-12" y="-8" width="24" height="18" rx="2"/><path d="M-12,-8 Q0,-14 12,-8 M-8,2 Q0,16 8,2"/></g>`)
+  },
+  { 
+    id: 'token_owlbear', 
+    name: 'Owlbear', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#b45309', '#3f1a02', '#120700', 'Owlbear', `<g fill="none" stroke="#b45309" stroke-width="2.2"><circle cx="0" cy="-2" r="11"/><path d="M-6,-4 L-2,-1 L-6,2 M6,-4 L2,-1 L6,2 M-2,2 L0,8 L2,2"/></g>`)
+  },
+  { 
+    id: 'token_kobold', 
+    name: 'Kobold Trapper', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#f97316', '#431407', '#120401', 'Kobold', `<g fill="none" stroke="#f97316" stroke-width="2.2"><path d="M-10,10 L-14,-10 L0,-16 L14,-10 L10,10 Z"/></g>`)
+  },
+  { 
+    id: 'token_demon', 
+    name: 'Demon Lord', 
+    category: 'dnd_monsters', 
+    type: 'image', 
+    imageUrl: makeTokenSvg('#dc2626', '#450a0a', '#140101', 'Demon Lord', `<g fill="none" stroke="#dc2626" stroke-width="2.2"><path d="M-8,-6 Q0,-12 8,-6 Q10,6 0,14 Q-10,6 -8,-6 Z M-8,-6 L-16,-16 M8,-6 L16,-16"/></g>`)
+  },
 ];
 
-// D&D Animated Spell & Effect Gifs (high-quality transparent background Giphy assets)
-const DND_ANIMATED_EFFECTS = [
-  { id: 'gif_fireball', name: 'Animated Fireball', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3g0Y2xrdjVpbmk4eHN1N3U5OHg4OHV6czhpMHVyN3B5ZnJhODRtNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o72F8t9TDi2xVnxOE/giphy.gif' },
-  { id: 'gif_lightning', name: 'Animated Storm Spark', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNnd3bXFhcTVudThoYTd3eGlnaGZlajA5bnFpZzJpNGd5bHBidmJ3YyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l2SpS8p3T4D078Mv6/giphy.gif' },
-  { id: 'gif_portal', name: 'Animated Void Portal', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNmtpMDJqcmFvY243M3p2dGJ5cG1yMGR4cHVobmdkcW5scmsxdXhkeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o7qE1YN7aBOFPRw8E/giphy.gif' },
-  { id: 'gif_poison', name: 'Animated Poison Cloud', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmVhbDZnNzhiaXU1cjdxbmd6Yzd6ZXo4Y2V6eW9kdnBlN2dybnh2eCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l0HlRt7vQn0gD6tqw/giphy.gif' },
-  { id: 'gif_sparkles', name: 'Animated Holy Sparkles', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNWoxNHhpaTRiOTMyYm5xZ2I0eWVxZHpyOXQ0bXoxbHozOXByOWZwayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o7qE4op16t6roNHit/giphy.gif' },
-  { id: 'gif_water', name: 'Animated Water Splash', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNno1OHp0Z25pNm9idWhtOHdrbHZtZ2ZpZnYyOW0xdzQ5dm9ocHh0NiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o6ozg0N0Cpx9741Q4/giphy.gif' },
-  { id: 'gif_blood', name: 'Animated Blood Splat', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOGg5MG03amg3YWpvd2JkZjY3MWt6ZXUzZHl6ZHRhdnhmNGN5Zm4waiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l0HlU7eS8Hq98E8x2/giphy.gif' },
-  { id: 'gif_explosion', name: 'Animated Explosion', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWl2aDhpZXB2MGJ6dnd5dzBzYzhwNnE0a3B3Yjd6NTVyZ3h0cG56cyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o7qE1YN7aBOFPRw8E/giphy.gif' },
-  { id: 'gif_d20', name: 'Animated d20 Dice Roll', category: 'animated_fx', type: 'image', imageUrl: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExdW5td24weXBnZG0zdW0xeWVmaHJxeGFoYWZ0OTRtbXg4MWZzNjBldCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l1Ktf6gqM385750C4/giphy.gif' }
+// D&D Dungeon Props & Objects
+const DND_DUNGEON_PROPS = [
+  { id: 'dnd_chest', name: 'Treasure Chest', category: 'dnd_dungeon', emoji: '📦', type: 'emoji' },
+  { id: 'dnd_door', name: 'Dungeon Iron Door', category: 'dnd_dungeon', emoji: '🚪', type: 'emoji' },
+  { id: 'dnd_altar', name: 'Arcane Altar', category: 'dnd_dungeon', emoji: '🏛️', type: 'emoji' },
+  { id: 'dnd_campfire', name: 'Rest Campfire', category: 'dnd_dungeon', emoji: '🔥', type: 'emoji' },
+  { id: 'dnd_tome', name: 'Spellbook Tome', category: 'dnd_dungeon', emoji: '📖', type: 'emoji' },
+  { id: 'dnd_trap', name: 'Trap Trigger', category: 'dnd_dungeon', emoji: '⚡', type: 'emoji' },
+  { id: 'dnd_barrel', name: 'Dungeon Barrel', category: 'dnd_dungeon', emoji: '🛢️', type: 'emoji' },
+  { id: 'dnd_tomb', name: 'Sarcophagus', category: 'dnd_dungeon', emoji: '⚰️', type: 'emoji' },
+  { id: 'dnd_torch', name: 'Wall Torch', category: 'dnd_dungeon', emoji: '🕯️', type: 'emoji' },
 ];
 
-// Default clipart items - Gaming/D&D themed
-const DEFAULT_CLIPARTS = [
-  ...DND_HERO_TOKENS,
-  ...DND_MONSTER_TOKENS,
-  ...DND_ANIMATED_EFFECTS,
-  
-  // Fire & Effects
-  { id: 'fire', name: 'Fire', category: 'effects', emoji: '🔥', type: 'emoji' },
-  { id: 'smoke', name: 'Smoke Cloud', category: 'effects', emoji: '💨', type: 'emoji' },
-  { id: 'explosion', name: 'Explosion', category: 'effects', emoji: '💥', type: 'emoji' },
-  { id: 'lightning', name: 'Lightning Strike', category: 'effects', emoji: '⚡', type: 'emoji' },
-  { id: 'sparkles', name: 'Magic Sparkles', category: 'effects', emoji: '✨', type: 'emoji' },
-  { id: 'ice', name: 'Ice/Frost', category: 'effects', emoji: '❄️', type: 'emoji' },
-  { id: 'poison', name: 'Poison Cloud', category: 'effects', emoji: '☠️', type: 'emoji' },
-  { id: 'water', name: 'Water Splash', category: 'effects', emoji: '💧', type: 'emoji' },
-  { id: 'portal', name: 'Portal', category: 'effects', emoji: '🌀', type: 'emoji' },
-  { id: 'shield_fx', name: 'Force Shield', category: 'effects', emoji: '🛡️', type: 'emoji' },
-  
-  // Markers & Targets
-  { id: 'target', name: 'Target', category: 'markers', emoji: '🎯', type: 'emoji' },
-  { id: 'skull', name: 'Skull Marker', category: 'markers', emoji: '💀', type: 'emoji' },
-  { id: 'flag', name: 'Flag', category: 'markers', emoji: '🚩', type: 'emoji' },
-  { id: 'pin', name: 'Pin', category: 'markers', emoji: '📍', type: 'emoji' },
-  { id: 'star_marker', name: 'Star', category: 'markers', emoji: '⭐', type: 'emoji' },
-  { id: 'warning', name: 'Warning', category: 'markers', emoji: '⚠️', type: 'emoji' },
-  { id: 'eye', name: 'Eye', category: 'markers', emoji: '👁️', type: 'emoji' },
-  { id: 'crosshair', name: 'Crosshair', category: 'markers', emoji: '➕', type: 'emoji' },
-  
-  // Terrain & Objects
-  { id: 'tree', name: 'Tree', category: 'terrain', emoji: '🌲', type: 'emoji' },
-  { id: 'rock', name: 'Rock', category: 'terrain', emoji: '🪨', type: 'emoji' },
-  { id: 'castle', name: 'Castle', category: 'terrain', emoji: '🏰', type: 'emoji' },
-  { id: 'house', name: 'House', category: 'terrain', emoji: '🏠', type: 'emoji' },
-  { id: 'tent', name: 'Tent', category: 'terrain', emoji: '⛺', type: 'emoji' },
-  { id: 'treasure', name: 'Treasure', category: 'terrain', emoji: '💎', type: 'emoji' },
-  { id: 'chest', name: 'Chest', category: 'terrain', emoji: '📦', type: 'emoji' },
-  { id: 'door', name: 'Door', category: 'terrain', emoji: '🚪', type: 'emoji' },
-  
-  // Status Effects
-  { id: 'heart', name: 'Health', category: 'status', emoji: '❤️', type: 'emoji' },
-  { id: 'broken_heart', name: 'Damage', category: 'status', emoji: '💔', type: 'emoji' },
-  { id: 'sleep', name: 'Sleep', category: 'status', emoji: '😴', type: 'emoji' },
-  { id: 'dizzy', name: 'Stunned', category: 'status', emoji: '😵', type: 'emoji' },
-  { id: 'rage', name: 'Rage', category: 'status', emoji: '😡', type: 'emoji' },
-  { id: 'shield_status', name: 'Protected', category: 'status', emoji: '🔰', type: 'emoji' },
-  { id: 'hourglass', name: 'Slowed', category: 'status', emoji: '⏳', type: 'emoji' },
-  { id: 'bolt', name: 'Hasted', category: 'status', emoji: '🏃', type: 'emoji' },
+// D&D 5e Conditions & Status Badges
+const DND_CONDITIONS = [
+  { id: 'cond_concentration', name: 'Concentration', category: 'dnd_conditions', emoji: '✨', type: 'emoji' },
+  { id: 'cond_poisoned', name: 'Poisoned', category: 'dnd_conditions', emoji: '☠️', type: 'emoji' },
+  { id: 'cond_stunned', name: 'Stunned', category: 'dnd_conditions', emoji: '😵', type: 'emoji' },
+  { id: 'cond_charmed', name: 'Charmed', category: 'dnd_conditions', emoji: '💖', type: 'emoji' },
+  { id: 'cond_paralyzed', name: 'Paralyzed', category: 'dnd_conditions', emoji: '⚡', type: 'emoji' },
+  { id: 'cond_blinded', name: 'Blinded', category: 'dnd_conditions', emoji: '👁️‍🗨️', type: 'emoji' },
+  { id: 'cond_restrained', name: 'Restrained', category: 'dnd_conditions', emoji: '⛓️', type: 'emoji' },
+  { id: 'cond_frightened', name: 'Frightened', category: 'dnd_conditions', emoji: '😱', type: 'emoji' },
+  { id: 'cond_bleeding', name: 'Bleeding', category: 'dnd_conditions', emoji: '🩸', type: 'emoji' },
+  { id: 'cond_unconscious', name: 'Unconscious', category: 'dnd_conditions', emoji: '💤', type: 'emoji' },
 ];
+
+// Default clipart items - populated strictly with Vault assets
+const DEFAULT_CLIPARTS = DEFAULT_VAULT_CLIPARTS.map(item => ({
+  ...item,
+  isVault: true
+}));
 
 const CATEGORIES = [
-  { id: 'all', name: 'All' },
+  { id: 'all', name: 'All D&D Assets' },
+  { id: 'vault', name: 'Vault Assets ⭐' },
   { id: 'favorites', name: 'Favorites' },
   { id: 'animated_fx', name: 'Animated FX' },
-  { id: 'dnd_heroes', name: 'D&D Heroes' },
-  { id: 'dnd_monsters', name: 'D&D Monsters' },
+  { id: 'dnd_heroes', name: 'Hero Tokens' },
+  { id: 'dnd_monsters', name: 'Monster Tokens' },
+  { id: 'dnd_dungeon', name: 'Dungeon Props' },
+  { id: 'dnd_conditions', name: '5e Conditions' },
   { id: 'custom', name: 'My Uploads' },
-  { id: 'effects', name: 'Effects' },
-  { id: 'markers', name: 'Markers' },
-  { id: 'terrain', name: 'Terrain' },
-  { id: 'status', name: 'Status' },
 ];
 
 export const ClipartLibrary = ({ 
@@ -165,56 +399,272 @@ export const ClipartLibrary = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  // Combine default and custom cliparts
-  const allCliparts = [...DEFAULT_CLIPARTS, ...customCliparts];
+  // Global admin added cliparts & GIFs
+  const [globalAdminCliparts, setGlobalAdminCliparts] = useState([]);
+
+  useEffect(() => {
+    const fetchGlobalCliparts = async () => {
+      try {
+        const res = await fetch('/api/library/cliparts');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.cliparts)) {
+            setGlobalAdminCliparts(data.cliparts);
+          }
+        }
+      } catch (e) {
+        // silent catch
+      }
+    };
+
+    fetchGlobalCliparts();
+
+    const handleUpdate = () => fetchGlobalCliparts();
+    window.addEventListener('krajden_library_updated', handleUpdate);
+    
+    // Poll every 5 seconds so any tokens added in admin page appear immediately
+    const interval = setInterval(fetchGlobalCliparts, 5000);
+
+    return () => {
+      window.removeEventListener('krajden_library_updated', handleUpdate);
+      clearInterval(interval);
+    };
+  }, [isOpen]);
+
+  // Standardize & normalize clipart item properties (imageUrl, url, imageData, image_data, src)
+  const normalizeClipartItem = useCallback((item, isDefaultVault = false) => {
+    if (!item) return null;
+    const url = item.imageUrl || item.url || item.imageData || item.image_data || item.src || '';
+    const isVault = item.isVault !== undefined ? Boolean(item.isVault) : (isDefaultVault || !item.isCustom);
+    const category = item.category || 'animated_fx';
+    return {
+      ...item,
+      id: String(item.id || `clipart_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`),
+      name: String(item.name || 'Untitled Token').trim(),
+      category: String(category).trim(),
+      type: item.type || (item.emoji ? 'emoji' : 'image'),
+      imageUrl: url,
+      imageData: item.imageData || (url.startsWith('data:') ? url : undefined),
+      isVault,
+      isCustom: Boolean(item.isCustom),
+      tags: Array.isArray(item.tags) ? item.tags : [category],
+    };
+  }, []);
+
+  // Tag global admin cliparts as Vault assets
+  const taggedGlobalAdmin = globalAdminCliparts.map(g => normalizeClipartItem({ ...g, isVault: true }, true));
+  const normalizedCustom = customCliparts.map(c => normalizeClipartItem({ ...c, isCustom: true }));
+  const normalizedDefault = DEFAULT_CLIPARTS.map(d => normalizeClipartItem(d, true));
+
+  // Combine admin vault, user custom, and default cliparts with deduplication
+  const clipartMap = new Map();
+  [...taggedGlobalAdmin, ...normalizedCustom, ...normalizedDefault].forEach(item => {
+    if (item && item.id && !clipartMap.has(item.id)) {
+      clipartMap.set(item.id, item);
+    }
+  });
+  const allCliparts = Array.from(clipartMap.values());
+
+  // Delete an item directly from the Global Vault
+  const handleDeleteVaultItem = async (itemId) => {
+    try {
+      await fetch(`/api/admin/library/clipart/${itemId}`, { method: 'DELETE' });
+      setGlobalAdminCliparts(prev => prev.filter(i => i.id !== itemId));
+      toast.success('Removed asset from vault');
+    } catch (e) {
+      toast.error('Failed to delete vault asset');
+    }
+  };
 
   // Filter cliparts based on search and category
   const filteredCliparts = allCliparts.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = 
-      selectedCategory === 'all' ||
-      (selectedCategory === 'favorites' && favorites.includes(item.id)) ||
-      (selectedCategory === 'custom' && item.isCustom) ||
-      item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const nameStr = (item.name || '').toLowerCase();
+    const searchStr = searchQuery.trim().toLowerCase();
+    const matchesSearch = searchStr === '' || nameStr.includes(searchStr);
+    
+    if (!matchesSearch) return false;
+    
+    if (selectedCategory === 'all') return true;
+    if (selectedCategory === 'vault') {
+      return item.isVault || item.id?.startsWith('admin_clipart_') || item.id?.startsWith('preset_') || item.id?.startsWith('token_') || item.id?.startsWith('gif_') || item.id?.startsWith('dnd_') || item.id?.startsWith('cond_');
+    }
+    if (selectedCategory === 'favorites') return favorites.includes(item.id);
+    if (selectedCategory === 'custom') return item.isCustom;
+    
+    const cat = (item.category || '').toLowerCase();
+    const tags = Array.isArray(item.tags) ? item.tags.map(t => String(t).toLowerCase()) : [];
+    const urlStr = (item.imageUrl || item.url || '').toLowerCase();
+
+    if (selectedCategory === 'animated_fx') {
+      return (
+        cat === 'animated_fx' ||
+        cat === 'gif' ||
+        cat === 'gifs' ||
+        item.id?.startsWith('gif_') ||
+        tags.includes('animated_fx') ||
+        tags.includes('gif') ||
+        tags.includes('gifs') ||
+        urlStr.includes('.gif') ||
+        urlStr.startsWith('data:image/gif') ||
+        nameStr.includes('gif') ||
+        nameStr.includes('animated') ||
+        nameStr.includes('fx') ||
+        nameStr.includes('spell') ||
+        nameStr.includes('aura') ||
+        nameStr.includes('portal') ||
+        nameStr.includes('fireball') ||
+        nameStr.includes('lightning')
+      );
+    }
+
+    if (selectedCategory === 'dnd_heroes') {
+      return (
+        cat === 'dnd_heroes' ||
+        cat === 'hero_tokens' ||
+        cat === 'heroes' ||
+        tags.includes('dnd_heroes') ||
+        tags.includes('hero') ||
+        (item.id?.startsWith('token_') && ['fighter','wizard','rogue','cleric','ranger','paladin','druid','bard','barbarian','sorcerer','warlock','monk','artificer'].some(h => item.id.includes(h) || nameStr.includes(h)))
+      );
+    }
+
+    if (selectedCategory === 'dnd_monsters') {
+      return (
+        cat === 'dnd_monsters' ||
+        cat === 'monster_tokens' ||
+        cat === 'monsters' ||
+        tags.includes('dnd_monsters') ||
+        tags.includes('monster') ||
+        (item.id?.startsWith('token_') && ['dragon','beholder','illithid','lich','goblin','orc','skeleton','vampire','golem','mimic','owlbear','kobold','demon'].some(m => item.id.includes(m) || nameStr.includes(m)))
+      );
+    }
+
+    if (selectedCategory === 'dnd_dungeon') {
+      return cat === 'dnd_dungeon' || cat === 'dungeon_props' || cat === 'props' || tags.includes('dnd_dungeon') || item.id?.startsWith('dnd_');
+    }
+
+    if (selectedCategory === 'dnd_conditions') {
+      return cat === 'dnd_conditions' || cat === 'conditions' || tags.includes('dnd_conditions') || item.id?.startsWith('cond_');
+    }
+
+    return cat === selectedCategory || tags.includes(selectedCategory);
   });
 
   const handleDragStart = (e, item) => {
-    setDraggedItem(item);
-    e.dataTransfer.setData('application/json', JSON.stringify(item));
+    const normalized = normalizeClipartItem(item);
+    setDraggedItem(normalized);
+    e.dataTransfer.setData('application/json', JSON.stringify(normalized));
     e.dataTransfer.effectAllowed = 'copy';
   };
 
-  // Handle single or batch file upload
-  const handleFileUpload = (e) => {
-    const files = Array.from(e.target.files || []);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Helper to process files (from file input or drag-and-drop)
+  const processFiles = async (filesList) => {
+    const files = Array.from(filesList || []);
     if (files.length === 0) return;
 
-    files.forEach((file, index) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          const customItem = {
-            id: `custom_${Date.now()}_${index}`,
-            name: file.name.replace(/\.[^/.]+$/, ''),
-            category: 'custom',
-            type: 'image',
-            imageData: event.target.result,
-            width: img.width,
-            height: img.height,
-            isCustom: true,
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const backendUrl = window.location.origin;
+        const res = await fetch(`${backendUrl}/api/cliparts/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          const img = new Image();
+          img.onload = () => {
+            const customItem = {
+              id: `custom_${Date.now()}_${i}`,
+              name: data.name || file.name.replace(/\.[^/.]+$/, ''),
+              category: 'custom',
+              type: 'image',
+              imageUrl: data.url,
+              width: img.width,
+              height: img.height,
+              isCustom: true,
+            };
+            onAddCustomClipart?.(customItem);
           };
-          onAddCustomClipart?.(customItem);
+          img.src = data.url;
+          successCount++;
+          continue;
+        }
+      } catch (err) {
+        console.warn('Backend upload failed, falling back to base64:', err);
+      }
+
+      // Fallback to base64
+      try {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const customItem = {
+              id: `custom_${Date.now()}_${i}_fb`,
+              name: file.name.replace(/\.[^/.]+$/, ''),
+              category: 'custom',
+              type: 'image',
+              imageData: event.target.result,
+              width: img.width,
+              height: img.height,
+              isCustom: true,
+            };
+            onAddCustomClipart?.(customItem);
+          };
+          img.src = event.target.result;
         };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
+        reader.readAsDataURL(file);
+        successCount++;
+      } catch (err) {
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) {
+      toast.success(`Successfully added ${successCount} GIF(s)/Token(s) to your library!`);
+    }
+    if (failCount > 0) {
+      toast.error(`Failed to add ${failCount} file(s).`);
+    }
     
-    // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle single or batch file upload from input
+  const handleFileUpload = (e) => {
+    processFiles(e.target.files);
+  };
+
+  const handleLibraryDragOver = (e) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      setIsDragOver(true);
+    }
+  };
+
+  const handleLibraryDragLeave = (e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleLibraryDrop = (e) => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      e.preventDefault();
+      setIsDragOver(false);
+      processFiles(e.dataTransfer.files);
     }
   };
 
@@ -258,14 +708,24 @@ export const ClipartLibrary = ({
   return (
     <div 
       className={isDocked 
-        ? "w-full bg-white/2 border border-white/10 rounded-xl flex flex-col overflow-hidden h-[380px]"
+        ? "relative w-full bg-white/2 border border-white/10 rounded-xl flex flex-col overflow-hidden h-[380px]"
         : isElectronWindow 
-          ? "w-full h-screen bg-[#1a1a1a] flex flex-col"
-          : "fixed z-[9998] bg-[#1a1a1a]/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl w-[320px] max-h-[600px] flex flex-col"}
+          ? "relative w-full h-full bg-[#0d0d0f] flex flex-col"
+          : "relative fixed z-[9998] bg-[#0d0d0f]/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl w-[320px] max-h-[600px] flex flex-col"}
       style={(isDocked || isElectronWindow) ? undefined : { left: position.x, top: position.y }}
       onMouseDown={(isDocked || isElectronWindow) ? undefined : handleMouseDown}
+      onDragOver={handleLibraryDragOver}
+      onDragLeave={handleLibraryDragLeave}
+      onDrop={handleLibraryDrop}
       data-testid="clipart-library-window"
     >
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 bg-cyan-950/90 backdrop-blur-md border-2 border-dashed border-cyan-400 rounded-xl flex flex-col items-center justify-center p-4 text-center pointer-events-none">
+          <Upload className="w-10 h-10 text-cyan-400 animate-bounce mb-2" />
+          <p className="text-sm font-bold text-white">Drop GIF or Token Files Here!</p>
+          <p className="text-xs text-cyan-200/80 mt-1">They will be automatically saved directly into your Token Library</p>
+        </div>
+      )}
       {/* Header */}
       <div 
         className={`${(!isDocked && !isElectronWindow) ? "drag-handle cursor-move bg-white/5" : "bg-white/2"} flex items-center justify-between p-2 border-b border-white/10 rounded-t-xl`} 
@@ -373,6 +833,13 @@ export const ClipartLibrary = ({
             </Button>
           </div>
         )}
+
+        <div className="bg-cyan-950/40 border border-cyan-500/20 rounded p-2 text-[10px] text-cyan-200/90 leading-relaxed flex gap-2 items-start mt-1">
+          <span className="text-[12px] shrink-0">💡</span>
+          <div>
+            <strong className="text-cyan-400">GIF Library Tip:</strong> You can select <span className="font-semibold text-white underline decoration-cyan-400/40">multiple</span> files or animated GIFs at once in the <strong className="text-white">File Upload</strong> dialog to instantly batch-add them! Transparent GIFs look best as tokens.
+          </div>
+        </div>
       </div>
 
       {/* Categories - All visible with wrapping */}
@@ -401,7 +868,7 @@ export const ClipartLibrary = ({
               key={item.id}
               draggable
               onDragStart={(e) => handleDragStart(e, item)}
-              onClick={() => onSelectClipart?.(item)}
+              onClick={() => onSelectClipart?.(normalizeClipartItem(item))}
               className="relative group aspect-square bg-white/5 rounded-lg flex items-center justify-center cursor-grab hover:bg-white/10 transition-colors border border-transparent hover:border-cyan-500/40"
               title={`${item.name} - Drag to grid or click to place`}
             >
@@ -409,12 +876,24 @@ export const ClipartLibrary = ({
                 <span className="text-2xl">{item.emoji}</span>
               ) : (
                 <img 
-                  src={item.imageUrl || item.imageData} 
+                  src={resolveAssetUrl(item.imageUrl || item.imageData || item.url || item.src)} 
                   alt={item.name}
-                  className="w-10 h-10 object-contain rounded"
+                  className={`w-10 h-10 ${isTokenAsset(item) ? 'object-cover rounded-full border border-white/30' : 'object-contain rounded'}`}
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = getFallbackTokenSvg(item.name);
+                  }}
+                  referrerPolicy="no-referrer"
                 />
               )}
               
+              {/* Vault badge */}
+              {item.isVault && (
+                <span className="absolute top-0.5 left-0.5 bg-yellow-500/80 text-black text-[7px] font-bold px-1 rounded shadow" title="Vault Asset">
+                  VAULT
+                </span>
+              )}
+
               {/* Favorite button */}
               <button
                 onClick={(e) => {
@@ -430,14 +909,19 @@ export const ClipartLibrary = ({
                 <Star className="w-2.5 h-2.5" fill={favorites.includes(item.id) ? 'currentColor' : 'none'} />
               </button>
               
-              {/* Delete button for custom items */}
-              {item.isCustom && (
+              {/* Delete button for custom or vault items */}
+              {(item.isCustom || item.isVault) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemoveCustomClipart?.(item.id);
+                    if (item.isVault) {
+                      handleDeleteVaultItem(item.id);
+                    } else {
+                      onRemoveCustomClipart?.(item.id);
+                    }
                   }}
-                  className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                  className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity bg-black/80"
+                  title="Remove asset"
                 >
                   <Trash2 className="w-2.5 h-2.5" />
                 </button>
@@ -484,6 +968,10 @@ export const PlacedClipart = ({
   snapToGrid = false,
   gridCellWidth = 50,
   gridCellHeight = 50,
+  groupDragOffset = null,
+  onDragStartExtra,
+  onDragMoveExtra,
+  onDragEndExtra,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
@@ -491,6 +979,9 @@ export const PlacedClipart = ({
   const [localScale, setLocalScale] = useState(clipart.scale || 50);
   const [localRotation, setLocalRotation] = useState(clipart.rotation || 0);
   const [isAdjusting, setIsAdjusting] = useState(false);
+
+  const clipSize = localScale;
+  const clipRotation = localRotation;
   const containerRef = useRef(null);
   const toolbarRef = useRef(null);
   const liveMoveThrottleRef = useRef(0);
@@ -518,10 +1009,11 @@ export const PlacedClipart = ({
   const handleMouseDown = (e) => {
     if (!canEdit || disabled) return;
     e.stopPropagation();
-    onSelect?.();
+    onSelect?.(e);
     setIsDragging(true);
     setDragOffset({ dx: 0, dy: 0 });
     dragStartRef.current = { x: e.clientX, y: e.clientY, clipX: clipart.x, clipY: clipart.y };
+    if (onDragStartExtra) onDragStartExtra(clipart);
   };
 
   const handleMouseMove = useCallback((e) => {
@@ -529,7 +1021,8 @@ export const PlacedClipart = ({
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
     setDragOffset({ dx, dy });
-  }, [isDragging]);
+    if (onDragMoveExtra) onDragMoveExtra(dx, dy);
+  }, [isDragging, onDragMoveExtra]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDragging) return;
@@ -540,8 +1033,9 @@ export const PlacedClipart = ({
     if (dragOffset.dx !== 0 || dragOffset.dy !== 0) {
       onUpdate?.({ ...clipart, x: pos.x, y: pos.y });
     }
+    if (onDragEndExtra) onDragEndExtra(dragOffset.dx, dragOffset.dy);
     setDragOffset({ dx: 0, dy: 0 });
-  }, [isDragging, dragOffset, snapToGrid, snapPosition, clipart, onUpdate]);
+  }, [isDragging, dragOffset, snapToGrid, snapPosition, clipart, onUpdate, onDragEndExtra]);
 
   useEffect(() => {
     if (isDragging) {
@@ -650,15 +1144,36 @@ export const PlacedClipart = ({
     };
   });
 
+  const valuesRef = useRef({ scale: localScale, rotation: localRotation });
+  useEffect(() => {
+    valuesRef.current = { scale: localScale, rotation: localRotation };
+  }, [localScale, localRotation]);
+
   const commitChanges = useCallback(() => {
     setIsAdjusting(false);
-    onUpdate?.({ ...clipart, scale: localScale, rotation: localRotation });
-  }, [clipart, localScale, localRotation, onUpdate]);
+    onUpdate?.({ ...clipart, scale: valuesRef.current.scale, rotation: valuesRef.current.rotation });
+  }, [clipart, onUpdate]);
 
-  const size = localScale;
-  const rotation = localRotation;
-  const posX = clipart.x + (isDragging ? dragOffset.dx : 0);
-  const posY = clipart.y + (isDragging ? dragOffset.dy : 0);
+  // Handle global/window mouseup and touchend when adjusting to prevent "stuck" sliders
+  useEffect(() => {
+    if (!isAdjusting) return;
+
+    const handleWindowMouseUp = () => {
+      commitChanges();
+    };
+
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('touchend', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('touchend', handleWindowMouseUp);
+    };
+  }, [isAdjusting, commitChanges]);
+
+  const effectiveDx = isDragging ? dragOffset.dx : (groupDragOffset ? groupDragOffset.dx : 0);
+  const effectiveDy = isDragging ? dragOffset.dy : (groupDragOffset ? groupDragOffset.dy : 0);
+  const posX = clipart.x + effectiveDx;
+  const posY = clipart.y + effectiveDy;
   const isTouch = isTouchDevice();
 
   const sessionContext = useContext(SessionContext);
@@ -676,7 +1191,7 @@ export const PlacedClipart = ({
       style={{
         left: posX,
         top: posY,
-        transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        transform: `translate(-50%, -50%) rotate(${clipRotation}deg)`,
         transformOrigin: 'center center',
         pointerEvents: disabled ? 'none' : 'auto',
         touchAction: 'none',
@@ -690,8 +1205,8 @@ export const PlacedClipart = ({
         <div 
           className="absolute inset-0 rounded-full bg-cyan-400/20 ring-4 ring-cyan-400/60 animate-pulse -z-10 blur-sm" 
           style={{ 
-            width: size + 20, 
-            height: size + 20, 
+            width: clipSize + 20, 
+            height: clipSize + 20, 
             left: -10, 
             top: -10,
           }} 
@@ -700,28 +1215,41 @@ export const PlacedClipart = ({
 
       <div
         style={{ 
-          width: size, 
-          height: size,
+          width: clipSize, 
+          height: clipSize,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative'
         }}
-        className={`${isSelected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-transparent rounded' : ''} ${isActiveTurn ? 'border-2 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)] rounded-full' : ''}`}
+        className={`${isActiveTurn ? 'border-2 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)] rounded-full' : ''}`}
       >
+        {/* Group Badge Indicator */}
+        {clipart.groupId && (
+          <div 
+            className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-[#caa055] text-black flex items-center justify-center shadow z-30 border border-black" 
+            title="Grouped Token"
+          >
+            <Layers className="w-2.5 h-2.5 text-black" />
+          </div>
+        )}
         {clipart.type === 'emoji' ? (
-          <span style={{ fontSize: `${size * 0.8}px`, lineHeight: 1 }}>{clipart.emoji}</span>
+          <span style={{ fontSize: `${clipSize * 0.8}px`, lineHeight: 1 }}>{clipart.emoji}</span>
         ) : (
           <img 
-            src={clipart.imageUrl || clipart.imageData} 
+            src={resolveAssetUrl(clipart.imageUrl || clipart.imageData || clipart.url || clipart.src)} 
             alt={clipart.name}
+            onError={(e) => {
+              e.target.onerror = null;
+              e.target.src = getFallbackTokenSvg(clipart.name);
+            }}
             style={{ 
               width: '100%', 
               height: '100%', 
-              objectFit: 'cover', 
-              borderRadius: (clipart.category === 'tokens' || clipart.category === 'dnd_heroes' || clipart.category === 'dnd_monsters' || clipart.id.startsWith('token_')) ? '50%' : '4px',
-              border: (clipart.category === 'tokens' || clipart.category === 'dnd_heroes' || clipart.category === 'dnd_monsters' || clipart.id.startsWith('token_')) ? '2px solid rgba(255, 255, 255, 0.5)' : 'none',
-              boxShadow: (clipart.category === 'tokens' || clipart.category === 'dnd_heroes' || clipart.category === 'dnd_monsters' || clipart.id.startsWith('token_')) ? '0 4px 10px rgba(0,0,0,0.4)' : 'none'
+              objectFit: isTokenAsset(clipart) ? 'cover' : 'contain', 
+              borderRadius: isTokenAsset(clipart) ? '50%' : '4px',
+              border: isTokenAsset(clipart) ? '2px solid rgba(255, 255, 255, 0.5)' : 'none',
+              boxShadow: isTokenAsset(clipart) ? '0 4px 10px rgba(0,0,0,0.4)' : 'none'
             }}
             draggable={false}
             referrerPolicy="no-referrer"
@@ -758,46 +1286,48 @@ export const PlacedClipart = ({
       {isSelected && canEdit && !isDragging && (
         <div
           ref={toolbarRef}
-          className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/95 rounded-xl px-3 py-2 shadow-xl border border-white/20 whitespace-nowrap"
+          className="absolute -top-14 left-1/2 flex items-center gap-2 bg-black/95 rounded-xl px-3 py-2 shadow-xl border border-white/20 whitespace-nowrap"
+          style={{
+            transform: `translateX(-50%) rotate(${-clipRotation}deg)`,
+            transformOrigin: 'bottom center',
+          }}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
         >
-          {/* Desktop: Scale slider */}
-          {!isTouch && (
-            <div className="flex items-center gap-2">
-              <Maximize2 className="w-4 h-4 text-cyan-400" />
-              <input
-                type="range" min="20" max="500" step="1"
-                value={localScale}
-                onChange={(e) => { setIsAdjusting(true); setLocalScale(parseInt(e.target.value)); }}
-                onMouseUp={commitChanges}
-                className="w-28 h-2 rounded-full appearance-none cursor-pointer"
-                style={{ background: `linear-gradient(to right, #06b6d4 0%, #06b6d4 ${((localScale - 20) / 480) * 100}%, #374151 ${((localScale - 20) / 480) * 100}%, #374151 100%)` }}
-              />
-              <span className="text-xs text-white font-mono w-10 text-right">{localScale}px</span>
-            </div>
-          )}
+          {/* Scale slider */}
+          <div className="flex items-center gap-2">
+            <Maximize2 className="w-4 h-4 text-cyan-400" />
+            <input
+              type="range" min="20" max="500" step="1"
+              value={localScale}
+              onMouseDown={() => setIsAdjusting(true)}
+              onTouchStart={() => setIsAdjusting(true)}
+              onChange={(e) => { setLocalScale(parseInt(e.target.value)); }}
+              className="w-28 h-2 rounded-full appearance-none cursor-pointer"
+              style={{ background: `linear-gradient(to right, #06b6d4 0%, #06b6d4 ${((localScale - 20) / 480) * 100}%, #374151 ${((localScale - 20) / 480) * 100}%, #374151 100%)` }}
+            />
+            <span className="text-xs text-white font-mono w-10 text-right">{localScale}px</span>
+          </div>
           
-          {/* Desktop: Rotation slider */}
-          {!isTouch && (
-            <div className="flex items-center gap-2 pl-3 border-l border-white/20">
-              <RotateCw className="w-4 h-4 text-cyan-400" />
-              <input
-                type="range" min="0" max="360" step="1"
-                value={localRotation}
-                onChange={(e) => { setIsAdjusting(true); setLocalRotation(parseInt(e.target.value)); }}
-                onMouseUp={commitChanges}
-                className="w-20 h-2 rounded-full appearance-none cursor-pointer"
-                style={{ background: `linear-gradient(to right, #06b6d4 0%, #06b6d4 ${(localRotation / 360) * 100}%, #374151 ${(localRotation / 360) * 100}%, #374151 100%)` }}
-              />
-              <span className="text-xs text-white font-mono w-8">{localRotation}°</span>
-            </div>
-          )}
+          {/* Rotation slider */}
+          <div className="flex items-center gap-2 pl-3 border-l border-white/20">
+            <RotateCw className="w-4 h-4 text-cyan-400" />
+            <input
+              type="range" min="0" max="360" step="1"
+              value={localRotation}
+              onMouseDown={() => setIsAdjusting(true)}
+              onTouchStart={() => setIsAdjusting(true)}
+              onChange={(e) => { setLocalRotation(parseInt(e.target.value)); }}
+              className="w-20 h-2 rounded-full appearance-none cursor-pointer"
+              style={{ background: `linear-gradient(to right, #06b6d4 0%, #06b6d4 ${(localRotation / 360) * 100}%, #374151 ${(localRotation / 360) * 100}%, #374151 100%)` }}
+            />
+            <span className="text-xs text-white font-mono w-8">{localRotation}°</span>
+          </div>
 
-          {/* Mobile: gesture hint */}
+          {/* Mobile: gesture hint (shows only if touch is available) */}
           {isTouch && (
-            <span className="text-[10px] text-white/40 px-1">Pinch to resize · 2-finger rotate</span>
+            <span className="text-[10px] text-white/40 px-1 border-l border-white/20 hidden md:inline">Pinch to resize · 2-finger rotate</span>
           )}
           
           {/* Delete button */}

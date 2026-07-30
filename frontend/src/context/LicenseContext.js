@@ -46,14 +46,19 @@ export const LicenseProvider = ({ children }) => {
 
   const deviceFp = getDeviceFingerprint();
 
-  // Check license on mount
-  useEffect(() => {
-    if (checkedRef.current) return;
-    checkedRef.current = true;
-    checkLicenseStatus();
-  }, []);
-
   const checkLicenseStatus = useCallback(async () => {
+    // If running inside Electron desktop app, automatically treat as licensed
+    if (window.electronAPI?.isElectron || new URLSearchParams(window.location.search).get('electron') === '1') {
+      setLicenseState({
+        status: 'licensed',
+        licenseKey: 'DESKTOP-NATIVE',
+        daysRemaining: Infinity,
+        trialExpiresAt: null,
+        deviceFingerprint: deviceFp,
+      });
+      return;
+    }
+
     // First check for saved license key
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -132,6 +137,13 @@ export const LicenseProvider = ({ children }) => {
     });
   }, [backendUrl, deviceFp]);
 
+  // Check license on mount
+  useEffect(() => {
+    if (checkedRef.current) return;
+    checkedRef.current = true;
+    checkLicenseStatus();
+  }, [checkLicenseStatus]);
+
   const activateLicense = useCallback(async (key, email) => {
     const res = await fetch(`${backendUrl}/api/license/validate`, {
       method: 'POST',
@@ -191,5 +203,21 @@ export const LicenseProvider = ({ children }) => {
   );
 };
 
-export const useLicense = () => useContext(LicenseContext);
+export const useLicense = () => {
+  const context = useContext(LicenseContext);
+  if (!context) {
+    return {
+      status: 'licensed',
+      licenseKey: 'DESKTOP-NATIVE',
+      daysRemaining: Infinity,
+      trialExpiresAt: null,
+      deviceFingerprint: null,
+      activateLicense: async () => ({ valid: true }),
+      startPurchase: async () => {},
+      pollPurchaseStatus: async () => {},
+      recheckLicense: async () => {},
+    };
+  }
+  return context;
+};
 export default LicenseContext;

@@ -264,6 +264,29 @@ export const SessionProvider = ({ children }) => {
     };
   }, [resetInactivityTimer]);
 
+  const leaveSession = useCallback(() => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('leave_session_request', { code: sessionCode });
+      socketRef.current.disconnect();
+    }
+    setSessionCode(null);
+    setIsHost(false);
+    setParticipants({ host: null, guests: [] });
+    setRemoteDrawings([]);
+    setRemoteMeasurements([]);
+    setRemoteCliparts([]);
+    setRemoteBgLayers([]);
+    setSessionBackgroundImage(null);
+    setRemoteCursors({});
+    setCursorTrails({});
+    setRemoteLiveMeasurements({});
+    setRemoteLiveClipartMoves({});
+    setRemoteGridSettings(null);
+    setHostDimensions(null);
+    setBlockList([]);
+    setIsBlocked(false);
+  }, [sessionCode]);
+
   useEffect(() => {
     if (!showInactivityWarning) return;
     const interval = setInterval(() => {
@@ -278,7 +301,7 @@ export const SessionProvider = ({ children }) => {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [showInactivityWarning]);
+  }, [showInactivityWarning, leaveSession]);
 
   const continueSession = useCallback(() => {
     resetInactivityTimer();
@@ -311,25 +334,6 @@ export const SessionProvider = ({ children }) => {
     if (socketRef.current.connected) run();
     else socketRef.current.once('connect', run);
   }, []);
-
-  const leaveSession = useCallback(() => {
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('leave_session_request', { code: sessionCode });
-      socketRef.current.disconnect();
-    }
-    setSessionCode(null);
-    setIsHost(false);
-    setParticipants({ host: null, guests: [] });
-    setRemoteDrawings([]);
-    setRemoteMeasurements([]);
-    setRemoteCliparts([]);
-    setRemoteBgLayers([]);
-    setSessionBackgroundImage(null);
-    setRemoteCursors({});
-    setCursorTrails({});
-    setRemoteLiveMeasurements({});
-    setRemoteLiveClipartMoves({});
-  }, [sessionCode]);
 
   const blockUser = useCallback((sid) => {
     // Unimplemented in standard schema but we provide stub

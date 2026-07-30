@@ -164,7 +164,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const exchangeGoogleSession = async (sessionId) => {
+  async function exchangeGoogleSession(sessionId) {
     const response = await fetch(`${backendUrl}/api/auth/google-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

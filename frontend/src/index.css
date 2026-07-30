@@ -69,6 +69,14 @@ body {
     color: #f3f4f6;
 }
 
+html.electron-app,
+body.electron-app,
+.electron-app #root,
+.electron-app .App {
+    background: #0d0f12 !important;
+    background-color: #0d0f12 !important;
+}
+
 code, .font-mono {
     font-family: 'JetBrains Mono', monospace;
 }

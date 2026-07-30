@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { RotateCw, Trash2, Maximize2, Eye } from 'lucide-react';
+import { getFallbackMapSvg } from './BackgroundLayersPanel';
 
 export const PlacedBackgroundImage = ({
   layer,
@@ -20,6 +21,10 @@ export const PlacedBackgroundImage = ({
   const [localRotation, setLocalRotation] = useState(layer.rotation ?? 0);
   const [localOpacity, setLocalOpacity] = useState(layer.opacity ?? 100);
   const [isAdjusting, setIsAdjusting] = useState(false);
+
+  const bgScale = localScale;
+  const bgRotation = localRotation;
+  const bgOpacity = localOpacity / 100;
 
   // Stable scale specifically for the control handle positioning so it does not jump vertically during slide
   const [stableScale, setStableScale] = useState(layer.scale ?? 300);
@@ -157,19 +162,19 @@ export const PlacedBackgroundImage = ({
       <img
         src={layer.imageData}
         alt={layer.name}
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = getFallbackMapSvg(layer.name);
+        }}
         className="w-full h-auto pointer-events-none select-none"
         referrerPolicy="no-referrer"
       />
     );
   };
 
-  const scale = localScale;
-  const rotation = localRotation;
-  const opacity = localOpacity / 100;
-
   // Custom range background gradient percentages
-  const scalePercent = ((scale - 50) / 1450) * 100;
-  const rotationPercent = (rotation / 360) * 100;
+  const scalePercent = Math.min(100, Math.max(0, ((bgScale - 50) / 4950) * 100));
+  const rotationPercent = (bgRotation / 360) * 100;
   const opacityPercent = localOpacity;
 
   // Calculate safe bottom offset using stable scale to completely eliminate vertical jumping
@@ -198,21 +203,18 @@ export const PlacedBackgroundImage = ({
           canEdit ? 'cursor-grab' : ''
         } ${isDragging ? 'cursor-grabbing' : ''}`}
         style={{
-          width: `${scale}px`,
+          width: `${bgScale}px`,
           height: 'auto',
-          transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+          transform: `translate(-50%, -50%) rotate(${bgRotation}deg)`,
           touchAction: 'none'
         }}
       >
-        {/* Visual outline if selected */}
-        {isSelected && canEdit && (
-          <div className="absolute -inset-3 border-2 border-dashed border-amber-500 rounded-lg pointer-events-none animate-pulse-glow" />
-        )}
+        {/* Visual outline if selected - removed per user request */}
 
         {/* Actual Background Media (translucent style applied only here so controls remain 100% opaque) */}
         <div 
           className="w-full h-auto overflow-hidden rounded shadow-lg transition-opacity duration-150"
-          style={{ opacity }}
+          style={{ opacity: bgOpacity }}
         >
           {renderContent()}
         </div>
@@ -241,9 +243,9 @@ export const PlacedBackgroundImage = ({
             <input
               type="range"
               min="50"
-              max="1500"
+              max="5000"
               step="5"
-              value={scale}
+              value={bgScale}
               onMouseDown={() => setIsAdjusting(true)}
               onTouchStart={() => setIsAdjusting(true)}
               onChange={(e) => {
@@ -255,7 +257,7 @@ export const PlacedBackgroundImage = ({
               }}
               title="Resize (Scale)"
             />
-            <span className="text-[11px] text-gray-300 font-mono w-10 text-right">{scale}px</span>
+            <span className="text-[11px] text-gray-300 font-mono w-14 text-right">{bgScale}px</span>
           </div>
 
           <div className="w-px h-5 bg-white/10" />
@@ -268,7 +270,7 @@ export const PlacedBackgroundImage = ({
               min="0"
               max="360"
               step="1"
-              value={rotation}
+              value={bgRotation}
               onMouseDown={() => setIsAdjusting(true)}
               onTouchStart={() => setIsAdjusting(true)}
               onChange={(e) => {
@@ -280,7 +282,7 @@ export const PlacedBackgroundImage = ({
               }}
               title="Rotate"
             />
-            <span className="text-[11px] text-gray-300 font-mono w-7 text-right">{rotation}°</span>
+            <span className="text-[11px] text-gray-300 font-mono w-7 text-right">{bgRotation}°</span>
           </div>
 
           <div className="w-px h-5 bg-white/10" />

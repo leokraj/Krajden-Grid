@@ -1,0 +1,190 @@
+@echo off
+set "self=%~f0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath $env:self -Raw; Invoke-Expression $c.Substring($c.IndexOf('#=== POWERSHELL ==='))"
+exit /b
+
+#=== POWERSHELL ===
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+Clear-Host
+Write-Host "============================================================" -ForegroundColor Yellow
+Write-Host "            KRAJDEN GRID - WINDOWS SETUP" -ForegroundColor Yellow
+Write-Host "============================================================" -ForegroundColor Yellow
+Write-Host "Welcome to the Krajden Grid Desktop Setup!"
+Write-Host "This script will download and install the transparent tactical overlay."
+Write-Host ""
+
+$defaultPath = Join-Path $env:LocalAppData "KrajdenGrid"
+$installPath = Read-Host "Enter installation folder [Default: $defaultPath]"
+if ([string]::IsNullOrWhiteSpace($installPath)) {
+    $installPath = $defaultPath
+}
+
+# Resolve relative path if needed, and make sure it is absolute
+$installPath = [System.IO.Path]::GetFullPath($installPath)
+
+Write-Host ""
+Write-Host "Installing to: $installPath" -ForegroundColor Cyan
+
+# Create directory
+if (-not (Test-Path -Path $installPath)) {
+    try {
+        New-Item -ItemType Directory -Force -Path $installPath | Out-Null
+    } catch {
+        Write-Host "Failed to create installation folder: $_" -ForegroundColor Red
+        Read-Host "Press Enter to exit..."
+        exit 1
+    }
+}
+
+$zipPath = Join-Path $installPath "temp-app-package.zip"
+
+$urls = @(
+  "https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Portable.zip",
+  "https://ais-dev-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/api/download/KrajdenGrid-Portable.zip",
+  "https://ais-pre-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/api/download/KrajdenGrid-Portable.zip"
+)
+
+Write-Host ""
+Write-Host "Downloading latest core files (approx. 120MB)..." -ForegroundColor Yellow
+
+$downloaded = $false
+foreach ($url in $urls) {
+    Write-Host "Attempting download from: $url" -ForegroundColor Gray
+    if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+    
+    # 1. Try native curl.exe first (fastest, supports streaming and beautiful native progress)
+    if (Get-Command "curl.exe" -ErrorAction SilentlyContinue) {
+        Write-Host "Downloading via curl..." -ForegroundColor Gray
+        try {
+            & curl.exe -L -H "User-Agent: Mozilla/5.0" --connect-timeout 30 -o $zipPath $url
+            if (Test-Path $zipPath) {
+                $fileSize = (Get-Item $zipPath).Length
+                if ($fileSize -gt 50000000) { # Must be at least 50MB
+                    $downloaded = $true
+                    break
+                } else {
+                    Write-Host "curl downloaded file is too small ($($fileSize / 1MB) MB), deleting..." -ForegroundColor Yellow
+                    Remove-Item -Path $zipPath -Force
+                }
+            }
+        } catch {
+            Write-Host "curl download failed: $_" -ForegroundColor Red
+            if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+        }
+    }
+    
+    # 2. Try .NET WebClient (classic reliable fallback)
+    if (-not $downloaded) {
+        Write-Host "Downloading via .NET WebClient..." -ForegroundColor Gray
+        try {
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0")
+            $wc.DownloadFile($url, $zipPath)
+            if (Test-Path $zipPath) {
+                $fileSize = (Get-Item $zipPath).Length
+                if ($fileSize -gt 50000000) { # Must be at least 50MB
+                    $downloaded = $true
+                    break
+                } else {
+                    Write-Host "WebClient downloaded file is too small ($($fileSize / 1MB) MB), deleting..." -ForegroundColor Yellow
+                    Remove-Item -Path $zipPath -Force
+                }
+            }
+        } catch {
+            Write-Host "WebClient download failed: $_" -ForegroundColor Red
+            if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+        }
+    }
+    
+    # 3. Try Invoke-WebRequest with basic parsing (final fallback)
+    if (-not $downloaded) {
+        Write-Host "Downloading via Invoke-WebRequest..." -ForegroundColor Gray
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing -UserAgent "Mozilla/5.0" -TimeoutSec 300
+            if (Test-Path $zipPath) {
+                $fileSize = (Get-Item $zipPath).Length
+                if ($fileSize -gt 50000000) { # Must be at least 50MB
+                    $downloaded = $true
+                    break
+                } else {
+                    Write-Host "Invoke-WebRequest downloaded file is too small ($($fileSize / 1MB) MB), deleting..." -ForegroundColor Yellow
+                    Remove-Item -Path $zipPath -Force
+                }
+            }
+        } catch {
+            Write-Host "Invoke-WebRequest failed: $_" -ForegroundColor Red
+            if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+        }
+    }
+}
+
+if (-not $downloaded) {
+    Write-Host ""
+    Write-Host "Failed to download core application package from all mirrors." -ForegroundColor Red
+    Write-Host "If you are behind a strict firewall, you can download the Portable ZIP directly" -ForegroundColor Yellow
+    Write-Host "from the web panel, extract it, and run KrajdenGrid.exe!" -ForegroundColor Yellow
+    Write-Host ""
+    Read-Host "Press Enter to exit..."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Extracting files... This might take a minute..." -ForegroundColor Yellow
+try {
+    # Extract ZIP
+    Expand-Archive -Path $zipPath -DestinationPath $installPath -Force
+    # Clean up ZIP
+    Remove-Item -Path $zipPath -Force
+    Write-Host "Extraction complete!" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to extract ZIP file: $_" -ForegroundColor Red
+    Read-Host "Press Enter to exit..."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Creating shortcuts..." -ForegroundColor Yellow
+try {
+    $WshShell = New-Object -ComObject WScript.Shell
+    $exePath = Join-Path $installPath "KrajdenGrid.exe"
+
+    # Desktop Shortcut
+    $desktopPath = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
+    $desktopShortcut = $WshShell.CreateShortcut((Join-Path $desktopPath "Krajden Grid.lnk"))
+    $desktopShortcut.TargetPath = $exePath
+    $desktopShortcut.WorkingDirectory = $installPath
+    $desktopShortcut.IconLocation = "$exePath,0"
+    $desktopShortcut.Save()
+
+    # Start Menu Shortcut
+    $startMenuPath = [System.IO.Path]::Combine($env:AppData, "Microsoft\Windows\Start Menu\Programs")
+    if (-not (Test-Path $startMenuPath)) {
+        New-Item -ItemType Directory -Force -Path $startMenuPath | Out-Null
+    }
+    $startShortcut = $WshShell.CreateShortcut((Join-Path $startMenuPath "Krajden Grid.lnk"))
+    $startShortcut.TargetPath = $exePath
+    $startShortcut.WorkingDirectory = $installPath
+    $startShortcut.IconLocation = "$exePath,0"
+    $startShortcut.Save()
+
+    Write-Host "Shortcuts created successfully!" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to create shortcuts, but installation completed: $_" -ForegroundColor Yellow
+}
+
+Write-Host ""
+$launch = Read-Host "Launch Krajden Grid now? [Y/n]"
+if ($launch -ne "n" -and $launch -ne "N") {
+    Write-Host "Launching Krajden Grid..." -ForegroundColor Green
+    try {
+        Start-Process -FilePath $exePath -WorkingDirectory $installPath
+    } catch {
+        Write-Host "Failed to launch: $_" -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+Write-Host "Krajden Grid has been installed successfully. Thank you!" -ForegroundColor Green
+Write-Host ""
+Read-Host "Press Enter to finish setup..."

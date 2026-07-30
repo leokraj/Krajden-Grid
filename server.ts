@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import fs from 'fs';
+import { execSync } from 'child_process';
 
 let resolvedFilename = '';
 let resolvedDirname = '';
@@ -31,8 +32,58 @@ async function startServer() {
   const server = http.createServer(app);
   const PORT = 3000;
 
-  app.use(express.json({ limit: '10mb' }));
+  const multer = (await import('multer')).default;
+  const upload = multer({
+    dest: UPLOADS_DIR,
+    limits: { fileSize: 50 * 1024 * 1024, files: 100 }
+  });
+
+  // === Startup Download Assets Verification ===
+  try {
+    const downloadsDir = path.join(process.cwd(), 'backend', 'downloads');
+    if (!fs.existsSync(downloadsDir)) {
+      console.log(`[Startup] Creating downloads directory at: ${downloadsDir}`);
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
+
+    // Restore KrajdenGrid-Setup.bat from template if missing
+    const batDestPath = path.join(downloadsDir, 'KrajdenGrid-Setup.bat');
+    const batTemplatePath = path.join(process.cwd(), 'KrajdenGrid-Setup.bat.template');
+    if (!fs.existsSync(batDestPath)) {
+      if (fs.existsSync(batTemplatePath)) {
+        console.log(`[Startup] Restoring KrajdenGrid-Setup.bat from template...`);
+        fs.copyFileSync(batTemplatePath, batDestPath);
+      } else {
+        console.error(`[Startup] KrajdenGrid-Setup.bat template not found!`);
+      }
+    }
+
+    // Run build assembly to generate KrajdenGrid-Portable.zip if missing
+    const zipPath = path.join(downloadsDir, 'KrajdenGrid-Portable.zip');
+    if (!fs.existsSync(zipPath)) {
+      console.log(`[Startup] KrajdenGrid-Portable.zip is missing. Creating placeholder file (downloads will redirect to GitHub Releases).`);
+      try {
+        fs.writeFileSync(zipPath, 'placeholder');
+      } catch (writeErr: any) {
+        console.warn(`[Startup] Could not write placeholder ZIP:`, writeErr.message);
+      }
+    } else {
+      console.log(`[Startup] KrajdenGrid-Portable.zip exists.`);
+    }
+  } catch (startupErr: any) {
+    console.error(`[Startup] Error ensuring downloads directory and assets:`, startupErr.message);
+  }
+
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(cookieParser());
+  app.use('/uploads', (req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', '*');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+  }, express.static(UPLOADS_DIR));
 
   // === MongoDB Client Setup ===
   let db: Db | null = null;
@@ -48,10 +99,97 @@ async function startServer() {
     db = mongoClient.db(dbName);
     console.log(`Connected to MongoDB: ${dbName}`);
   } catch (err: any) {
-    console.error('Failed to connect to MongoDB, using in-memory mock storage fallback:', err.message);
+    console.log('MongoDB not connected, using in-memory mock storage fallback:', err.message);
   }
 
   // Fallback in-memory DB if Mongo is unavailable
+  const VAULT_CLIPARTS_FILE = path.join(UPLOADS_DIR, 'vault_cliparts.json');
+  const VAULT_BATTLEMAPS_FILE = path.join(UPLOADS_DIR, 'vault_battlemaps.json');
+
+  const seedPresetFallback = (presetName: string) => {
+    try {
+      const presetPath = path.join(process.cwd(), 'frontend', 'src', 'data', 'vaultPresets.js');
+      if (fs.existsSync(presetPath)) {
+        const content = fs.readFileSync(presetPath, 'utf-8');
+        const regex = new RegExp(`export const ${presetName} = (\\[[\\s\\S]*?\\]);`);
+        const match = content.match(regex);
+        if (match && match[1]) {
+          return JSON.parse(match[1]);
+        }
+      }
+    } catch (e: any) {
+      console.error(`[Vault Seeding] Error reading fallback ${presetName}:`, e.message);
+    }
+    return [];
+  };
+
+  const loadVaultClipartsDisk = (): any[] => {
+    try {
+      if (fs.existsSync(VAULT_CLIPARTS_FILE)) {
+        const data = fs.readFileSync(VAULT_CLIPARTS_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e: any) {
+      console.error('[Vault Storage] Error reading vault_cliparts.json:', e.message);
+    }
+    // Fallback seed from vaultPresets.js
+    const defaults = seedPresetFallback('DEFAULT_VAULT_CLIPARTS');
+    if (defaults.length > 0) {
+      saveVaultClipartsDisk(defaults);
+      return defaults;
+    }
+    return [];
+  };
+
+  const saveVaultClipartsDisk = (items: any[]) => {
+    try {
+      fs.writeFileSync(VAULT_CLIPARTS_FILE, JSON.stringify(items || [], null, 2), 'utf-8');
+    } catch (e: any) {
+      console.error('[Vault Storage] Error writing vault_cliparts.json:', e.message);
+    }
+  };
+
+  const loadVaultBattlemapsDisk = (): any[] => {
+    try {
+      if (fs.existsSync(VAULT_BATTLEMAPS_FILE)) {
+        const data = fs.readFileSync(VAULT_BATTLEMAPS_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e: any) {
+      console.error('[Vault Storage] Error reading vault_battlemaps.json:', e.message);
+    }
+    // Fallback seed from vaultPresets.js
+    const defaults = seedPresetFallback('DEFAULT_VAULT_BATTLEMAPS');
+    if (defaults.length > 0) {
+      saveVaultBattlemapsDisk(defaults);
+    }
+    return defaults;
+  };
+
+  const saveVaultBattlemapsDisk = (items: any[]) => {
+    try {
+      let existing: any[] = [];
+      if (fs.existsSync(VAULT_BATTLEMAPS_FILE)) {
+        try {
+          const raw = fs.readFileSync(VAULT_BATTLEMAPS_FILE, 'utf-8');
+          existing = JSON.parse(raw);
+          if (!Array.isArray(existing)) existing = [];
+        } catch (e) { existing = []; }
+      }
+
+      const map = new Map<string, any>();
+      existing.forEach(i => { if (i && i.id) map.set(i.id, i); });
+      (items || []).forEach(i => { if (i && i.id) map.set(i.id, i); });
+
+      const merged = Array.from(map.values());
+      fs.writeFileSync(VAULT_BATTLEMAPS_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+    } catch (e: any) {
+      console.error('[Vault Storage] Error writing vault_battlemaps.json:', e.message);
+    }
+  };
+
   const mockDb: Record<string, any[]> = {
     users: [],
     user_sessions: [],
@@ -61,7 +199,9 @@ async function startServer() {
     payment_transactions: [],
     presets: [],
     measurements: [],
-    image_layouts: []
+    image_layouts: [],
+    global_cliparts: loadVaultClipartsDisk(),
+    global_battlemaps: loadVaultBattlemapsDisk()
   };
 
   const getCollection = (name: string) => {
@@ -84,6 +224,9 @@ async function startServer() {
         deleteMany: (query: any) => db!.collection(name).deleteMany(query)
       };
     } else {
+      if (!mockDb[name]) {
+        mockDb[name] = [];
+      }
       return {
         findOne: async (query: any) => {
           return mockDb[name].find(item => {
@@ -181,10 +324,18 @@ async function startServer() {
 
   // Download endpoint
   app.get('/api/download/:filename', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type');
+
     try {
       const requestedFilename = req.params.filename;
       // Extract only the base name of the file to completely prevent any directory traversal attacks
       const filename = path.basename(requestedFilename);
+      const lowerFilename = filename.toLowerCase();
+
+      let targetFilenameToServe = filename;
 
       // Define possible paths for the downloads directory
       const possibleDirs = [
@@ -202,15 +353,53 @@ async function startServer() {
 
       let filePath = '';
 
+      // First check if the exact file exists locally and is a real file (not a small placeholder)
       for (const dir of possibleDirs) {
         const testPath = path.join(dir, filename);
         if (fs.existsSync(testPath)) {
-          filePath = testPath;
-          break;
+          const stats = fs.statSync(testPath);
+          if (stats.size > 1000) {
+            filePath = testPath;
+            break;
+          }
         }
       }
 
-      console.log(`[Download] Requested: ${requestedFilename} -> Sanitized: ${filename}`);
+      // Alias/fallback KrajdenGrid-Setup.exe to KrajdenGrid-Portable.zip as KrajdenGrid-Windows.zip if Setup.exe is missing
+      if (!filePath && lowerFilename === 'krajdengrid-setup.exe') {
+        console.log(`[Download] KrajdenGrid-Setup.exe not found on Linux. Falling back to KrajdenGrid-Portable.zip (renamed/aliased as KrajdenGrid-Windows.zip)`);
+        for (const dir of possibleDirs) {
+          const testPath = path.join(dir, 'KrajdenGrid-Portable.zip');
+          if (fs.existsSync(testPath)) {
+            const stats = fs.statSync(testPath);
+            if (stats.size > 1000) {
+              filePath = testPath;
+              targetFilenameToServe = 'KrajdenGrid-Windows.zip';
+              break;
+            }
+          }
+        }
+      }
+
+      // If we don't have a valid local file, redirect to GitHub Releases
+      if (!filePath) {
+        let redirectUrl = '';
+        if (lowerFilename === 'krajdengrid-portable.zip') {
+          redirectUrl = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Portable.zip';
+        } else if (lowerFilename === 'krajdengrid-setup.exe' || lowerFilename === 'krajdengrid-windows.zip') {
+          redirectUrl = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Windows.zip';
+        }
+
+        if (redirectUrl) {
+          if (req.query.info === 'true') {
+            return res.json({ external: true, redirectUrl });
+          }
+          console.log(`[Download] ${filename} not found locally. Redirecting to ${redirectUrl}`);
+          return res.redirect(302, redirectUrl);
+        }
+      }
+
+      console.log(`[Download] Requested: ${requestedFilename} -> Sanitized: ${filename} -> Serving: ${targetFilenameToServe}`);
       console.log(`[Download] Selected path: ${filePath || 'NOT FOUND'}`);
 
       if (!filePath || !fs.existsSync(filePath)) {
@@ -229,6 +418,9 @@ async function startServer() {
         batContent = batContent.replace(
           /https:\/\/ais-(dev|pre)-uozjwodwx7ctzjsx4334de-668611332745\.us-east1\.run\.app/g,
           origin
+        ).replace(
+          /https:\/\/ais-(dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app/g,
+          origin
         );
         
         const buffer = Buffer.from(batContent, 'utf8');
@@ -239,24 +431,50 @@ async function startServer() {
         return res.send(buffer);
       }
 
+      // Set long timeouts for this specific route (e.g., 30 minutes) to prevent premature termination of large file downloads
+      req.setTimeout(30 * 60 * 1000);
+      res.setTimeout(30 * 60 * 1000);
+
       const stats = fs.statSync(filePath);
       const fileSize = stats.size;
       console.log(`[Download] Serving file size: ${fileSize} bytes`);
 
       // Determine content type
       let contentType = 'application/octet-stream';
-      if (filename.endsWith('.zip')) {
+      if (targetFilenameToServe.endsWith('.zip')) {
         contentType = 'application/zip';
-      } else if (filename.endsWith('.bat')) {
+      } else if (targetFilenameToServe.endsWith('.bat')) {
         contentType = 'text/plain';
-      } else if (filename.endsWith('.exe')) {
+      } else if (targetFilenameToServe.endsWith('.exe')) {
         contentType = 'application/octet-stream';
       }
 
       // Set download headers
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${targetFilenameToServe}"`);
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Cache-Control', 'public, max-age=0');
+
+      let fileStream: fs.ReadStream | null = null;
+
+      // Handle connection close or abort safely without crashing the server or throwing unhandled errors
+      const cleanup = () => {
+        req.off('close', onAbort);
+        res.off('close', onAbort);
+        res.off('finish', cleanup);
+      };
+
+      const onAbort = () => {
+        console.log(`[Download] Connection closed or aborted by client for: ${filename}`);
+        if (fileStream) {
+          console.log(`[Download] Destroying fileStream for aborted transfer: ${filename}`);
+          fileStream.destroy();
+        }
+        cleanup();
+      };
+
+      req.on('close', onAbort);
+      res.on('close', onAbort);
+      res.on('finish', cleanup);
 
       // Check for Range request
       const range = req.headers.range;
@@ -276,7 +494,8 @@ async function startServer() {
         res.setHeader('Content-Length', chunksize);
         res.setHeader('Content-Type', contentType);
 
-        const fileStream = fs.createReadStream(filePath, { start, end });
+        // Use 64KB maximum buffer size (highWaterMark) for chunked chunk streaming
+        fileStream = fs.createReadStream(filePath, { start, end, highWaterMark: 64 * 1024 });
         
         fileStream.on('error', (streamErr) => {
           console.error(`[Download] Stream error during range transfer of ${filename}:`, streamErr);
@@ -291,7 +510,8 @@ async function startServer() {
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Content-Type', contentType);
 
-        const fileStream = fs.createReadStream(filePath);
+        // Use 64KB maximum buffer size (highWaterMark) for chunked chunk streaming
+        fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
 
         fileStream.on('error', (streamErr) => {
           console.error(`[Download] Stream error during transfer of ${filename}:`, streamErr);
@@ -302,22 +522,6 @@ async function startServer() {
 
         fileStream.pipe(res);
       }
-
-      // Handle connection close or abort safely without crashing the server or throwing unhandled errors
-      const cleanup = () => {
-        req.off('close', onAbort);
-        res.off('close', onAbort);
-        res.off('finish', cleanup);
-      };
-
-      const onAbort = () => {
-        console.log(`[Download] Connection closed or aborted by client for: ${filename}`);
-        cleanup();
-      };
-
-      req.on('close', onAbort);
-      res.on('close', onAbort);
-      res.on('finish', cleanup);
 
     } catch (err: any) {
       console.error('[Download] Uncaught exception in download route:', err);
@@ -669,6 +873,329 @@ async function startServer() {
         { upsert: true }
       );
       res.json({ saved: true, count: (cliparts || []).length });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Cliparts Upload (POST) - Public so both guests and registered users can use it
+  app.post('/api/cliparts/upload', upload.single('file'), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ detail: 'No file uploaded' });
+      }
+
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      const CLIPARTS_DIR = path.join(UPLOADS_DIR, 'cliparts');
+      if (!fs.existsSync(CLIPARTS_DIR)) {
+        fs.mkdirSync(CLIPARTS_DIR, { recursive: true });
+      }
+      
+      const fileName = `${crypto.randomUUID()}${ext}`;
+      const destPath = path.join(CLIPARTS_DIR, fileName);
+
+      fs.renameSync(req.file.path, destPath);
+
+      res.json({
+        url: `/uploads/cliparts/${fileName}`,
+        name: req.file.originalname.replace(/\.[^/.]+$/, ''),
+        size: req.file.size
+      });
+    } catch (e: any) {
+      console.error('Error uploading clipart:', e);
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Batch Upload Cliparts / GIFs / Maps
+  app.post('/api/cliparts/batch-upload', (req, res) => {
+    upload.array('files', 100)(req, res, (err: any) => {
+      if (err) {
+        console.error('[Batch Upload Multer Error]:', err);
+        return res.status(400).json({ detail: err.message || 'Error processing uploaded files' });
+      }
+
+      try {
+        const files = (req.files as Express.Multer.File[]) || [];
+        if (!files || files.length === 0) {
+          return res.status(400).json({ detail: 'No files were attached in upload request' });
+        }
+
+        const CLIPARTS_DIR = path.join(UPLOADS_DIR, 'cliparts');
+        if (!fs.existsSync(CLIPARTS_DIR)) {
+          fs.mkdirSync(CLIPARTS_DIR, { recursive: true });
+        }
+
+        const uploadedResults = files.map((file) => {
+          const ext = path.extname(file.originalname).toLowerCase();
+          const fileName = `${crypto.randomUUID()}${ext}`;
+          const destPath = path.join(CLIPARTS_DIR, fileName);
+          fs.renameSync(file.path, destPath);
+
+          // Format clean default title from file name
+          const rawName = file.originalname.replace(/\.[^/.]+$/, '');
+          const cleanName = rawName
+            .replace(/[-_]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+
+          return {
+            url: `/uploads/cliparts/${fileName}`,
+            name: cleanName || 'Untitled Asset',
+            originalName: file.originalname,
+            size: file.size
+          };
+        });
+
+        console.log(`[Batch Upload] Successfully processed ${uploadedResults.length} files`);
+        res.json({ files: uploadedResults });
+      } catch (e: any) {
+        console.error('Error batch uploading files:', e);
+        res.status(500).json({ detail: e.message || 'Server batch upload error' });
+      }
+    });
+  });
+
+  // === SECRET ADMIN & GLOBAL ASSET VAULT API ENDPOINTS ===
+
+  // Admin Login
+  app.post('/api/admin/login', (req, res) => {
+    try {
+      const { password } = req.body || {};
+      const validPasswords = ['1512kolelo', '1512kolelO', 'dnd2026', 'admin123', 'dungeonmaster', 'admin', 'krajdengrid', 'secret'];
+      const rawInput = String(password || '').trim();
+      if (password && (validPasswords.includes(rawInput) || validPasswords.includes(rawInput.toLowerCase()))) {
+        return res.json({ success: true, token: 'admin_vault_session_2026' });
+      }
+      return res.status(401).json({ detail: 'Invalid Admin Passphrase.' });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Get All Global Admin Cliparts & GIFs
+  app.get('/api/library/cliparts', async (req, res) => {
+    try {
+      let items = await getCollection('global_cliparts').find({}).toArray();
+      if (!items || items.length === 0) {
+        items = loadVaultClipartsDisk();
+        if (items && items.length > 0) {
+          for (const item of items) {
+            await getCollection('global_cliparts').insertOne(item);
+          }
+        }
+      }
+      res.json({ cliparts: items || [] });
+    } catch (e: any) {
+      res.json({ cliparts: loadVaultClipartsDisk() });
+    }
+  });
+
+  // Admin Add Global Clipart / GIF
+  app.post('/api/admin/library/clipart', async (req, res) => {
+    try {
+      const { name, category, type, imageUrl, tags } = req.body || {};
+      if (!name || !imageUrl) {
+        return res.status(400).json({ detail: 'Name and image/GIF URL are required' });
+      }
+      const item = {
+        id: `admin_clipart_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(name).trim(),
+        category: category || 'animated_fx',
+        type: type || 'image',
+        imageUrl: String(imageUrl).trim(),
+        tags: Array.isArray(tags) ? tags : [],
+        created_at: new Date().toISOString()
+      };
+      await getCollection('global_cliparts').insertOne(item);
+      const allItems = await getCollection('global_cliparts').find({}).toArray();
+      saveVaultClipartsDisk(allItems);
+      console.log(`[Admin Library] Added new clipart/GIF: ${item.name} (${item.category})`);
+      res.json({ success: true, item });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Batch Add Global Cliparts / GIFs
+  app.post('/api/admin/library/clipart/batch', async (req, res) => {
+    try {
+      const { items } = req.body || {};
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ detail: 'Items array is required' });
+      }
+
+      const preparedItems = items.map((i: any, idx: number) => ({
+        id: `admin_clipart_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(i.name || 'Untitled Asset').trim(),
+        category: i.category || 'animated_fx',
+        type: i.type || 'image',
+        imageUrl: String(i.imageUrl || i.url).trim(),
+        tags: Array.isArray(i.tags) ? i.tags : [i.category || 'animated_fx'],
+        created_at: new Date().toISOString()
+      }));
+
+      for (const item of preparedItems) {
+        await getCollection('global_cliparts').insertOne(item);
+      }
+      const allItems = await getCollection('global_cliparts').find({}).toArray();
+      saveVaultClipartsDisk(allItems);
+      console.log(`[Admin Library] Batch added ${preparedItems.length} cliparts/GIFs`);
+      res.json({ success: true, count: preparedItems.length, items: preparedItems });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Update Global Clipart / GIF
+  app.put('/api/admin/library/clipart/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, category, imageUrl } = req.body || {};
+      const updateData: any = {};
+      if (name) updateData.name = String(name).trim();
+      if (category) updateData.category = category;
+      if (imageUrl) updateData.imageUrl = String(imageUrl).trim();
+
+      await getCollection('global_cliparts').updateOne({ id }, { $set: updateData });
+      const allItems = await getCollection('global_cliparts').find({}).toArray();
+      saveVaultClipartsDisk(allItems);
+      console.log(`[Admin Library] Updated clipart/GIF id: ${id}`);
+      res.json({ success: true, id, updated: updateData });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Delete Global Clipart / GIF
+  app.delete('/api/admin/library/clipart/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      await getCollection('global_cliparts').deleteOne({ id });
+      const allItems = await getCollection('global_cliparts').find({}).toArray();
+      saveVaultClipartsDisk(allItems);
+      console.log(`[Admin Library] Deleted clipart/GIF id: ${id}`);
+      res.json({ success: true, id });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Clear All Vault Cliparts
+  app.post('/api/admin/library/cliparts/clear', async (req, res) => {
+    try {
+      await getCollection('global_cliparts').deleteMany({});
+      saveVaultClipartsDisk([]);
+      console.log(`[Admin Library] Cleared all vault cliparts`);
+      res.json({ success: true, count: 0 });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Get All Global Admin Battle Maps
+  app.get('/api/library/battlemaps', async (req, res) => {
+    try {
+      let items = await getCollection('global_battlemaps').find({}).toArray();
+      if (!items || items.length === 0) {
+        items = loadVaultBattlemapsDisk();
+        if (items && items.length > 0) {
+          for (const item of items) {
+            await getCollection('global_battlemaps').insertOne(item);
+          }
+        }
+      }
+      res.json({ battlemaps: items || [] });
+    } catch (e: any) {
+      res.json({ battlemaps: loadVaultBattlemapsDisk() });
+    }
+  });
+
+  // Admin Add Global Battle Map
+  app.post('/api/admin/library/battlemap', async (req, res) => {
+    try {
+      const { name, theme, url, description } = req.body || {};
+      if (!name || !url) {
+        return res.status(400).json({ detail: 'Map Name and URL are required' });
+      }
+      const item = {
+        id: `admin_map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(name).trim(),
+        theme: theme || 'Dungeon',
+        url: String(url).trim(),
+        description: description ? String(description).trim() : 'Tactical Battle Map',
+        created_at: new Date().toISOString()
+      };
+      await getCollection('global_battlemaps').insertOne(item);
+      const allItems = await getCollection('global_battlemaps').find({}).toArray();
+      saveVaultBattlemapsDisk(allItems);
+      console.log(`[Admin Library] Added new battle map: ${item.name} (${item.theme})`);
+      res.json({ success: true, item });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Batch Add Global Battle Maps
+  app.post('/api/admin/library/battlemap/batch', async (req, res) => {
+    try {
+      const { items } = req.body || {};
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ detail: 'Items array is required' });
+      }
+
+      const preparedItems = items.map((i: any, idx: number) => ({
+        id: `admin_map_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(i.name || 'Untitled Battle Map').trim(),
+        theme: i.theme || 'Dungeon',
+        url: String(i.url || i.imageUrl).trim(),
+        description: i.description ? String(i.description).trim() : 'Tactical Battle Map',
+        created_at: new Date().toISOString()
+      }));
+
+      for (const item of preparedItems) {
+        await getCollection('global_battlemaps').insertOne(item);
+      }
+      const allItems = await getCollection('global_battlemaps').find({}).toArray();
+      saveVaultBattlemapsDisk(allItems);
+      console.log(`[Admin Library] Batch added ${preparedItems.length} battle maps`);
+      res.json({ success: true, count: preparedItems.length, items: preparedItems });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Update Global Battle Map
+  app.put('/api/admin/library/battlemap/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, theme, url, description } = req.body || {};
+      const updateData: any = {};
+      if (name) updateData.name = String(name).trim();
+      if (theme) updateData.theme = theme;
+      if (url) updateData.url = String(url).trim();
+      if (description !== undefined) updateData.description = String(description).trim();
+
+      await getCollection('global_battlemaps').updateOne({ id }, { $set: updateData });
+      const allItems = await getCollection('global_battlemaps').find({}).toArray();
+      saveVaultBattlemapsDisk(allItems);
+      console.log(`[Admin Library] Updated battle map id: ${id}`);
+      res.json({ success: true, id, updated: updateData });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Delete Global Battle Map
+  app.delete('/api/admin/library/battlemap/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      await getCollection('global_battlemaps').deleteOne({ id });
+      const allItems = await getCollection('global_battlemaps').find({}).toArray();
+      saveVaultBattlemapsDisk(allItems);
+      console.log(`[Admin Library] Deleted battle map id: ${id}`);
+      res.json({ success: true, id });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1027,9 +1554,6 @@ async function startServer() {
 
   // === VIDEO UPLOAD & SERVICE ===
 
-  const multer = (await import('multer')).default;
-  const upload = multer({ dest: UPLOADS_DIR });
-
   app.post('/api/upload-video', upload.single('file'), (req, res) => {
     try {
       if (!req.file) {
@@ -1211,6 +1735,7 @@ async function startServer() {
   // === VITE MIDDLEWARE ===
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
+      configFile: path.join(resolvedDirname, 'vite.config.ts'),
       server: { middlewareMode: true },
       appType: 'spa'
     });

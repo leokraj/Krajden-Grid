@@ -1,76 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useLicense } from '../context/LicenseContext';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Key, Clock, CreditCard, CheckCircle, AlertTriangle, X, Loader2, AlertCircle } from 'lucide-react';
-
-// Trial banner shown at top of app during trial period
-export const TrialBanner = () => {
-  const license = useLicense();
-  const [showActivate, setShowActivate] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-
-  if (!license) return null;
-  const { status, daysRemaining } = license;
-  if (status === 'licensed' || status === 'checking' || dismissed) return null;
-  if (status !== 'trial') return null;
-
-  const days = Math.ceil(daysRemaining);
-
-  return (
-    <>
-      <div className="h-9 bg-[#111214] border-b border-[#caa055]/20 text-[10px] text-slate-cool uppercase font-outfit tracking-wider flex items-center justify-between px-6 z-[9999] relative" data-testid="trial-banner">
-        <div className="w-5" /> {/* Spacer to perfectly center the content */}
-        <div className="flex items-center gap-1.5 justify-center">
-          <AlertCircle className="w-3.5 h-3.5 text-[#caa055]" />
-          <span className="font-semibold text-white/90">
-            {days} day{days !== 1 ? 's' : ''} left in campaign trial
-          </span>
-          <span className="text-[#caa055]/40 mx-1.5">·</span>
-          <button
-            onClick={() => setShowActivate(true)}
-            className="text-[#caa055] hover:text-[#d5b271] font-semibold transition-colors cursor-pointer underline underline-offset-4 decoration-[#caa055]/40"
-            data-testid="trial-buy-btn"
-          >
-            Get Lifetime License — $15
-          </button>
-        </div>
-        <button onClick={() => setDismissed(true)} className="text-slate-muted hover:text-[#caa055] transition-colors cursor-pointer">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      {showActivate && <LicenseModal onClose={() => setShowActivate(false)} />}
-    </>
-  );
-};
-
-// Full-screen paywall when trial expires
-export const ExpiredGate = ({ children }) => {
-  const license = useLicense();
-  if (!license) return children; // No license provider = no gate (Electron)
-  if (license.status === 'expired') return <ExpiredScreen />;
-  return children;
-};
-
-// Expired screen with purchase + activate options
-const ExpiredScreen = () => {
-  return (
-    <div className="fixed inset-0 bg-[#1c1d1f] flex items-center justify-center z-[99999] p-4">
-      <div className="max-w-md w-full bg-[#141517] rounded-2xl border border-[#caa055]/15 p-8 text-center shadow-2xl">
-        <div className="w-16 h-16 rounded-full bg-[#dc143c]/10 flex items-center justify-center mx-auto mb-5 border border-[#dc143c]/20">
-          <AlertTriangle className="w-8 h-8 text-[#dc143c]" />
-        </div>
-        <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: "'Cinzel', serif" }}>Campaign Trial Ended</h1>
-        <p className="text-gray-400 text-sm mb-6 font-sans leading-relaxed">
-          Your 7-day Krajden Grid trial has expired. Acquire a lifetime artifact key to continue designing and syncing your fantasy battlefields.
-        </p>
-        <LicenseActions />
-      </div>
-    </div>
-  );
-};
+import { Shield, Key, CreditCard, CheckCircle, AlertTriangle, X, Loader2, AlertCircle } from 'lucide-react';
 
 // Shared purchase + activate UI
-const LicenseActions = () => {
+export function LicenseActions() {
   const [mode, setMode] = useState('purchase'); // 'purchase' | 'activate'
   const { user } = useAuth();
   const [email, setEmail] = useState(user?.email || '');
@@ -203,10 +137,10 @@ const LicenseActions = () => {
       )}
     </div>
   );
-};
+}
 
 // Modal version of license actions (for in-app use)
-export const LicenseModal = ({ onClose }) => {
+export function LicenseModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div className="max-w-sm w-full bg-[#141517] rounded-2xl border border-[#caa055]/15 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -221,25 +155,80 @@ export const LicenseModal = ({ onClose }) => {
       </div>
     </div>
   );
-};
+}
+
+// Expired screen with purchase + activate options
+export function ExpiredScreen() {
+  return (
+    <div className="fixed inset-0 bg-[#1c1d1f] flex items-center justify-center z-[99999] p-4">
+      <div className="max-w-md w-full bg-[#141517] rounded-2xl border border-[#caa055]/15 p-8 text-center shadow-2xl">
+        <div className="w-16 h-16 rounded-full bg-[#dc143c]/10 flex items-center justify-center mx-auto mb-5 border border-[#dc143c]/20">
+          <AlertTriangle className="w-8 h-8 text-[#dc143c]" />
+        </div>
+        <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: "'Cinzel', serif" }}>Campaign Trial Ended</h1>
+        <p className="text-gray-400 text-sm mb-6 font-sans leading-relaxed">
+          Your 7-day Krajden Grid trial has expired. Acquire a lifetime artifact key to continue designing and syncing your fantasy battlefields.
+        </p>
+        <LicenseActions />
+      </div>
+    </div>
+  );
+}
+
+// Trial banner shown at top of app during trial period
+export function TrialBanner() {
+  const license = useLicense();
+  const [showActivate, setShowActivate] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!license) return null;
+  const { status, daysRemaining } = license;
+  if (status === 'licensed' || status === 'checking' || dismissed) return null;
+  if (status !== 'trial') return null;
+
+  const days = Math.ceil(daysRemaining);
+
+  return (
+    <>
+      <div className="h-9 bg-[#111214] border-b border-[#caa055]/20 text-[10px] text-slate-cool uppercase font-outfit tracking-wider flex items-center justify-between px-6 z-[9999] relative" data-testid="trial-banner">
+        <div className="w-5" /> {/* Spacer to perfectly center the content */}
+        <div className="flex items-center gap-1.5 justify-center">
+          <AlertCircle className="w-3.5 h-3.5 text-[#caa055]" />
+          <span className="font-semibold text-white/90">
+            {days} day{days !== 1 ? 's' : ''} left in campaign trial
+          </span>
+          <span className="text-[#caa055]/40 mx-1.5">·</span>
+          <button
+            onClick={() => setShowActivate(true)}
+            className="text-[#caa055] hover:text-[#d5b271] font-semibold transition-colors cursor-pointer underline underline-offset-4 decoration-[#caa055]/40"
+            data-testid="trial-buy-btn"
+          >
+            Get Lifetime License — $15
+          </button>
+        </div>
+        <button onClick={() => setDismissed(true)} className="text-slate-muted hover:text-[#caa055] transition-colors cursor-pointer">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {showActivate && <LicenseModal onClose={() => setShowActivate(false)} />}
+    </>
+  );
+}
+
+// Full-screen paywall when trial expires
+export function ExpiredGate({ children }) {
+  const license = useLicense();
+  if (!license) return children; // No license provider = no gate (Electron)
+  if (license.status === 'expired') return <ExpiredScreen />;
+  return children;
+}
 
 // License success page component (shown after Stripe redirect)
-export const LicenseSuccessPage = () => {
+export function LicenseSuccessPage() {
   const [status, setStatus] = useState('polling');
   const [licenseKey, setLicenseKey] = useState('');
   const [error, setError] = useState('');
   const { pollPurchaseStatus, activateLicense } = useLicense();
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session_id');
-    if (!sessionId) {
-      setError('No session ID found');
-      setStatus('error');
-      return;
-    }
-    pollStatus(sessionId, 0);
-  }, []);
 
   const pollStatus = async (sessionId, attempts) => {
     if (attempts >= 10) {
@@ -268,6 +257,17 @@ export const LicenseSuccessPage = () => {
       setTimeout(() => pollStatus(sessionId, attempts + 1), 2000);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    if (!sessionId) {
+      setError('No session ID found');
+      setStatus('error');
+      return;
+    }
+    pollStatus(sessionId, 0);
+  }, []);
 
   const copyKey = () => {
     navigator.clipboard.writeText(licenseKey);
@@ -321,4 +321,4 @@ export const LicenseSuccessPage = () => {
       </div>
     </div>
   );
-};
+}
