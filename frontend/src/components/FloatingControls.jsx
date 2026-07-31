@@ -848,21 +848,30 @@ export const FloatingControls = ({ onClose }) => {
                           >
                             Rectangle
                           </button>
+                          <button
+                            onClick={() => updateSettings({ maskTool: 'circle' })}
+                            className={`flex-1 ${getButtonClass(settings.maskTool === 'circle')}`}
+                            data-testid="mask-tool-circle"
+                          >
+                            Circle
+                          </button>
                         </div>
                       </div>
 
-                      {/* Brush Size (only for brush tool) */}
-                      {settings.maskTool === 'brush' && (
+                      {/* Brush/Circle Size */}
+                      {(settings.maskTool === 'brush' || settings.maskTool === 'circle') && (
                         <div className="space-y-1">
                           <div className="flex items-center justify-between">
-                            <Label className="text-[10px] text-slate-cool font-outfit font-semibold">Brush Size</Label>
+                            <Label className="text-[10px] text-slate-cool font-outfit font-semibold">
+                              {settings.maskTool === 'circle' ? 'Circle Radius' : 'Brush Size'}
+                            </Label>
                             <span className="text-xs text-slate-muted font-mono">{settings.maskBrushSize}px</span>
                           </div>
                           <Slider
                             value={[settings.maskBrushSize]}
                             onValueChange={([v]) => updateSettings({ maskBrushSize: v })}
                             min={5}
-                            max={200}
+                            max={300}
                             step={1}
                             data-testid="mask-brush-size"
                           />
