@@ -119,7 +119,15 @@ const defaultSettings = {
   maskRects: [],
   pingMode: false,
   pingColor: '#FFD700',
-  pingLabel: ''
+  pingLabel: '',
+  // Effects drawing tool
+  effectsEnabled: false,
+  effectPaths: [],
+  activeEffectId: null,
+  activeEffectUrl: null,
+  // Fog of war shape tools (rect + circle in addition to freehand brush)
+  maskShapeTool: null,
+  maskShapeRadius: 80,
 };
 
 const GridContext = createContext(undefined);
@@ -599,12 +607,103 @@ export const GridProvider = ({ children }) => {
       if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
         window.electronAPI.broadcast("settings-update", { settings: { placedCliparts: nextPlaced } });
       }
-      return {
-        ...prev,
-        placedCliparts: nextPlaced
-      };
+      return { ...prev, placedCliparts: nextPlaced };
     });
     setSelectedClipartId((curr) => (curr === instanceId ? null : curr));
+  }, []);
+
+  // ── Token label ────────────────────────────────────────────────────────────
+  const setTokenLabel = useCallback((instanceId, label) => {
+    setSettings((prev) => ({
+      ...prev,
+      placedCliparts: (prev.placedCliparts || []).map((cp) =>
+        cp.instanceId === instanceId ? { ...cp, label: label ?? '' } : cp
+      ),
+    }));
+  }, []);
+
+  // ── Token status conditions ────────────────────────────────────────────────
+  const toggleTokenStatus = useCallback((instanceId, status) => {
+    setSettings((prev) => ({
+      ...prev,
+      placedCliparts: (prev.placedCliparts || []).map((cp) => {
+        if (cp.instanceId !== instanceId) return cp;
+        const current = cp.statuses || [];
+        const next = current.includes(status)
+          ? current.filter((s) => s !== status)
+          : [...current, status];
+        return { ...cp, statuses: next };
+      }),
+    }));
+  }, []);
+
+  // ── Token z-order ──────────────────────────────────────────────────────────
+  const bringTokenToFront = useCallback((instanceId) => {
+    setSettings((prev) => {
+      const placed = [...(prev.placedCliparts || [])];
+      const idx = placed.findIndex((cp) => cp.instanceId === instanceId);
+      if (idx === -1 || idx === placed.length - 1) return prev;
+      const [item] = placed.splice(idx, 1);
+      placed.push(item);
+      return { ...prev, placedCliparts: placed };
+    });
+  }, []);
+
+  const sendTokenToBack = useCallback((instanceId) => {
+    setSettings((prev) => {
+      const placed = [...(prev.placedCliparts || [])];
+      const idx = placed.findIndex((cp) => cp.instanceId === instanceId);
+      if (idx <= 0) return prev;
+      const [item] = placed.splice(idx, 1);
+      placed.unshift(item);
+      return { ...prev, placedCliparts: placed };
+    });
+  }, []);
+
+  // ── D&D 5e token size presets ──────────────────────────────────────────────
+  const TOKEN_SIZE_PRESETS = [
+    { label: 'Tiny (½×½)', multiplier: 0.5 },
+    { label: 'Small (1×1)', multiplier: 1 },
+    { label: 'Medium (1×1)', multiplier: 1 },
+    { label: 'Large (2×2)', multiplier: 2 },
+    { label: 'Huge (3×3)', multiplier: 3 },
+    { label: 'Gargantuan (4×4)', multiplier: 4 },
+  ];
+
+  const DND_CONDITIONS = [
+    'Blinded','Charmed','Deafened','Exhaustion','Frightened',
+    'Grappled','Incapacitated','Invisible','Paralyzed','Petrified',
+    'Poisoned','Prone','Restrained','Stunned','Unconscious',
+    'Concentrating','Bleeding',
+  ];
+
+  // ── Effects tool ───────────────────────────────────────────────────────────
+  const addEffectPath = useCallback((effectPath) => {
+    setSettings((prev) => ({
+      ...prev,
+      effectPaths: [...(prev.effectPaths || []), {
+        ...effectPath,
+        id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
+      }],
+    }));
+  }, []);
+
+  const updateEffectPath = useCallback((id, updates) => {
+    setSettings((prev) => ({
+      ...prev,
+      effectPaths: (prev.effectPaths || []).map((e) => e.id === id ? { ...e, ...updates } : e),
+    }));
+  }, []);
+
+  const removeEffectPath = useCallback((id) => {
+    setSettings((prev) => ({
+      ...prev,
+      effectPaths: (prev.effectPaths || []).filter((e) => e.id !== id),
+    }));
+  }, []);
+
+  const clearEffectPaths = useCallback(() => {
+    setSettings((prev) => ({ ...prev, effectPaths: [] }));
   }, []);
 
   const groupSelectedCliparts = useCallback(() => {
@@ -718,8 +817,14 @@ export const GridProvider = ({ children }) => {
       gridColor: settings.gridColor,
       gridSize: settings.gridSize,
       gridOpacity: settings.gridOpacity,
+      backgroundColor: settings.backgroundColor,
+      lineThickness: settings.lineThickness,
+      opacity: settings.opacity,
+      // Effects and pings are part of the scene
+      effectPaths: JSON.parse(JSON.stringify(settings.effectPaths || [])),
+      pingsSnapshot: JSON.parse(JSON.stringify(pings || [])),
     };
-  }, [settings, measurements]);
+  }, [settings, measurements, pings]);
 
   const saveNewScene = useCallback((name, description = '') => {
     const data = captureCanvasData();
@@ -804,16 +909,26 @@ export const GridProvider = ({ children }) => {
         backgroundImageY: d.backgroundImageY ?? prev.backgroundImageY,
         backgroundImageRotation: d.backgroundImageRotation ?? prev.backgroundImageRotation,
         useBackgroundImage: d.useBackgroundImage ?? prev.useBackgroundImage,
+        effectPaths: d.effectPaths || [],
       };
       if (d.gridType) nextSettings.gridType = d.gridType;
       if (d.gridColor) nextSettings.gridColor = d.gridColor;
       if (d.gridSize) nextSettings.gridSize = d.gridSize;
+      if (d.backgroundColor) nextSettings.backgroundColor = d.backgroundColor;
+      if (d.lineThickness !== undefined) nextSettings.lineThickness = d.lineThickness;
+      if (d.opacity !== undefined) nextSettings.opacity = d.opacity;
 
       if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
         window.electronAPI.broadcast("settings-update", { settings: nextSettings });
       }
       return nextSettings;
     });
+
+    // Restore pings from scene snapshot
+    if (d.pingsSnapshot) {
+      setPings(d.pingsSnapshot);
+      try { localStorage.setItem('overgrid_pings', JSON.stringify(d.pingsSnapshot)); } catch(e) {}
+    }
 
     toast.success(`Loaded scene: "${scene.name}"`);
   }, [scenes]);
@@ -1385,6 +1500,16 @@ export const GridProvider = ({ children }) => {
     addPlacedClipart,
     updatePlacedClipart,
     removePlacedClipart,
+    setTokenLabel,
+    toggleTokenStatus,
+    bringTokenToFront,
+    sendTokenToBack,
+    TOKEN_SIZE_PRESETS,
+    DND_CONDITIONS,
+    addEffectPath,
+    updateEffectPath,
+    removeEffectPath,
+    clearEffectPaths,
     clearAllCliparts,
     selectedClipartId,
     setSelectedClipartId,
