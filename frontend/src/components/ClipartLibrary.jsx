@@ -1012,6 +1012,7 @@ export const PlacedClipart = ({
   onUpdate,
   onLiveMove,
   onDelete,
+  onContextMenu,
   canEdit = true,
   disabled = false,
   snapToGrid = false,
@@ -1248,6 +1249,11 @@ export const PlacedClipart = ({
       }}
       onMouseDown={handleMouseDown}
       onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu?.(e, clipart.instanceId);
+      }}
     >
       {/* Active Turn Glowing Ring Indicator */}
       {isActiveTurn && (
@@ -1330,6 +1336,29 @@ export const PlacedClipart = ({
           </div>
         )}
       </div>
+
+      {/* Token label — optional, shown below the token */}
+      {clipart.label && (
+        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap"
+          style={{ top: clipSize + 4 }}>
+          <span className="text-[10px] font-bold text-white bg-black/75 rounded px-1.5 py-0.5 border border-white/20 shadow-lg">
+            {clipart.label}
+          </span>
+        </div>
+      )}
+
+      {/* Manual status badges (from radial menu) */}
+      {(clipart.statuses || []).length > 0 && (
+        <div className="absolute -top-3 -left-3 flex flex-wrap gap-0.5 max-w-[48px] z-20 pointer-events-none">
+          {(clipart.statuses || []).map((s, i) => (
+            <span key={i}
+              className="h-4 w-4 rounded-full bg-red-700 border border-white/30 flex items-center justify-center text-[7px] font-bold text-white shadow-md"
+              title={s}>
+              {s[0]}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Controls when selected */}
       {isSelected && canEdit && !isDragging && (
