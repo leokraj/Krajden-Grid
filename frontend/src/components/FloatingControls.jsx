@@ -15,6 +15,7 @@ import { CommunityBrowser } from './CommunityBrowser';
 import BackgroundLayersPanel from './BackgroundLayersPanel';
 import SceneEditorPanel from './SceneEditorPanel';
 import { FloatingWindow } from './FloatingWindow';
+import { EffectsControlPanel } from './EffectsLayer';
 import { CustomizationModal } from './CustomizationModal';
 import { 
   Grid3X3, 
@@ -946,6 +947,21 @@ export const FloatingControls = ({ onClose }) => {
                     </div>
                   )}
                 </div>
+              )}
+              <Separator className="bg-[#caa055]/15" />
+            </div>
+
+            {/* Effects Tool */}
+            <div className="space-y-3" id="section-effects">
+              <button onClick={() => toggleSection('effects')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                  <span className="text-base leading-none">✨</span>
+                  Effects Tool
+                </span>
+                {collapsedSections.effects ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </button>
+              {!collapsedSections.effects && (
+                <EffectsControlPanel />
               )}
               <Separator className="bg-[#caa055]/15" />
             </div>
