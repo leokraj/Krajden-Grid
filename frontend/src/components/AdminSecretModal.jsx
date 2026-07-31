@@ -21,6 +21,7 @@ import {
   Sparkles,
   CheckCircle,
   FolderPlus,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function AdminSecretModal({ isOpen, onClose }) {
@@ -544,10 +545,14 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       const backendUrl = window.location.origin;
       const targetItem = cliparts.find(c => c.id === id);
       const url = targetItem ? (targetItem.imageUrl || targetItem.url) : null;
+      const adminToken = localStorage.getItem('krajden_admin_token') || '';
 
       const res = await fetch(`${backendUrl}/api/admin/library/clipart/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
         body: JSON.stringify({ url, name }),
       });
 
@@ -571,10 +576,14 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       const backendUrl = window.location.origin;
       const targetItem = battlemaps.find(m => m.id === id);
       const url = targetItem ? (targetItem.url || targetItem.imageUrl) : null;
+      const adminToken = localStorage.getItem('krajden_admin_token') || '';
 
       const res = await fetch(`${backendUrl}/api/admin/library/battlemap/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
         body: JSON.stringify({ url, name }),
       });
 
@@ -596,19 +605,47 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     try {
       const backendUrl = window.location.origin;
+      const adminToken = localStorage.getItem('krajden_admin_token') || '';
       const res = await fetch(`${backendUrl}/api/admin/library/cliparts/clear`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
       });
 
       if (res.ok) {
         toast.success("Cleared all vault tokens!");
         setCliparts([]);
+        localStorage.setItem('krajden_vault_cleared', 'true');
         window.dispatchEvent(new CustomEvent('krajden_library_updated'));
       } else {
         toast.error('Failed to clear vault');
       }
     } catch (err) {
       toast.error('Clear error: ' + err.message);
+    }
+  };
+
+  // Handle Reseed Default Vault Cliparts/Tokens
+  const handleReseedVault = async () => {
+    try {
+      const backendUrl = window.location.origin;
+      const res = await fetch(`${backendUrl}/api/admin/library/cliparts/reseed`, {
+        method: 'POST',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Restored ${data.count || 0} default vault tokens!`);
+        localStorage.removeItem('krajden_vault_cleared');
+        fetchLibraryItems();
+        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      } else {
+        toast.error('Failed to restore default vault');
+      }
+    } catch (err) {
+      toast.error('Reseed error: ' + err.message);
     }
   };
 
@@ -877,7 +914,16 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                       <h4 className="text-xs font-bold font-cinzel tracking-widest text-gold uppercase">
                         Global Vault GIFs & Tokens ({cliparts.length})
                       </h4>
-                      {cliparts.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={handleReseedVault}
+                          size="sm"
+                          variant="outline"
+                          className="border-gold/30 text-gold hover:bg-gold/10 text-xs font-bold gap-1.5"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Restore Default Vault
+                        </Button>
                         <Button
                           onClick={handleClearAllCliparts}
                           size="sm"
@@ -887,7 +933,7 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                           <Trash2 className="w-3.5 h-3.5 text-red-400" />
                           Clear All Vault Tokens
                         </Button>
-                      )}
+                      </div>
                     </div>
 
                     {isLoadingLibrary ? (
