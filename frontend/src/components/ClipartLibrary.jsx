@@ -4,6 +4,19 @@ import { DEFAULT_VAULT_CLIPARTS } from '../data/vaultPresets';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
+import { 
+  X, 
+  Star,
+  Upload,
+  Search,
+  RotateCw,
+  Maximize2,
+  Trash2,
+  GripVertical,
+  ExternalLink,
+  Minimize2,
+  Layers
+} from 'lucide-react';
 
 export const getFallbackTokenSvg = (name = 'Token') => {
   const initial = (name || 'Token').trim().charAt(0).toUpperCase() || 'T';
@@ -67,20 +80,6 @@ export const isTokenAsset = (item) => {
     id.startsWith('preset_monster_')
   );
 };
-import { 
-  X, 
-  Star,
-  Upload,
-  Search,
-  RotateCw,
-  Maximize2,
-  Trash2,
-  GripVertical,
-  ExternalLink,
-  Minimize2,
-  Layers
-} from 'lucide-react';
-
 // Helper to generate crisp, dark fantasy circular RPG tokens (SVG data URLs)
 const makeTokenSvg = (ringColor, bg1, bg2, label, iconSvg) => {
   const labelClean = label.replace(/[^a-z0-9]/gi, '_');
