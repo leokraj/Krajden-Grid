@@ -7,6 +7,7 @@ import { Toaster } from '../components/ui/sonner';
 import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
+import { EffectsDrawingOverlay } from '../components/EffectsLayer';
 
 export function FullscreenContent() {
   const { 
@@ -241,6 +242,11 @@ export function FullscreenContent() {
         interactive={true} 
         fullscreen={true} 
         className="absolute inset-0 z-10" 
+      />
+
+      {/* Effects drawing layer — video/GIF effects along drawn paths */}
+      <EffectsDrawingOverlay
+        canvasSize={{ width: window.screen.width || 1920, height: window.screen.height || 1080 }}
       />
 
       {/* Floating UI Overlays */}
