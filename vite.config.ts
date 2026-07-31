@@ -35,6 +35,9 @@ export default defineConfig(() => {
         },
       },
     } as any,
+    build: {
+      sourcemap: process.env.GENERATE_SOURCEMAP === 'true' || true,
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

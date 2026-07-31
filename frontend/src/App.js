@@ -1,5 +1,5 @@
-import "../../App.css";
-import { useEffect, lazy, Suspense } from "react";
+import "@/App.css";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { LicenseProvider } from "./context/LicenseContext";
@@ -8,13 +8,11 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import HomePage from "./pages/HomePage";
 import AppPage from "./pages/AppPage";
 import DownloadPage from "./pages/DownloadPage";
+import FullscreenPage from "./pages/FullscreenPage";
 import JoinPage from "./pages/JoinPage";
 import DisplayPage from "./pages/DisplayPage";
 import RemotePage from "./pages/RemotePage";
 import AuthCallback from "./components/AuthCallback";
-
-// Lazy import to match JoinPage's dynamic import — fixes Vite bundler initialization error
-const FullscreenPage = lazy(() => import("./pages/FullscreenPage"));
 
 function AppRouter() {
   const location = useLocation();
@@ -53,7 +51,7 @@ function AppRouter() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/app" element={<AppPage />} />
-            <Route path="/fullscreen" element={<Suspense fallback={<div style={{background:'#0a0a0a',width:'100vw',height:'100vh'}}/>}><FullscreenPage /></Suspense>} />
+            <Route path="/fullscreen" element={<FullscreenPage />} />
             <Route path="/download" element={<DownloadPage />} />
             <Route path="/join/:code" element={<JoinPage />} />
             <Route path="/display" element={<DisplayPage />} />
@@ -64,7 +62,7 @@ function AppRouter() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/app" element={<AppPage />} />
-          <Route path="/fullscreen" element={<Suspense fallback={<div style={{background:'#0a0a0a',width:'100vw',height:'100vh'}}/>}><FullscreenPage /></Suspense>} />
+          <Route path="/fullscreen" element={<FullscreenPage />} />
           <Route path="/download" element={<DownloadPage />} />
           <Route path="/join/:code" element={<JoinPage />} />
           <Route path="/display" element={<DisplayPage />} />

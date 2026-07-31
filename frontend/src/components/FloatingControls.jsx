@@ -159,6 +159,7 @@ export const FloatingControls = ({ onClose }) => {
   const [showCustomizationModal, setShowCustomizationModal] = useState(false);
   const [maskSaveName, setMaskSaveName] = useState('');
   const [collapsedSections, setCollapsedSections] = useState({
+    effects: false,
     geometry: true,
     measure: true,
     ping: true,

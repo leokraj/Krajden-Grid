@@ -18,7 +18,6 @@ import {
   Layers,
   Grid
 } from 'lucide-react';
-import { toast } from 'sonner';
 
 export function RadialContextMenu() {
   const { 

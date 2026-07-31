@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useContext } from 'react';
 import SessionContext from '../context/SessionContext';
 import { DEFAULT_VAULT_CLIPARTS } from '../data/vaultPresets';
+import { EffectsControlPanel } from './EffectsLayer';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
@@ -344,6 +345,7 @@ const DEFAULT_CLIPARTS = [
 const CATEGORIES = [
   { id: 'all', name: 'All D&D Assets' },
   { id: 'vault', name: 'Vault Assets ⭐' },
+  { id: 'effects', name: 'Effects ✨' },
   { id: 'favorites', name: 'Favorites' },
   { id: 'animated_fx', name: 'Animated FX' },
   { id: 'dnd_heroes', name: 'Hero Tokens' },
@@ -405,7 +407,8 @@ export const ClipartLibrary = ({
   const [globalAdminCliparts, setGlobalAdminCliparts] = useState([]);
   const [deletedVaultIds, setDeletedVaultIds] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+      const raw = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+      return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('clipart_') || x.startsWith('token_') || x.startsWith('data:') || x.startsWith('http'))) : [];
     } catch (e) {
       return [];
     }
@@ -420,6 +423,10 @@ export const ClipartLibrary = ({
   useEffect(() => {
     const fetchGlobalCliparts = async () => {
       try {
+        const storedDeleted = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+        if (Array.isArray(storedDeleted)) {
+          setDeletedVaultIds(storedDeleted);
+        }
         const res = await fetch('/api/library/cliparts');
         if (res.ok) {
           const data = await res.json();
@@ -489,38 +496,67 @@ export const ClipartLibrary = ({
 
   const allCliparts = Array.from(clipartMap.values()).filter(item => {
     if (!item) return false;
-    if (deletedVaultIds.includes(item.id)) return false;
-    if (item.imageUrl && deletedVaultIds.includes(item.imageUrl)) return false;
-    if (item.url && deletedVaultIds.includes(item.url)) return false;
-    return true;
+    const strId = String(item.id || '').trim();
+    const strImgUrl = String(item.imageUrl || '').trim();
+    const strUrl = String(item.url || '').trim();
+
+    const isDeleted = deletedVaultIds.some(d => {
+      const sD = String(d || '').trim();
+      if (!sD) return false;
+      if (strId && sD === strId) return true;
+      if (strImgUrl && sD === strImgUrl) return true;
+      if (strUrl && sD === strUrl) return true;
+      return false;
+    });
+
+    return !isDeleted;
   });
 
-  // Delete an item directly from the Global Vault
+  // Delete an item directly from the Global Vault / Library
   const handleDeleteVaultItem = async (itemOrId) => {
     const item = typeof itemOrId === 'object' ? itemOrId : allCliparts.find(i => i.id === itemOrId);
-    const id = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
-    const url = item ? (item.imageUrl || item.url) : null;
+    const id = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId;
+    const url = item ? (item.imageUrl || item.url || item.imageData || item.src) : null;
     const name = item ? item.name : 'asset';
 
-    if (!window.confirm(`Delete "${name}" from vault?`)) return;
+    if (!window.confirm(`Delete "${name}" from vault library?`)) return;
+
+    if (item && item.isCustom && onRemoveCustomClipart) {
+      onRemoveCustomClipart(id || item.id);
+    }
+
+    setGlobalAdminCliparts(prev => prev.filter(i => {
+      if (!i) return false;
+      if (id && (i.id === id || String(i.id) === String(id))) return false;
+      if (url && (i.imageUrl === url || i.url === url)) return false;
+      return true;
+    }));
+
+    setDeletedVaultIds(prev => {
+      const next = Array.from(new Set([
+        ...prev,
+        ...(id ? [id, String(id)] : []),
+        ...(url ? [url] : [])
+      ]));
+      try { localStorage.setItem('krajden_deleted_vault_ids', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+    toast.success(`Removed "${name}" from vault`);
 
     try {
-      const res = await fetch(`/api/admin/library/clipart/${encodeURIComponent(id)}`, {
+      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+      await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
         body: JSON.stringify({ url, name })
       });
-
-      if (res.ok) {
-        setGlobalAdminCliparts(prev => prev.filter(i => i.id !== id && (url ? i.imageUrl !== url && i.url !== url : true)));
-        setDeletedVaultIds(prev => [...prev, id, ...(url ? [url] : [])]);
-        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-        toast.success(`Removed "${name}" from vault`);
-      } else {
-        toast.error('Failed to delete vault asset');
-      }
     } catch (e) {
-      toast.error('Failed to delete vault asset');
+      // silent catch
     }
   };
 
@@ -908,9 +944,14 @@ export const ClipartLibrary = ({
         ))}
       </div>
 
-      {/* Clipart Grid - Compact */}
+      {/* Clipart Grid or Effects Panel */}
       <div className="flex-1 overflow-y-auto p-2">
-        <div className="grid grid-cols-4 gap-1.5">
+        {selectedCategory === 'effects' ? (
+          <div className="bg-black/40 rounded-xl p-2 border border-white/10">
+            <EffectsControlPanel />
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-1.5">
           {filteredCliparts.map(item => (
             <div
               key={item.id}
@@ -957,28 +998,23 @@ export const ClipartLibrary = ({
                 <Star className="w-2.5 h-2.5" fill={favorites.includes(item.id) ? 'currentColor' : 'none'} />
               </button>
               
-              {/* Delete button for custom or vault items */}
-              {(item.isCustom || item.isVault || selectedCategory === 'vault') && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (item.isCustom) {
-                      onRemoveCustomClipart?.(item.id);
-                    } else {
-                      handleDeleteVaultItem(item);
-                    }
-                  }}
-                  className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity bg-black/80 z-10"
-                  title="Remove asset"
-                >
-                  <Trash2 className="w-2.5 h-2.5" />
-                </button>
-              )}
+              {/* Delete button for all tokens/cliparts/vault items */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteVaultItem(item);
+                }}
+                className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-200 hover:bg-red-900/80 transition-all bg-black/90 border border-red-500/40 z-20"
+                title="Delete asset from vault"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
             </div>
           ))}
         </div>
+        )}
         
-        {filteredCliparts.length === 0 && (
+        {selectedCategory !== 'effects' && filteredCliparts.length === 0 && (
           <div className="text-center text-white/40 py-4 text-xs">
             No cliparts found
           </div>

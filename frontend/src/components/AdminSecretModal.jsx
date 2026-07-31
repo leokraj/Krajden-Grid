@@ -22,6 +22,7 @@ import {
   CheckCircle,
   FolderPlus,
   RefreshCw,
+  Zap,
 } from 'lucide-react';
 
 export default function AdminSecretModal({ isOpen, onClose }) {
@@ -30,12 +31,13 @@ export default function AdminSecretModal({ isOpen, onClose }) {
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active Tab: 'gifs' or 'maps'
+  // Active Tab: 'gifs' | 'maps' | 'effects'
   const [activeTab, setActiveTab] = useState('gifs');
 
   // Library Items state
   const [cliparts, setCliparts] = useState([]);
   const [battlemaps, setBattlemaps] = useState([]);
+  const [effects, setEffects] = useState([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
 
   // Form states - Single GIF/Clipart
@@ -52,6 +54,13 @@ export default function AdminSecretModal({ isOpen, onClose }) {
   const [mapDescription, setMapDescription] = useState('');
   const [isUploadingMap, setIsUploadingMap] = useState(false);
   const mapFileInputRef = useRef(null);
+
+  // Form states - Single Effect
+  const [effectName, setEffectName] = useState('');
+  const [effectCategory, setEffectCategory] = useState('nature');
+  const [effectUrl, setEffectUrl] = useState('');
+  const [isUploadingEffect, setIsUploadingEffect] = useState(false);
+  const effectFileInputRef = useRef(null);
 
   // Edit State
   const [editingItem, setEditingItem] = useState(null); // { id, name, category, theme, imageUrl, url, description, type: 'gif'|'map' }
@@ -72,19 +81,23 @@ export default function AdminSecretModal({ isOpen, onClose }) {
   async function fetchLibraryData() {
     setIsLoadingLibrary(true);
     try {
-      const backendUrl = window.location.origin;
-      const [clipartsRes, mapsRes] = await Promise.all([
-        fetch(`${backendUrl}/api/library/cliparts`),
-        fetch(`${backendUrl}/api/library/battlemaps`),
+      const results = await Promise.allSettled([
+        fetch('/api/library/cliparts'),
+        fetch('/api/library/battlemaps'),
+        fetch('/api/library/effects'),
       ]);
 
-      if (clipartsRes.ok) {
-        const data = await clipartsRes.json();
+      if (results[0].status === 'fulfilled' && results[0].value.ok) {
+        const data = await results[0].value.json();
         setCliparts(data.cliparts || []);
       }
-      if (mapsRes.ok) {
-        const data = await mapsRes.json();
+      if (results[1].status === 'fulfilled' && results[1].value.ok) {
+        const data = await results[1].value.json();
         setBattlemaps(data.battlemaps || []);
+      }
+      if (results[2].status === 'fulfilled' && results[2].value.ok) {
+        const data = await results[2].value.json();
+        setEffects(data.effects || []);
       }
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
     } catch (e) {
@@ -537,17 +550,45 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     }
   };
 
-  // Handle Delete Clipart
-  const handleDeleteClipart = async (id, name) => {
+  // Helper to persist deleted vault IDs (ID or exact URL only)
+  const markVaultIdDeleted = (id, url) => {
+    try {
+      const existing = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]')
+        .filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http')));
+      const newSet = new Set([
+        ...existing,
+        ...(id ? [id, String(id)] : []),
+        ...(url ? [url] : [])
+      ]);
+      localStorage.setItem('krajden_deleted_vault_ids', JSON.stringify(Array.from(newSet)));
+    } catch (e) {}
+  };
+
+  // Handle Delete Clipart / GIF Token
+  const handleDeleteClipart = async (itemOrId, nameArg) => {
+    const item = typeof itemOrId === 'object' ? itemOrId : cliparts.find(c => c.id === itemOrId);
+    const id = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId;
+    const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Asset');
+    const url = item ? (item.imageUrl || item.url || item.imageData || item.src) : null;
+
     if (!window.confirm(`Delete "${name}" from global vault?`)) return;
 
-    try {
-      const backendUrl = window.location.origin;
-      const targetItem = cliparts.find(c => c.id === id);
-      const url = targetItem ? (targetItem.imageUrl || targetItem.url) : null;
-      const adminToken = localStorage.getItem('krajden_admin_token') || '';
+    const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
-      const res = await fetch(`${backendUrl}/api/admin/library/clipart/${encodeURIComponent(id)}`, {
+    markVaultIdDeleted(id, url);
+
+    setCliparts((prev) => prev.filter((i) => {
+      if (!i) return false;
+      if (id && (i.id === id || String(i.id) === String(id))) return false;
+      if (url && (i.imageUrl === url || i.url === url)) return false;
+      return true;
+    }));
+
+    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+    toast.success(`Deleted "${name}" from Vault`);
+
+    try {
+      await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -555,30 +596,36 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         },
         body: JSON.stringify({ url, name }),
       });
-
-      if (res.ok) {
-        toast.success(`Deleted "${name}"`);
-        setCliparts((prev) => prev.filter((item) => item.id !== id && (url ? item.imageUrl !== url && item.url !== url : true)));
-        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-      } else {
-        toast.error('Failed to delete item');
-      }
     } catch (err) {
-      toast.error('Delete error: ' + err.message);
+      // silent catch
     }
   };
 
   // Handle Delete Battle Map
-  const handleDeleteMap = async (id, name) => {
+  const handleDeleteMap = async (itemOrId, nameArg) => {
+    const item = typeof itemOrId === 'object' ? itemOrId : battlemaps.find(m => m.id === itemOrId);
+    const id = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId;
+    const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Battle Map');
+    const url = item ? (item.url || item.imageUrl) : null;
+
     if (!window.confirm(`Delete battle map "${name}" from global vault?`)) return;
 
-    try {
-      const backendUrl = window.location.origin;
-      const targetItem = battlemaps.find(m => m.id === id);
-      const url = targetItem ? (targetItem.url || targetItem.imageUrl) : null;
-      const adminToken = localStorage.getItem('krajden_admin_token') || '';
+    const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
-      const res = await fetch(`${backendUrl}/api/admin/library/battlemap/${encodeURIComponent(id)}`, {
+    markVaultIdDeleted(id, url);
+
+    setBattlemaps((prev) => prev.filter((i) => {
+      if (!i) return false;
+      if (id && (i.id === id || String(i.id) === String(id))) return false;
+      if (url && (i.url === url || i.imageUrl === url)) return false;
+      return true;
+    }));
+
+    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+    toast.success(`Deleted battle map "${name}"`);
+
+    try {
+      await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -586,16 +633,90 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         },
         body: JSON.stringify({ url, name }),
       });
+    } catch (err) {
+      // silent catch
+    }
+  };
+
+  // Handle Delete Effect
+  const handleDeleteEffect = async (itemOrId, nameArg) => {
+    const item = typeof itemOrId === 'object' ? itemOrId : effects.find(e => e.id === itemOrId);
+    const id = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId;
+    const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Effect');
+    const url = item ? (item.imageUrl || item.url) : null;
+
+    if (!window.confirm(`Delete effect "${name}" from global vault?`)) return;
+
+    const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+
+    markVaultIdDeleted(id, url);
+
+    setEffects((prev) => prev.filter((i) => {
+      if (!i) return false;
+      if (id && (i.id === id || String(i.id) === String(id))) return false;
+      if (url && (i.imageUrl === url || i.url === url)) return false;
+      return true;
+    }));
+
+    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+    toast.success(`Deleted effect "${name}"`);
+
+    try {
+      await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ url, name }),
+      });
+    } catch (err) {
+      // silent catch
+    }
+  };
+
+  // Handle Upload Single Effect
+  const handleSingleEffectUpload = async (e) => {
+    e.preventDefault();
+    if (!effectName.trim()) {
+      toast.error('Please enter an effect name');
+      return;
+    }
+    const file = effectFileInputRef.current?.files?.[0];
+    if (!file && !effectUrl.trim()) {
+      toast.error('Please select a video/GIF file or enter an Effect URL');
+      return;
+    }
+
+    setIsUploadingEffect(true);
+    try {
+      const backendUrl = window.location.origin;
+      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+      const formData = new FormData();
+      formData.append('name', effectName.trim());
+      formData.append('category', effectCategory);
+      if (file) formData.append('file', file);
+      if (effectUrl.trim()) formData.append('imageUrl', effectUrl.trim());
+
+      const res = await fetch(`${backendUrl}/api/admin/library/effect`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+        body: formData,
+      });
 
       if (res.ok) {
-        toast.success(`Deleted battle map "${name}"`);
-        setBattlemaps((prev) => prev.filter((item) => item.id !== id && (url ? item.url !== url && item.imageUrl !== url : true)));
-        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+        toast.success(`Uploaded effect "${effectName}"`);
+        setEffectName('');
+        setEffectUrl('');
+        if (effectFileInputRef.current) effectFileInputRef.current.value = '';
+        fetchLibraryData();
       } else {
-        toast.error('Failed to delete map');
+        toast.error('Failed to upload effect');
       }
     } catch (err) {
-      toast.error('Delete error: ' + err.message);
+      toast.error('Upload error: ' + err.message);
+    } finally {
+      setIsUploadingEffect(false);
     }
   };
 
@@ -770,6 +891,17 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                 >
                   <MapIcon className="w-4 h-4" />
                   Battle Maps ({battlemaps.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('effects')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold font-cinzel tracking-wider transition-all flex items-center gap-2 ${
+                    activeTab === 'effects'
+                      ? 'bg-gold text-black shadow-md'
+                      : 'text-slate-cool hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  Effects ({effects.length})
                 </button>
               </div>
 
@@ -982,7 +1114,7 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                                 Edit
                               </button>
                               <button
-                                onClick={() => handleDeleteClipart(item.id, item.name)}
+                                onClick={() => handleDeleteClipart(item)}
                                 className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors"
                                 title="Delete"
                               >
@@ -995,7 +1127,7 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : activeTab === 'maps' ? (
                 /* Battle Maps Tab */
                 <div className="space-y-6">
                   {/* Batch Upload Battle Maps Box */}
@@ -1178,11 +1310,147 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                                   Edit
                                 </button>
                                 <button
-                                  onClick={() => handleDeleteMap(map.id, map.name)}
+                                  onClick={() => handleDeleteMap(map)}
                                   className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors"
                                   title="Delete Map"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Animated Effects Tab */
+                <div className="space-y-6">
+                  {/* Single Effect Upload Box */}
+                  <div className="p-4 bg-black/60 border border-white/10 rounded-2xl space-y-4">
+                    <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+                      <Zap className="w-4 h-4 text-gold" />
+                      <h3 className="text-xs font-bold font-cinzel text-white uppercase tracking-wider">
+                        Upload Vault Effect (GIF / Video)
+                      </h3>
+                    </div>
+
+                    <form onSubmit={handleSingleEffectUpload} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-cool font-mono mb-1 block">
+                          Effect Title
+                        </Label>
+                        <Input
+                          placeholder="e.g. Raging Firestorm"
+                          value={effectName}
+                          onChange={(e) => setEffectName(e.target.value)}
+                          className="bg-black/60 border-white/10 text-xs text-white placeholder:text-slate-muted"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-cool font-mono mb-1 block">
+                          Category
+                        </Label>
+                        <select
+                          value={effectCategory}
+                          onChange={(e) => setEffectCategory(e.target.value)}
+                          className="w-full h-9 rounded-md bg-black/60 border border-white/10 px-3 text-xs text-white focus:outline-none focus:border-gold"
+                        >
+                          <option value="nature">Nature / Weather</option>
+                          <option value="elemental">Elemental / Magic</option>
+                          <option value="fire">Fire / Lava</option>
+                          <option value="water">Water / Ocean</option>
+                          <option value="dungeon">Dungeon / Smoke</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-cool font-mono mb-1 block">
+                          Video or GIF File
+                        </Label>
+                        <input
+                          ref={effectFileInputRef}
+                          type="file"
+                          accept="image/gif,video/mp4,video/webm,.gif"
+                          className="w-full text-xs text-slate-cool file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-white/10 file:text-white file:text-xs hover:file:bg-white/20 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-cool font-mono mb-1 block">
+                          OR Effect URL (.gif, .mp4, data URI)
+                        </Label>
+                        <Input
+                          placeholder="https://example.com/river_effect.gif"
+                          value={effectUrl}
+                          onChange={(e) => setEffectUrl(e.target.value)}
+                          className="bg-black/60 border-white/10 text-xs text-white placeholder:text-slate-muted"
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <Button
+                          type="submit"
+                          disabled={isUploadingEffect}
+                          className="w-full bg-gold hover:bg-gold-light text-black font-bold h-9 text-xs tracking-wider uppercase transition-all rounded-xl"
+                        >
+                          {isUploadingEffect ? (
+                            <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> Uploading...</>
+                          ) : (
+                            <><Upload className="w-3.5 h-3.5 mr-2" /> Upload Effect</>
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Effects List Grid */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold font-cinzel text-white uppercase tracking-wider">
+                        Vault Effects ({effects.length})
+                      </h3>
+                    </div>
+
+                    {effects.length === 0 ? (
+                      <div className="text-center py-12 border border-dashed border-white/10 rounded-2xl bg-black/20 space-y-2">
+                        <Zap className="w-8 h-8 text-slate-muted mx-auto" />
+                        <p className="text-xs text-slate-cool font-medium">No vault effects saved yet.</p>
+                        <p className="text-[11px] text-slate-muted">Upload GIF/video clips above to populate the Effects tool.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {effects.map((effect) => (
+                          <div
+                            key={effect.id}
+                            className="bg-black/40 border border-white/10 rounded-xl overflow-hidden group hover:border-gold/40 transition-all flex flex-col"
+                          >
+                            <div className="aspect-video relative bg-black/60 overflow-hidden flex items-center justify-center">
+                              {effect.imageUrl?.includes('video/mp4') || effect.imageUrl?.endsWith('.mp4') ? (
+                                <video src={effect.imageUrl} autoPlay loop muted className="w-full h-full object-cover" />
+                              ) : (
+                                <img src={effect.imageUrl || effect.url} alt={effect.name} className="w-full h-full object-cover" />
+                              )}
+                              <span className="absolute top-1.5 left-1.5 bg-black/80 text-gold text-[8px] font-mono px-1.5 py-0.5 rounded uppercase">
+                                {effect.category || 'Effect'}
+                              </span>
+                            </div>
+
+                            <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
+                              <div>
+                                <p className="text-xs font-bold text-white truncate">{effect.name}</p>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 pt-1">
+                                <button
+                                  onClick={() => handleDeleteEffect(effect)}
+                                  className="w-full py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
+                                  title="Delete Effect"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  Delete Effect
                                 </button>
                               </div>
                             </div>

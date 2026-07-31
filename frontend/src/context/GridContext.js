@@ -247,6 +247,59 @@ export const GridProvider = ({ children }) => {
     }
   }, [activeSceneId]);
 
+  // PINGS & MAP BEACONS STATE
+  const [pings, setPings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('overgrid_pings');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  const addPing = useCallback((x, y, color = null, label = null) => {
+    const newPing = {
+      id: 'ping_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      x,
+      y,
+      color: color || settings.pingColor || '#FFD700',
+      name: label !== null && label !== undefined ? label : (settings.pingLabel || ''),
+      timestamp: Date.now()
+    };
+    setPings(prev => {
+      const updated = [...prev, newPing];
+      try {
+        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+    return newPing;
+  }, [settings.pingColor, settings.pingLabel]);
+
+  const removePing = useCallback((id) => {
+    setPings(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      try {
+        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  }, []);
+
+  const clearPings = useCallback(() => {
+    setPings([]);
+    try {
+      localStorage.setItem('overgrid_pings', JSON.stringify([]));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
   const [selectedClipartIds, setSelectedClipartIds] = useState([]);
 
   const selectedClipartId = useMemo(() => (
@@ -1254,59 +1307,6 @@ export const GridProvider = ({ children }) => {
     setRadialMenuConfig(defaultConfig);
     try {
       localStorage.setItem('overgrid_radial_config', JSON.stringify(defaultConfig));
-    } catch (e) {
-      console.error(e);
-    }
-  }, []);
-
-  // PINGS & MAP BEACONS STATE
-  const [pings, setPings] = useState(() => {
-    try {
-      const saved = localStorage.getItem('overgrid_pings');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
-
-  const addPing = useCallback((x, y, color = null, label = null) => {
-    const newPing = {
-      id: 'ping_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      x,
-      y,
-      color: color || settings.pingColor || '#FFD700',
-      name: label !== null && label !== undefined ? label : (settings.pingLabel || ''),
-      timestamp: Date.now()
-    };
-    setPings(prev => {
-      const updated = [...prev, newPing];
-      try {
-        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
-      return updated;
-    });
-    return newPing;
-  }, [settings.pingColor, settings.pingLabel]);
-
-  const removePing = useCallback((id) => {
-    setPings(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      try {
-        localStorage.setItem('overgrid_pings', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
-      return updated;
-    });
-  }, []);
-
-  const clearPings = useCallback(() => {
-    setPings([]);
-    try {
-      localStorage.setItem('overgrid_pings', JSON.stringify([]));
     } catch (e) {
       console.error(e);
     }

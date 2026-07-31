@@ -49,10 +49,23 @@ export function BackgroundLayersPanel({ onUndock }) {
   const [showMapLibrary, setShowMapLibrary] = useState(false);
 
   const [globalBattleMaps, setGlobalBattleMaps] = useState([]);
+  const [deletedVaultIds, setDeletedVaultIds] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+      return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http'))) : [];
+    } catch (e) {
+      return [];
+    }
+  });
 
   useEffect(() => {
     const fetchGlobalMaps = async () => {
       try {
+        const storedDeleted = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+        if (Array.isArray(storedDeleted)) {
+          const cleanDeleted = storedDeleted.filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http')));
+          setDeletedVaultIds(cleanDeleted);
+        }
         const res = await fetch('/api/library/battlemaps');
         if (res.ok) {
           const data = await res.json();
@@ -65,13 +78,29 @@ export function BackgroundLayersPanel({ onUndock }) {
       }
     };
     fetchGlobalMaps();
+
+    const handleUpdate = () => fetchGlobalMaps();
+    window.addEventListener('krajden_library_updated', handleUpdate);
+    return () => window.removeEventListener('krajden_library_updated', handleUpdate);
   }, [showMapLibrary]);
 
-  // Combine global admin battle maps with default preset maps, avoiding duplicate IDs
+  // Combine global admin battle maps with default preset maps, avoiding duplicate IDs and deleted vault items
   const mapIds = new Set();
   const allVttMaps = [];
   [...globalBattleMaps, ...VTT_MAPS].forEach(m => {
-    if (m && m.id && !mapIds.has(m.id)) {
+    if (!m) return;
+    const mId = String(m.id || '').trim();
+    const mUrl = String(m.url || m.imageUrl || '').trim();
+
+    const isDeleted = deletedVaultIds.some(d => {
+      const sD = String(d || '').trim();
+      if (!sD) return false;
+      if (mId && sD === mId) return true;
+      if (mUrl && sD === mUrl) return true;
+      return false;
+    });
+
+    if (!isDeleted && m.id && !mapIds.has(m.id)) {
       mapIds.add(m.id);
       allVttMaps.push(m);
     }
