@@ -333,11 +333,14 @@ const DND_CONDITIONS = [
   { id: 'cond_unconscious', name: 'Unconscious', category: 'dnd_conditions', emoji: '💤', type: 'emoji' },
 ];
 
-// Default clipart items - populated strictly with Vault assets
-const DEFAULT_CLIPARTS = DEFAULT_VAULT_CLIPARTS.map(item => ({
-  ...item,
-  isVault: true
-}));
+// Default clipart items - populated with Vault assets, D&D Hero Tokens, Monster Tokens, Dungeon Props, and 5e Conditions
+const DEFAULT_CLIPARTS = [
+  ...DEFAULT_VAULT_CLIPARTS.map(item => ({ ...item, isVault: true })),
+  ...DND_HERO_TOKENS.map(item => ({ ...item, isVault: true })),
+  ...DND_MONSTER_TOKENS.map(item => ({ ...item, isVault: true })),
+  ...DND_DUNGEON_PROPS.map(item => ({ ...item, isVault: true })),
+  ...DND_CONDITIONS.map(item => ({ ...item, isVault: true })),
+];
 
 const CATEGORIES = [
   { id: 'all', name: 'All D&D Assets' },
@@ -401,6 +404,19 @@ export const ClipartLibrary = ({
 
   // Global admin added cliparts & GIFs
   const [globalAdminCliparts, setGlobalAdminCliparts] = useState([]);
+  const [deletedVaultIds, setDeletedVaultIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('krajden_deleted_vault_ids', JSON.stringify(deletedVaultIds));
+    } catch (e) {}
+  }, [deletedVaultIds]);
 
   useEffect(() => {
     const fetchGlobalCliparts = async () => {
@@ -456,21 +472,54 @@ export const ClipartLibrary = ({
   const normalizedCustom = customCliparts.map(c => normalizeClipartItem({ ...c, isCustom: true }));
   const normalizedDefault = DEFAULT_CLIPARTS.map(d => normalizeClipartItem(d, true));
 
-  // Combine admin vault, user custom, and default cliparts with deduplication
+  // Combine admin vault, user custom, and default cliparts with URL & ID deduplication
   const clipartMap = new Map();
+  const seenUrls = new Set();
+
   [...taggedGlobalAdmin, ...normalizedCustom, ...normalizedDefault].forEach(item => {
-    if (item && item.id && !clipartMap.has(item.id)) {
+    if (!item) return;
+    const url = (item.imageUrl || item.url || '').trim();
+
+    if (url && url.length > 5 && seenUrls.has(url)) return;
+
+    if (item.id && !clipartMap.has(item.id)) {
       clipartMap.set(item.id, item);
+      if (url && url.length > 5) seenUrls.add(url);
     }
   });
-  const allCliparts = Array.from(clipartMap.values());
+
+  const allCliparts = Array.from(clipartMap.values()).filter(item => {
+    if (!item) return false;
+    if (deletedVaultIds.includes(item.id)) return false;
+    if (item.imageUrl && deletedVaultIds.includes(item.imageUrl)) return false;
+    if (item.url && deletedVaultIds.includes(item.url)) return false;
+    return true;
+  });
 
   // Delete an item directly from the Global Vault
-  const handleDeleteVaultItem = async (itemId) => {
+  const handleDeleteVaultItem = async (itemOrId) => {
+    const item = typeof itemOrId === 'object' ? itemOrId : allCliparts.find(i => i.id === itemOrId);
+    const id = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
+    const url = item ? (item.imageUrl || item.url) : null;
+    const name = item ? item.name : 'asset';
+
+    if (!window.confirm(`Delete "${name}" from vault?`)) return;
+
     try {
-      await fetch(`/api/admin/library/clipart/${itemId}`, { method: 'DELETE' });
-      setGlobalAdminCliparts(prev => prev.filter(i => i.id !== itemId));
-      toast.success('Removed asset from vault');
+      const res = await fetch(`/api/admin/library/clipart/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, name })
+      });
+
+      if (res.ok) {
+        setGlobalAdminCliparts(prev => prev.filter(i => i.id !== id && (url ? i.imageUrl !== url && i.url !== url : true)));
+        setDeletedVaultIds(prev => [...prev, id, ...(url ? [url] : [])]);
+        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+        toast.success(`Removed "${name}" from vault`);
+      } else {
+        toast.error('Failed to delete vault asset');
+      }
     } catch (e) {
       toast.error('Failed to delete vault asset');
     }
@@ -910,17 +959,17 @@ export const ClipartLibrary = ({
               </button>
               
               {/* Delete button for custom or vault items */}
-              {(item.isCustom || item.isVault) && (
+              {(item.isCustom || item.isVault || selectedCategory === 'vault') && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (item.isVault) {
-                      handleDeleteVaultItem(item.id);
-                    } else {
+                    if (item.isCustom) {
                       onRemoveCustomClipart?.(item.id);
+                    } else {
+                      handleDeleteVaultItem(item);
                     }
                   }}
-                  className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity bg-black/80"
+                  className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity bg-black/80 z-10"
                   title="Remove asset"
                 >
                   <Trash2 className="w-2.5 h-2.5" />

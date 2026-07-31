@@ -17,6 +17,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     measurements,
     addMeasurement, 
     addDrawingPath,
+    clearDrawings,
     eraseAt,
     setLiveMeasurement,
     pixelsPerUnitX, 
@@ -1379,7 +1380,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         return;
       }
 
-      // Right click (button 2): Reset active tool & clear pinned measurements
+      // Right click (button 2): Reset active tool, clear pinned measurements & turn off measure mode
       if (e.button === 2) {
         e.preventDefault();
         setMeasureWaypoints([]);
@@ -1389,6 +1390,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         if (clearLiveMeasurement) clearLiveMeasurement();
         if (broadcastActivityStatus) broadcastActivityStatus('idle');
         if (clearMeasurements) clearMeasurements();
+        updateSettings({ measureMode: false });
         return;
       }
     }
@@ -1432,14 +1434,60 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       return;
     }
     
-    // Block drawing/erasing if user is blocked in session
-    if (isBlocked && (settings.eraserEnabled || settings.drawingEnabled)) {
-      return;
-    }
+    // Drawing tool mode / Eraser mode controls:
+    // Left click (button 0): draw (or erase if eraser mode selected)
+    // Middle click (button 1): erase
+    // Right click (button 2): clear drawings & exit tool
+    if ((settings.drawingEnabled || settings.eraserEnabled) && !isBlocked) {
+      if (e.button === 2) {
+        e.preventDefault();
+        setIsDrawing(false);
+        setIsErasing(false);
+        setCurrentDrawingPath([]);
+        if (clearDrawings) clearDrawings();
+        updateSettings({ drawingEnabled: false, eraserEnabled: false });
+        if (broadcastActivityStatus) broadcastActivityStatus('idle');
+        return;
+      }
 
-    if (clickedPing && e.button === 0) {
-      if (removePing) removePing(clickedPing.id);
-      return;
+      if (e.button === 1) {
+        e.preventDefault();
+        setIsErasing(true);
+        eraseAt(coords.x, coords.y, settings.eraserSize || 20);
+        if (broadcastErase) {
+          broadcastErase(coords.x, coords.y, settings.eraserSize || 20);
+        }
+        if (sessionCode && broadcastCursor && showMyCursor) {
+          broadcastCursor(coords.x, coords.y, true);
+        }
+        if (broadcastActivityStatus) broadcastActivityStatus('erasing');
+        return;
+      }
+
+      if (e.button === 0) {
+        if (settings.eraserEnabled) {
+          setIsErasing(true);
+          eraseAt(coords.x, coords.y, settings.eraserSize || 20);
+          if (broadcastErase) {
+            broadcastErase(coords.x, coords.y, settings.eraserSize || 20);
+          }
+          if (sessionCode && broadcastCursor && showMyCursor) {
+            broadcastCursor(coords.x, coords.y, true);
+          }
+          if (broadcastActivityStatus) broadcastActivityStatus('erasing');
+          return;
+        }
+
+        if (settings.drawingEnabled) {
+          setIsDrawing(true);
+          setCurrentDrawingPath([coords]);
+          if (sessionCode && broadcastCursor && showMyCursor) {
+            broadcastCursor(coords.x, coords.y, true);
+          }
+          if (broadcastActivityStatus) broadcastActivityStatus('drawing');
+          return;
+        }
+      }
     }
 
     // Ping mode or Alt+Click (Left click e.button === 0): Drop a persistent animated ping beacon
@@ -1464,31 +1512,6 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       }
       return;
     }
-    
-    // Eraser mode
-    if (settings.eraserEnabled) {
-      setIsErasing(true);
-      eraseAt(coords.x, coords.y, settings.eraserSize || 20);
-      if (broadcastErase) {
-        broadcastErase(coords.x, coords.y, settings.eraserSize || 20);
-      }
-      if (sessionCode && broadcastCursor && showMyCursor) {
-        broadcastCursor(coords.x, coords.y, true);
-      }
-      if (broadcastActivityStatus) broadcastActivityStatus('erasing');
-      return;
-    }
-    
-    // Drawing mode
-    if (settings.drawingEnabled) {
-      setIsDrawing(true);
-      setCurrentDrawingPath([coords]);
-      if (sessionCode && broadcastCursor && showMyCursor) {
-        broadcastCursor(coords.x, coords.y, true);
-      }
-      if (broadcastActivityStatus) broadcastActivityStatus('drawing');
-      return;
-    }
 
     // Start Marquee Box Selection if left clicking on empty canvas space
     if (e.button === 0 && !settings.drawingEnabled && !settings.eraserEnabled && !settings.maskEnabled && !settings.measureMode && !settings.pingMode) {
@@ -1499,7 +1522,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         isShift: e.shiftKey
       });
     }
-  }, [interactive, isBlocked, settings, updateSettings, pings, pingMarkers, removePing, addPing, clearPings, clearMeasurements, broadcastPing, getCanvasCoords, eraseAt, broadcastErase, resetInactivityTimer, sessionCode, broadcastCursor, showMyCursor, measureWaypoints, currentPoint, calculateAccurateDistance, addMeasurement, broadcastMeasurement, setLiveMeasurement, clearLiveMeasurement, broadcastActivityStatus, openRadialMenu, canvasSize]);
+  }, [interactive, isBlocked, settings, updateSettings, pings, pingMarkers, removePing, addPing, clearPings, clearDrawings, clearMeasurements, broadcastPing, getCanvasCoords, eraseAt, broadcastErase, resetInactivityTimer, sessionCode, broadcastCursor, showMyCursor, measureWaypoints, currentPoint, calculateAccurateDistance, addMeasurement, broadcastMeasurement, setLiveMeasurement, clearLiveMeasurement, broadcastActivityStatus, openRadialMenu, canvasSize]);
 
   const handleMouseMove = useCallback((e) => {
     const coords = getCanvasCoords(e);
@@ -1759,6 +1782,18 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       onDragOver={handleDragOver}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (settings.measureMode) {
+          updateSettings({ measureMode: false });
+          return;
+        }
+        if (settings.drawingEnabled || settings.eraserEnabled) {
+          if (clearDrawings) clearDrawings();
+          setIsDrawing(false);
+          setIsErasing(false);
+          setCurrentDrawingPath([]);
+          updateSettings({ drawingEnabled: false, eraserEnabled: false });
+          return;
+        }
         const coords = getCanvasCoords(e);
         if (settings.pingMode) {
           const allExistingPings = [...(pings || []), ...(pingMarkers || [])];

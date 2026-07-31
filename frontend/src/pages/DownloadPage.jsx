@@ -198,15 +198,8 @@ export function DownloadPage() {
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           if (infoData && infoData.external && infoData.redirectUrl) {
-            console.log(`[ChunkedDownload] Asset is served externally (${infoData.redirectUrl}). Triggering direct browser download...`);
-            const directLink = document.createElement('a');
-            directLink.href = infoData.redirectUrl;
-            directLink.download = finalFilename;
-            directLink.target = '_blank';
-            directLink.rel = 'noopener noreferrer';
-            document.body.appendChild(directLink);
-            directLink.click();
-            document.body.removeChild(directLink);
+            console.log(`[ChunkedDownload] Asset is served externally (${infoData.redirectUrl}). Opening in new window...`);
+            window.open(infoData.redirectUrl, '_blank');
             setDown(false);
             return;
           }

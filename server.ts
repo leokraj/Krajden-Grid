@@ -381,7 +381,7 @@ async function startServer() {
         }
       }
 
-      // If we don't have a valid local file, redirect to GitHub Releases
+      // If we don't have a valid local file, provide iframe-safe download redirect
       if (!filePath) {
         let redirectUrl = '';
         if (lowerFilename === 'krajdengrid-portable.zip') {
@@ -394,8 +394,31 @@ async function startServer() {
           if (req.query.info === 'true') {
             return res.json({ external: true, redirectUrl });
           }
-          console.log(`[Download] ${filename} not found locally. Redirecting to ${redirectUrl}`);
-          return res.redirect(302, redirectUrl);
+          console.log(`[Download] ${filename} not found locally. Serving iframe-safe launcher page for ${redirectUrl}`);
+          return res.send(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Downloading ${filename}...</title>
+                <style>
+                  body { background: #0c0d10; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+                  .card { background: #151821; border: 1px solid #caa055; padding: 40px; border-radius: 16px; max-width: 450px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+                  a { display: inline-block; background: #caa055; color: #000; font-weight: bold; padding: 14px 28px; border-radius: 8px; text-decoration: none; margin-top: 20px; letter-spacing: 1px; }
+                  a:hover { background: #e0b465; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <h2>Krajden Grid Download</h2>
+                  <p>Click below to download <strong>${filename}</strong> directly in a new window:</p>
+                  <a href="${redirectUrl}" target="_blank" rel="noopener noreferrer">Download File</a>
+                  <script>
+                    window.open('${redirectUrl}', '_blank');
+                  </script>
+                </div>
+              </body>
+            </html>
+          `);
         }
       }
 
@@ -990,7 +1013,16 @@ async function startServer() {
           }
         }
       }
-      res.json({ cliparts: items || [] });
+      // Deduplicate items by URL (when provided) before returning
+      const seenUrls = new Set();
+      const cleanItems = (items || []).filter((item: any) => {
+        if (!item) return false;
+        const url = (item.imageUrl || item.url || '').trim();
+        if (url && url.length > 5 && seenUrls.has(url)) return false;
+        if (url && url.length > 5) seenUrls.add(url);
+        return true;
+      });
+      res.json({ cliparts: cleanItems });
     } catch (e: any) {
       res.json({ cliparts: loadVaultClipartsDisk() });
     }
@@ -1075,12 +1107,32 @@ async function startServer() {
   // Admin Delete Global Clipart / GIF
   app.delete('/api/admin/library/clipart/:id', async (req, res) => {
     try {
-      const id = req.params.id;
-      await getCollection('global_cliparts').deleteOne({ id });
-      const allItems = await getCollection('global_cliparts').find({}).toArray();
+      const rawId = req.params.id;
+      const decodedId = decodeURIComponent(rawId);
+      const { url, name } = req.body || {};
+
+      let allItems = await getCollection('global_cliparts').find({}).toArray();
+      const initialCount = allItems.length;
+
+      allItems = allItems.filter((i: any) => {
+        if (!i) return false;
+        const iUrl = (i.imageUrl || i.url || '').trim();
+        const iName = (i.name || '').trim().toLowerCase();
+
+        if (i.id === rawId || i.id === decodedId) return false;
+        if (url && (iUrl === url || iUrl === url.trim())) return false;
+        if (rawId && (iUrl === rawId || iUrl === decodedId)) return false;
+        if (name && iName === String(name).trim().toLowerCase()) return false;
+        return true;
+      });
+
+      await getCollection('global_cliparts').deleteMany({});
+      for (const item of allItems) {
+        await getCollection('global_cliparts').insertOne(item);
+      }
       saveVaultClipartsDisk(allItems);
-      console.log(`[Admin Library] Deleted clipart/GIF id: ${id}`);
-      res.json({ success: true, id });
+      console.log(`[Admin Library] Deleted clipart/GIF id: ${rawId} (removed ${initialCount - allItems.length} items)`);
+      res.json({ success: true, id: rawId, remaining: allItems.length });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1194,12 +1246,32 @@ async function startServer() {
   // Admin Delete Global Battle Map
   app.delete('/api/admin/library/battlemap/:id', async (req, res) => {
     try {
-      const id = req.params.id;
-      await getCollection('global_battlemaps').deleteOne({ id });
-      const allItems = await getCollection('global_battlemaps').find({}).toArray();
+      const rawId = req.params.id;
+      const decodedId = decodeURIComponent(rawId);
+      const { url, name } = req.body || {};
+
+      let allItems = await getCollection('global_battlemaps').find({}).toArray();
+      const initialCount = allItems.length;
+
+      allItems = allItems.filter((i: any) => {
+        if (!i) return false;
+        const iUrl = (i.url || i.imageUrl || '').trim();
+        const iName = (i.name || '').trim().toLowerCase();
+
+        if (i.id === rawId || i.id === decodedId) return false;
+        if (url && (iUrl === url || iUrl === url.trim())) return false;
+        if (rawId && (iUrl === rawId || iUrl === decodedId)) return false;
+        if (name && iName === String(name).trim().toLowerCase()) return false;
+        return true;
+      });
+
+      await getCollection('global_battlemaps').deleteMany({});
+      for (const item of allItems) {
+        await getCollection('global_battlemaps').insertOne(item);
+      }
       saveVaultBattlemapsDisk(allItems);
-      console.log(`[Admin Library] Deleted battle map id: ${id}`);
-      res.json({ success: true, id });
+      console.log(`[Admin Library] Deleted battle map id: ${rawId} (removed ${initialCount - allItems.length} items)`);
+      res.json({ success: true, id: rawId, remaining: allItems.length });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }

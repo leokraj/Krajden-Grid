@@ -542,13 +542,19 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     try {
       const backendUrl = window.location.origin;
-      const res = await fetch(`${backendUrl}/api/admin/library/clipart/${id}`, {
+      const targetItem = cliparts.find(c => c.id === id);
+      const url = targetItem ? (targetItem.imageUrl || targetItem.url) : null;
+
+      const res = await fetch(`${backendUrl}/api/admin/library/clipart/${encodeURIComponent(id)}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, name }),
       });
 
       if (res.ok) {
         toast.success(`Deleted "${name}"`);
-        setCliparts((prev) => prev.filter((item) => item.id !== id));
+        setCliparts((prev) => prev.filter((item) => item.id !== id && (url ? item.imageUrl !== url && item.url !== url : true)));
+        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
       } else {
         toast.error('Failed to delete item');
       }
@@ -563,13 +569,19 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     try {
       const backendUrl = window.location.origin;
-      const res = await fetch(`${backendUrl}/api/admin/library/battlemap/${id}`, {
+      const targetItem = battlemaps.find(m => m.id === id);
+      const url = targetItem ? (targetItem.url || targetItem.imageUrl) : null;
+
+      const res = await fetch(`${backendUrl}/api/admin/library/battlemap/${encodeURIComponent(id)}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, name }),
       });
 
       if (res.ok) {
         toast.success(`Deleted battle map "${name}"`);
-        setBattlemaps((prev) => prev.filter((item) => item.id !== id));
+        setBattlemaps((prev) => prev.filter((item) => item.id !== id && (url ? item.url !== url && item.imageUrl !== url : true)));
+        window.dispatchEvent(new CustomEvent('krajden_library_updated'));
       } else {
         toast.error('Failed to delete map');
       }
