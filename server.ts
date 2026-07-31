@@ -901,26 +901,25 @@ async function startServer() {
     }
   });
 
-  // Cliparts Upload (POST) - Public so both guests and registered users can use it
+  // Cliparts Upload (POST) — converts to base64 data URL so images survive redeployments.
+  // DO NOT change this back to /uploads/cliparts/... file paths — those are wiped on every redeploy.
   app.post('/api/cliparts/upload', upload.single('file'), (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ detail: 'No file uploaded' });
       }
-
       const ext = path.extname(req.file.originalname).toLowerCase();
-      const CLIPARTS_DIR = path.join(UPLOADS_DIR, 'cliparts');
-      if (!fs.existsSync(CLIPARTS_DIR)) {
-        fs.mkdirSync(CLIPARTS_DIR, { recursive: true });
-      }
-      
-      const fileName = `${crypto.randomUUID()}${ext}`;
-      const destPath = path.join(CLIPARTS_DIR, fileName);
-
-      fs.renameSync(req.file.path, destPath);
-
+      const mimeMap: Record<string, string> = {
+        '.gif': 'image/gif', '.png': 'image/png', '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+      };
+      const mimeType = mimeMap[ext] || req.file.mimetype || 'image/png';
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const base64 = fileBuffer.toString('base64');
+      const dataUrl = `data:${mimeType};base64,${base64}`;
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
       res.json({
-        url: `/uploads/cliparts/${fileName}`,
+        url: dataUrl,
         name: req.file.originalname.replace(/\.[^/.]+$/, ''),
         size: req.file.size
       });
@@ -949,22 +948,28 @@ async function startServer() {
           fs.mkdirSync(CLIPARTS_DIR, { recursive: true });
         }
 
+        // Convert to base64 data URLs — DO NOT revert to /uploads/cliparts/ file paths.
+        const mimeMap: Record<string, string> = {
+          '.gif': 'image/gif', '.png': 'image/png', '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        };
         const uploadedResults = files.map((file) => {
           const ext = path.extname(file.originalname).toLowerCase();
-          const fileName = `${crypto.randomUUID()}${ext}`;
-          const destPath = path.join(CLIPARTS_DIR, fileName);
-          fs.renameSync(file.path, destPath);
+          const mimeType = mimeMap[ext] || file.mimetype || 'image/png';
+          const fileBuffer = fs.readFileSync(file.path);
+          const base64 = fileBuffer.toString('base64');
+          const dataUrl = `data:${mimeType};base64,${base64}`;
+          try { fs.unlinkSync(file.path); } catch (_) {}
 
-          // Format clean default title from file name
           const rawName = file.originalname.replace(/\.[^/.]+$/, '');
           const cleanName = rawName
             .replace(/[-_]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
-            .replace(/\b\w/g, (char) => char.toUpperCase());
+            .replace(/\b\w/g, (char: string) => char.toUpperCase());
 
           return {
-            url: `/uploads/cliparts/${fileName}`,
+            url: dataUrl,
             name: cleanName || 'Untitled Asset',
             originalName: file.originalname,
             size: file.size
@@ -986,13 +991,11 @@ async function startServer() {
   app.post('/api/admin/login', (req, res) => {
     try {
       const { password } = req.body || {};
-      const envAdminPassword = process.env.ADMIN_PASSWORD ? String(process.env.ADMIN_PASSWORD).trim() : null;
-      const validPasswords = ['1512kolelo', '1512kolelO', 'dnd2026', 'admin123', 'dungeonmaster', 'admin', 'krajdengrid', 'secret'];
-      if (envAdminPassword) {
-        validPasswords.push(envAdminPassword);
-      }
+      // Password is set via ADMIN_PASSWORD environment variable in Cloud Run.
+      // DO NOT add hardcoded passwords here — this file is public on GitHub.
+      const adminPassword = process.env.ADMIN_PASSWORD ? String(process.env.ADMIN_PASSWORD).trim() : null;
       const rawInput = String(password || '').trim();
-      if (password && (validPasswords.includes(rawInput) || validPasswords.includes(rawInput.toLowerCase()))) {
+      if (adminPassword && rawInput === adminPassword) {
         return res.json({ success: true, token: 'admin_vault_session_2026' });
       }
       return res.status(401).json({ detail: 'Invalid Admin Passphrase.' });
@@ -1145,6 +1148,270 @@ async function startServer() {
       saveVaultClipartsDisk([]);
       console.log(`[Admin Library] Cleared all vault cliparts`);
       res.json({ success: true, count: 0 });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // === COMMUNITY SHARING API ===
+  // Community effects — anyone can share, browse, and use. Users can delete their own.
+  // Stored as base64 data URLs in MongoDB — never as file paths.
+
+  app.get('/api/community/effects', async (req, res) => {
+    try {
+      const items = await getCollection('community_effects')
+        .find({})
+        .sort({ likes: -1, created_at: -1 })
+        .limit(200)
+        .toArray();
+      res.json({ effects: items || [] });
+    } catch (e: any) {
+      res.json({ effects: [] });
+    }
+  });
+
+  app.post('/api/community/effects', upload.single('file'), async (req, res) => {
+    try {
+      const { name, category, tags, authorName } = req.body || {};
+      if (!req.file && !req.body.imageUrl) {
+        return res.status(400).json({ detail: 'File or imageUrl required' });
+      }
+      let dataUrl = req.body.imageUrl || '';
+      if (req.file) {
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm',
+          '.png': 'image/png', '.webp': 'image/webp',
+        };
+        const mimeType = mimeMap[ext] || req.file.mimetype || 'image/gif';
+        const fileBuffer = fs.readFileSync(req.file.path);
+        dataUrl = `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      // Basic size guard — base64 of a 2MB file is ~2.7MB
+      if (dataUrl.length > 3_000_000) {
+        return res.status(400).json({ detail: 'File too large — max ~2MB for community effects' });
+      }
+      const authorId = req.headers['x-user-id'] || req.body.authorId || 'anonymous';
+      const item = {
+        id: `comm_effect_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(name || 'Untitled Effect').trim(),
+        category: category || 'nature',
+        imageUrl: dataUrl,
+        tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map((t: string) => t.trim()) : [category || 'nature']),
+        authorName: String(authorName || 'Anonymous').trim().substring(0, 40),
+        authorId: String(authorId).substring(0, 64),
+        likes: 0,
+        likedBy: [],
+        created_at: new Date().toISOString(),
+        isCommunity: true,
+      };
+      await getCollection('community_effects').insertOne(item);
+      console.log(`[Community Effects] Shared: ${item.name} by ${item.authorName}`);
+      res.json({ success: true, item });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  app.post('/api/community/effects/:id/like', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const userId = String(req.headers['x-user-id'] || req.body.userId || 'anon').substring(0, 64);
+      const effect = await getCollection('community_effects').findOne({ id });
+      if (!effect) return res.status(404).json({ detail: 'Not found' });
+      const alreadyLiked = (effect.likedBy || []).includes(userId);
+      if (alreadyLiked) {
+        await getCollection('community_effects').updateOne({ id }, {
+          $inc: { likes: -1 }, $pull: { likedBy: userId }
+        });
+        res.json({ success: true, liked: false, likes: Math.max(0, (effect.likes || 1) - 1) });
+      } else {
+        await getCollection('community_effects').updateOne({ id }, {
+          $inc: { likes: 1 }, $push: { likedBy: userId }
+        });
+        res.json({ success: true, liked: true, likes: (effect.likes || 0) + 1 });
+      }
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  app.delete('/api/community/effects/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const userId = String(req.headers['x-user-id'] || req.body.userId || '').substring(0, 64);
+      const adminToken = req.headers.authorization || '';
+      const effect = await getCollection('community_effects').findOne({ id });
+      if (!effect) return res.status(404).json({ detail: 'Not found' });
+      // Allow delete if: own post OR admin token
+      if (effect.authorId !== userId && !adminToken.includes('admin_vault_session_2026')) {
+        return res.status(403).json({ detail: 'Not authorized to delete this effect' });
+      }
+      await getCollection('community_effects').deleteOne({ id });
+      res.json({ success: true, id });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Community cliparts — same pattern, replaces the fake hardcoded presets in CommunityBrowser
+  app.get('/api/community/cliparts', async (req, res) => {
+    try {
+      const items = await getCollection('community_cliparts')
+        .find({})
+        .sort({ likes: -1, created_at: -1 })
+        .limit(200)
+        .toArray();
+      res.json({ cliparts: items || [] });
+    } catch (e: any) {
+      res.json({ cliparts: [] });
+    }
+  });
+
+  app.post('/api/community/cliparts', upload.single('file'), async (req, res) => {
+    try {
+      const { name, category, tags, authorName } = req.body || {};
+      if (!req.file && !req.body.imageUrl) {
+        return res.status(400).json({ detail: 'File or imageUrl required' });
+      }
+      let dataUrl = req.body.imageUrl || '';
+      if (req.file) {
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.gif': 'image/gif', '.png': 'image/png', '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        };
+        const mimeType = mimeMap[ext] || req.file.mimetype || 'image/png';
+        const fileBuffer = fs.readFileSync(req.file.path);
+        dataUrl = `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      if (dataUrl.length > 3_000_000) {
+        return res.status(400).json({ detail: 'File too large — max ~2MB for community cliparts' });
+      }
+      const authorId = req.headers['x-user-id'] || req.body.authorId || 'anonymous';
+      const item = {
+        id: `comm_clipart_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(name || 'Untitled').trim(),
+        category: category || 'custom',
+        imageUrl: dataUrl,
+        tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map((t: string) => t.trim()) : []),
+        authorName: String(authorName || 'Anonymous').trim().substring(0, 40),
+        authorId: String(authorId).substring(0, 64),
+        likes: 0,
+        likedBy: [],
+        created_at: new Date().toISOString(),
+        isCommunity: true,
+      };
+      await getCollection('community_cliparts').insertOne(item);
+      res.json({ success: true, item });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  app.post('/api/community/cliparts/:id/like', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const userId = String(req.headers['x-user-id'] || req.body.userId || 'anon').substring(0, 64);
+      const clipart = await getCollection('community_cliparts').findOne({ id });
+      if (!clipart) return res.status(404).json({ detail: 'Not found' });
+      const alreadyLiked = (clipart.likedBy || []).includes(userId);
+      if (alreadyLiked) {
+        await getCollection('community_cliparts').updateOne({ id }, {
+          $inc: { likes: -1 }, $pull: { likedBy: userId }
+        });
+        res.json({ success: true, liked: false, likes: Math.max(0, (clipart.likes || 1) - 1) });
+      } else {
+        await getCollection('community_cliparts').updateOne({ id }, {
+          $inc: { likes: 1 }, $push: { likedBy: userId }
+        });
+        res.json({ success: true, liked: true, likes: (clipart.likes || 0) + 1 });
+      }
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  app.delete('/api/community/cliparts/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const userId = String(req.headers['x-user-id'] || req.body.userId || '').substring(0, 64);
+      const adminToken = req.headers.authorization || '';
+      const clipart = await getCollection('community_cliparts').findOne({ id });
+      if (!clipart) return res.status(404).json({ detail: 'Not found' });
+      if (clipart.authorId !== userId && !adminToken.includes('admin_vault_session_2026')) {
+        return res.status(403).json({ detail: 'Not authorized' });
+      }
+      await getCollection('community_cliparts').deleteOne({ id });
+      res.json({ success: true, id });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // === VAULT EFFECTS API ===
+  // Effects are video/GIF clips used by the Effects drawing tool (river, fog, lava, fire, etc.)
+  // Stored as base64 data URLs in MongoDB — never as file paths.
+
+  app.get('/api/library/effects', async (req, res) => {
+    try {
+      let items = await getCollection('global_effects').find({}).toArray();
+      res.json({ effects: items || [] });
+    } catch (e: any) {
+      res.json({ effects: [] });
+    }
+  });
+
+  app.post('/api/admin/library/effect', upload.single('file'), async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
+      const { name, category, tags } = req.body || {};
+      if (!req.file && !req.body.imageUrl) {
+        return res.status(400).json({ detail: 'File or imageUrl required' });
+      }
+      let dataUrl = req.body.imageUrl || '';
+      if (req.file) {
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm',
+          '.png': 'image/png', '.webp': 'image/webp',
+        };
+        const mimeType = mimeMap[ext] || req.file.mimetype || 'image/gif';
+        const fileBuffer = fs.readFileSync(req.file.path);
+        dataUrl = `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      const item = {
+        id: `effect_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: String(name || 'Untitled Effect').trim(),
+        category: category || 'nature',
+        imageUrl: dataUrl,
+        tags: Array.isArray(tags) ? tags : [category || 'nature'],
+        created_at: new Date().toISOString(),
+        isVault: true,
+      };
+      await getCollection('global_effects').insertOne(item);
+      console.log(`[Admin Effects] Added effect: ${item.name}`);
+      res.json({ success: true, item });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  app.delete('/api/admin/library/effect/:id', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
+      const id = req.params.id;
+      await getCollection('global_effects').deleteOne({ id });
+      res.json({ success: true, id });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
