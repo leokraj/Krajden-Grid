@@ -128,12 +128,12 @@ async function startServer() {
       if (fs.existsSync(VAULT_CLIPARTS_FILE)) {
         const data = fs.readFileSync(VAULT_CLIPARTS_FILE, 'utf-8');
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e: any) {
       console.error('[Vault Storage] Error reading vault_cliparts.json:', e.message);
     }
-    // Fallback seed from vaultPresets.js
+    // Fallback seed from vaultPresets.js only if file does not exist
     const defaults = seedPresetFallback('DEFAULT_VAULT_CLIPARTS');
     if (defaults.length > 0) {
       saveVaultClipartsDisk(defaults);
@@ -155,7 +155,7 @@ async function startServer() {
       if (fs.existsSync(VAULT_BATTLEMAPS_FILE)) {
         const data = fs.readFileSync(VAULT_BATTLEMAPS_FILE, 'utf-8');
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e: any) {
       console.error('[Vault Storage] Error reading vault_battlemaps.json:', e.message);
@@ -210,13 +210,12 @@ async function startServer() {
         findOne: (query: any, projection?: any) => db!.collection(name).findOne(query, projection),
         find: (query: any, projection?: any) => {
           const cursor = db!.collection(name).find(query, projection);
-          return {
-            toArray: () => cursor.toArray(),
-            sort: (sortQuery: any) => {
-              const sortedCursor = cursor.sort(sortQuery);
-              return { toArray: () => sortedCursor.toArray() };
-            }
-          };
+          const makeChain = (c: any) => ({
+            toArray: () => c.toArray(),
+            sort: (sortQuery: any) => makeChain(c.sort(sortQuery)),
+            limit: (n: number) => makeChain(c.limit(n))
+          });
+          return makeChain(cursor);
         },
         insertOne: (doc: any) => db!.collection(name).insertOne(doc),
         updateOne: (query: any, update: any, options?: any) => db!.collection(name).updateOne(query, update, options),
@@ -237,10 +236,12 @@ async function startServer() {
           const res = mockDb[name].filter(item => {
             return Object.keys(query).every(key => item[key] === query[key]);
           });
-          return {
-            toArray: async () => res,
-            sort: () => ({ toArray: async () => res })
-          };
+          const makeMockChain = (arr: any[]) => ({
+            toArray: async () => arr,
+            sort: () => makeMockChain([...arr]),
+            limit: (n: number) => makeMockChain(arr.slice(0, n))
+          });
+          return makeMockChain(res);
         },
         insertOne: async (doc: any) => {
           mockDb[name].push(doc);
@@ -1008,7 +1009,7 @@ async function startServer() {
   app.get('/api/library/cliparts', async (req, res) => {
     try {
       let items = await getCollection('global_cliparts').find({}).toArray();
-      if (!items || items.length === 0) {
+      if ((!items || items.length === 0) && !fs.existsSync(VAULT_CLIPARTS_FILE)) {
         items = loadVaultClipartsDisk();
         if (items && items.length > 0) {
           for (const item of items) {
@@ -1110,6 +1111,10 @@ async function startServer() {
   // Admin Delete Global Clipart / GIF
   app.delete('/api/admin/library/clipart/:id', async (req, res) => {
     try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
       const { url, name } = req.body || {};
@@ -1144,10 +1149,30 @@ async function startServer() {
   // Admin Clear All Vault Cliparts
   app.post('/api/admin/library/cliparts/clear', async (req, res) => {
     try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
       await getCollection('global_cliparts').deleteMany({});
       saveVaultClipartsDisk([]);
       console.log(`[Admin Library] Cleared all vault cliparts`);
       res.json({ success: true, count: 0 });
+    } catch (e: any) {
+      res.status(500).json({ detail: e.message });
+    }
+  });
+
+  // Admin Reseed Default Vault Cliparts
+  app.post('/api/admin/library/cliparts/reseed', async (req, res) => {
+    try {
+      const defaults = seedPresetFallback('DEFAULT_VAULT_CLIPARTS');
+      await getCollection('global_cliparts').deleteMany({});
+      for (const item of defaults) {
+        await getCollection('global_cliparts').insertOne(item);
+      }
+      saveVaultClipartsDisk(defaults);
+      console.log(`[Admin Library] Reseeded default vault cliparts (${defaults.length} items)`);
+      res.json({ success: true, count: defaults.length, cliparts: defaults });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
