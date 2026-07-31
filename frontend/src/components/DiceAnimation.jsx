@@ -297,5 +297,3 @@ function getDieColor(sides) {
 export function dispatchDiceRoll(rollData) {
   window.dispatchEvent(new CustomEvent('krajden_dice_roll', { detail: rollData }));
 }
-
-export default DiceAnimationLayer;
