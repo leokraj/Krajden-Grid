@@ -1088,7 +1088,13 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       }
 
       for (const mr of maskRects) {
-        ctx.fillRect(mr.x, mr.y, mr.width, mr.height);
+        if (mr.type === 'circle' && mr.cx !== undefined) {
+          ctx.beginPath();
+          ctx.arc(mr.cx, mr.cy, mr.r, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillRect(mr.x, mr.y, mr.width || mr.w, mr.height || mr.h);
+        }
       }
 
       // Draw preview rect while dragging
@@ -1490,13 +1496,23 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       }
     }
 
-    // Ping mode or Alt+Click (Left click e.button === 0): Drop a persistent animated ping beacon
-    if (e.button === 0 && (settings.pingMode || e.altKey)) {
-      if (addPing) {
-        addPing(coords.x, coords.y, settings.pingColor, settings.pingLabel || '');
-      }
+    // Alt+Click: permanent ping beacon (stays until manually cleared)
+    if (e.button === 0 && e.altKey) {
+      if (addPing) addPing(coords.x, coords.y, settings.pingColor, settings.pingLabel || '');
       if (sessionCode && broadcastPing) {
         broadcastPing(coords.x, coords.y, settings.pingColor || '#FFD700', settings.pingLabel || '');
+      }
+      return;
+    }
+
+    // Ping mode click: 3-second disappearing ping
+    if (e.button === 0 && settings.pingMode) {
+      if (sessionCode && broadcastPing) {
+        broadcastPing(coords.x, coords.y, settings.pingColor || '#FFD700', settings.pingLabel || '');
+      }
+      if (addPing && removePing) {
+        const ping = addPing(coords.x, coords.y, settings.pingColor, settings.pingLabel || '');
+        if (ping?.id) setTimeout(() => removePing(ping.id), 3000);
       }
       return;
     }
@@ -1509,6 +1525,10 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       } else if (settings.maskTool === 'rect') {
         setMaskRectStart(coords);
         setMaskRectPreview(null);
+      } else if (settings.maskTool === 'circle') {
+        // Circle fog: add a circle mask rect with type='circle'
+        const r = settings.maskBrushSize || 80;
+        addMaskRect({ x: coords.x - r, y: coords.y - r, w: r * 2, h: r * 2, type: 'circle', cx: coords.x, cy: coords.y, r });
       }
       return;
     }
@@ -1904,6 +1924,18 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
               clipart={clipart}
               isSelected={isSelected}
               onSelect={(e) => handleClipartSelect(clipart, e)}
+              onContextMenu={(e, instanceId) => {
+                e.preventDefault();
+                if (openRadialMenu) {
+                  openRadialMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    mapX: clipart.x,
+                    mapY: clipart.y,
+                    tokenInstanceId: instanceId,
+                  });
+                }
+              }}
               onUpdate={(updated) => {
                 updatePlacedClipart(clipart.instanceId, updated);
                 if (sessionCode && broadcastUpdateClipart) {
