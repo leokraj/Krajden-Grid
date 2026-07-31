@@ -6,6 +6,7 @@ import { FloatingControls } from '../components/FloatingControls';
 import { Toaster } from '../components/ui/sonner';
 import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
+import { DiceAnimationLayer } from '../components/DiceAnimation';
 
 export function FullscreenContent() {
   const { 
@@ -265,6 +266,9 @@ export function FullscreenContent() {
       <div className="fixed bottom-4 right-4 z-40 bg-black/60 backdrop-blur-sm border border-[#caa055]/20 rounded-[4px] px-3 py-1.5 text-[9px] font-mono text-slate-muted pointer-events-none tracking-wider">
         Press <span className="text-[#caa055] font-bold">Ctrl + Shift + C</span> to toggle controls dashboard
       </div>
+
+      {/* 3D dice animation layer — renders tumbling dice at cursor position on every roll */}
+      <DiceAnimationLayer />
 
       <Toaster position="top-right" />
     </div>
