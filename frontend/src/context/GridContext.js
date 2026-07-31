@@ -1,6 +1,23 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 
+// Module-level constants — defined outside component to avoid bundler initialization issues
+export const TOKEN_SIZE_PRESETS = [
+  { label: 'Tiny (½×½)', multiplier: 0.5 },
+  { label: 'Small (1×1)', multiplier: 1 },
+  { label: 'Medium (1×1)', multiplier: 1 },
+  { label: 'Large (2×2)', multiplier: 2 },
+  { label: 'Huge (3×3)', multiplier: 3 },
+  { label: 'Gargantuan (4×4)', multiplier: 4 },
+];
+
+export const DND_CONDITIONS = [
+  'Blinded','Charmed','Deafened','Exhaustion','Frightened',
+  'Grappled','Incapacitated','Invisible','Paralyzed','Petrified',
+  'Poisoned','Prone','Restrained','Stunned','Unconscious',
+  'Concentrating','Bleeding',
+];
+
 export const DEFAULT_ACTIONS = [
   { id: 'toggle_grid', name: 'Toggle Grid', category: 'Grid & Canvas', defaultHotkey: 'G', description: 'Show or hide grid lines' },
   { id: 'toggle_measure', name: 'Toggle Measurement Mode', category: 'Grid & Canvas', defaultHotkey: 'M', description: 'Enable distance & cone measuring tools' },
@@ -659,23 +676,6 @@ export const GridProvider = ({ children }) => {
       return { ...prev, placedCliparts: placed };
     });
   }, []);
-
-  // ── D&D 5e token size presets ──────────────────────────────────────────────
-  const TOKEN_SIZE_PRESETS = [
-    { label: 'Tiny (½×½)', multiplier: 0.5 },
-    { label: 'Small (1×1)', multiplier: 1 },
-    { label: 'Medium (1×1)', multiplier: 1 },
-    { label: 'Large (2×2)', multiplier: 2 },
-    { label: 'Huge (3×3)', multiplier: 3 },
-    { label: 'Gargantuan (4×4)', multiplier: 4 },
-  ];
-
-  const DND_CONDITIONS = [
-    'Blinded','Charmed','Deafened','Exhaustion','Frightened',
-    'Grappled','Incapacitated','Invisible','Paralyzed','Petrified',
-    'Poisoned','Prone','Restrained','Stunned','Unconscious',
-    'Concentrating','Bleeding',
-  ];
 
   // ── Effects tool ───────────────────────────────────────────────────────────
   const addEffectPath = useCallback((effectPath) => {
@@ -1504,8 +1504,6 @@ export const GridProvider = ({ children }) => {
     toggleTokenStatus,
     bringTokenToFront,
     sendTokenToBack,
-    TOKEN_SIZE_PRESETS,
-    DND_CONDITIONS,
     addEffectPath,
     updateEffectPath,
     removeEffectPath,
