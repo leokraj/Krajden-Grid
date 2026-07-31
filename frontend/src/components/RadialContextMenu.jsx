@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useGrid } from '../context/GridContext';
+import { useGrid, TOKEN_SIZE_PRESETS, DND_CONDITIONS } from '../context/GridContext';
 import { toast } from 'sonner';
 import { 
   Ruler, 
@@ -27,7 +27,7 @@ export function RadialContextMenu() {
     broadcastPing, sessionCode, selectedClipartIds = [],
     groupSelectedCliparts, ungroupSelectedCliparts,
     setTokenLabel, toggleTokenStatus, bringTokenToFront, sendTokenToBack,
-    updatePlacedClipart, TOKEN_SIZE_PRESETS, DND_CONDITIONS,
+    updatePlacedClipart,
   } = useGrid();
 
   const [activeSubMenu, setActiveSubMenu] = useState(null);
