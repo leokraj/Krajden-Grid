@@ -3,6 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dices, Trash2 } from 'lucide-react';
+import { dispatchDiceRoll } from './DiceAnimation';
 
 export const DiceRollerPanel = ({
   diceRolls = [],
@@ -44,6 +45,8 @@ export const DiceRollerPanel = ({
     };
 
     broadcastRollDice?.(rollData);
+    // Fire 3D animation at cursor position
+    dispatchDiceRoll(rollData);
   };
 
   return (
