@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGrid } from '../context/GridContext';
+import { toast } from 'sonner';
 import { 
   Ruler, 
   Minus, 
@@ -21,25 +22,24 @@ import { toast } from 'sonner';
 
 export function RadialContextMenu() {
   const { 
-    radialMenuOpen, 
-    radialMenuPos, 
-    closeRadialMenu, 
-    settings, 
-    updateSettings, 
-    addPing, 
-    clearDrawings,
-    clearPings,
-    radialMenuConfig,
-    setShowClipartLibrary,
-    broadcastPing,
-    sessionCode,
-    selectedClipartIds = [],
-    groupSelectedCliparts,
-    ungroupSelectedCliparts
+    radialMenuOpen, radialMenuPos, closeRadialMenu, settings, updateSettings,
+    addPing, clearDrawings, clearPings, radialMenuConfig, setShowClipartLibrary,
+    broadcastPing, sessionCode, selectedClipartIds = [],
+    groupSelectedCliparts, ungroupSelectedCliparts,
+    setTokenLabel, toggleTokenStatus, bringTokenToFront, sendTokenToBack,
+    updatePlacedClipart, TOKEN_SIZE_PRESETS, DND_CONDITIONS,
   } = useGrid();
 
-  const [activeSubMenu, setActiveSubMenu] = useState(null); // 'measure' | 'draw' | 'beacon' | null
+  const [activeSubMenu, setActiveSubMenu] = useState(null);
+  const [labelInput, setLabelInput] = useState('');
+  const [showLabelEdit, setShowLabelEdit] = useState(false);
   const menuRef = useRef(null);
+
+  // Token being right-clicked (if any)
+  const tokenInstanceId = radialMenuPos?.tokenInstanceId || null;
+  const activeToken = tokenInstanceId
+    ? (settings.placedCliparts || []).find(cp => cp.instanceId === tokenInstanceId)
+    : null;
 
   // Close on Escape or click outside
   useEffect(() => {
@@ -205,6 +205,24 @@ export function RadialContextMenu() {
             </div>
           </div>
 
+          {/* CORNER: TOP-LEFT — Token options (visible when right-clicking a token) */}
+          {activeToken && (
+            <div
+              className="absolute top-6 left-6 flex flex-col items-center cursor-pointer z-10"
+              onClick={() => setActiveSubMenu(activeSubMenu === 'token' ? null : 'token')}
+              title="Token Options"
+            >
+              <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+                activeSubMenu === 'token'
+                  ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
+                  : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
+              }`}>
+                <span className="text-base">🎭</span>
+                <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider">Token</span>
+              </div>
+            </div>
+          )}
+
           {/* CORNER ACTION: TOP-RIGHT (Group / Ungroup Tokens) */}
           <div 
             className="absolute top-6 right-6 flex flex-col items-center group cursor-pointer z-10"
@@ -340,6 +358,71 @@ export function RadialContextMenu() {
                 <XCircle className="w-4 h-4" />
                 <span className="text-[9px] font-bold uppercase">Off</span>
               </button>
+            </div>
+          )}
+
+          {/* TOKEN SUBMENU */}
+          {activeSubMenu === 'token' && activeToken && (
+            <div className="absolute -left-52 top-1/2 -translate-y-1/2 w-48 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-3 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2 max-h-80 overflow-y-auto">
+              
+              <p className="text-[9px] text-[#caa055] font-bold uppercase tracking-wider">Token Label</p>
+              {showLabelEdit ? (
+                <div className="flex gap-1">
+                  <input autoFocus value={labelInput}
+                    onChange={e => setLabelInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { setTokenLabel(activeToken.instanceId, labelInput); setShowLabelEdit(false); toast.success('Label set'); }
+                      if (e.key === 'Escape') setShowLabelEdit(false);
+                    }}
+                    placeholder="Enter label..."
+                    className="flex-1 bg-black/60 border border-[#caa055]/30 rounded px-2 py-1 text-[10px] text-white" />
+                  <button onClick={() => { setTokenLabel(activeToken.instanceId, labelInput); setShowLabelEdit(false); toast.success('Label set'); }}
+                    className="text-[#caa055] text-[10px] px-2 border border-[#caa055]/40 rounded hover:bg-[#caa055]/20">✓</button>
+                </div>
+              ) : (
+                <button onClick={() => { setLabelInput(activeToken.label || ''); setShowLabelEdit(true); }}
+                  className="w-full text-left text-[10px] border border-[#caa055]/20 rounded px-2 py-1 text-white/60 hover:bg-white/5 truncate">
+                  {activeToken.label || '(no label — click to set)'}
+                </button>
+              )}
+
+              <p className="text-[9px] text-[#caa055] font-bold uppercase tracking-wider pt-1">Size Preset</p>
+              <div className="grid grid-cols-2 gap-1">
+                {(TOKEN_SIZE_PRESETS || []).map((preset) => (
+                  <button key={preset.label}
+                    onClick={() => {
+                      updatePlacedClipart?.(activeToken.instanceId, { scale: 50 * preset.multiplier });
+                      toast.success(`Set to ${preset.label}`);
+                    }}
+                    className="text-[8px] border border-[#caa055]/20 rounded px-1.5 py-1 text-white/70 hover:bg-[#caa055]/20 hover:text-[#caa055] transition-all">
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[9px] text-[#caa055] font-bold uppercase tracking-wider pt-1">Layer Order</p>
+              <div className="flex gap-1">
+                <button onClick={() => { bringTokenToFront?.(activeToken.instanceId); toast.success('Brought to front'); closeRadialMenu(); }}
+                  className="flex-1 text-[9px] border border-[#caa055]/20 rounded px-2 py-1 text-white/70 hover:bg-[#caa055]/20 transition-all">↑ Front</button>
+                <button onClick={() => { sendTokenToBack?.(activeToken.instanceId); toast.success('Sent to back'); closeRadialMenu(); }}
+                  className="flex-1 text-[9px] border border-[#caa055]/20 rounded px-2 py-1 text-white/70 hover:bg-[#caa055]/20 transition-all">↓ Back</button>
+              </div>
+
+              <p className="text-[9px] text-[#caa055] font-bold uppercase tracking-wider pt-1">Conditions</p>
+              <div className="flex flex-wrap gap-1">
+                {(DND_CONDITIONS || []).map((status) => {
+                  const active = (activeToken.statuses || []).includes(status);
+                  return (
+                    <button key={status}
+                      onClick={() => toggleTokenStatus?.(activeToken.instanceId, status)}
+                      className={`text-[8px] rounded px-1.5 py-0.5 border transition-all ${
+                        active ? 'bg-[#caa055] text-black border-[#caa055] font-bold' : 'border-white/20 text-white/50 hover:border-[#caa055]/50'
+                      }`}>
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
