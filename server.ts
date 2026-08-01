@@ -31,6 +31,21 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const PORT = 3000;
+  const ADMIN_SESSION_TOKEN = String(process.env.ADMIN_SESSION_TOKEN || 'admin_vault_session_2026').trim();
+
+  const hasAdminToken = (authHeader: unknown) => {
+    const header = String(authHeader || '');
+    if (!header) return false;
+    return header.includes(ADMIN_SESSION_TOKEN);
+  };
+
+  const requireAdmin = (req: any, res: any): boolean => {
+    if (!hasAdminToken(req.headers.authorization)) {
+      res.status(401).json({ detail: 'Unauthorized' });
+      return false;
+    }
+    return true;
+  };
 
   const multer = (await import('multer')).default;
   const upload = multer({
@@ -1005,7 +1020,7 @@ async function startServer() {
       const adminPassword = process.env.ADMIN_PASSWORD ? String(process.env.ADMIN_PASSWORD).trim() : null;
       const rawInput = String(password || '').trim();
       if (adminPassword && rawInput === adminPassword) {
-        return res.json({ success: true, token: 'admin_vault_session_2026' });
+        return res.json({ success: true, token: ADMIN_SESSION_TOKEN });
       }
       return res.status(401).json({ detail: 'Invalid Admin Passphrase.' });
     } catch (e: any) {
@@ -1043,6 +1058,7 @@ async function startServer() {
   // Admin Add Global Clipart / GIF
   app.post('/api/admin/library/clipart', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const { name, category, type, imageUrl, tags } = req.body || {};
       if (!name || !imageUrl) {
         return res.status(400).json({ detail: 'Name and image/GIF URL are required' });
@@ -1069,6 +1085,7 @@ async function startServer() {
   // Admin Batch Add Global Cliparts / GIFs
   app.post('/api/admin/library/clipart/batch', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const { items } = req.body || {};
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ detail: 'Items array is required' });
@@ -1099,6 +1116,7 @@ async function startServer() {
   // Admin Update Global Clipart / GIF
   app.put('/api/admin/library/clipart/:id', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const id = req.params.id;
       const { name, category, imageUrl } = req.body || {};
       const updateData: any = {};
@@ -1119,10 +1137,7 @@ async function startServer() {
   // Admin Delete Global Clipart / GIF
   app.delete('/api/admin/library/clipart/:id', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization || '';
-      if (!authHeader.includes('admin_vault_session_2026')) {
-        return res.status(401).json({ detail: 'Unauthorized' });
-      }
+      if (!requireAdmin(req, res)) return;
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
       const { url } = req.body || {};
@@ -1151,10 +1166,7 @@ async function startServer() {
   // Admin Clear All Vault Cliparts
   app.post('/api/admin/library/cliparts/clear', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization || '';
-      if (!authHeader.includes('admin_vault_session_2026')) {
-        return res.status(401).json({ detail: 'Unauthorized' });
-      }
+      if (!requireAdmin(req, res)) return;
       await getCollection('global_cliparts').deleteMany({});
       saveVaultClipartsDisk([]);
       console.log(`[Admin Library] Cleared all vault cliparts`);
@@ -1167,6 +1179,7 @@ async function startServer() {
   // Admin Reseed Default Vault Cliparts
   app.post('/api/admin/library/cliparts/reseed', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const defaults = seedPresetFallback('DEFAULT_VAULT_CLIPARTS');
       await getCollection('global_cliparts').deleteMany({});
       for (const item of defaults) {
@@ -1268,11 +1281,10 @@ async function startServer() {
     try {
       const id = req.params.id;
       const userId = String(req.headers['x-user-id'] || req.body.userId || '').substring(0, 64);
-      const adminToken = req.headers.authorization || '';
       const effect = await getCollection('community_effects').findOne({ id });
       if (!effect) return res.status(404).json({ detail: 'Not found' });
       // Allow delete if: own post OR admin token
-      if (effect.authorId !== userId && !adminToken.includes('admin_vault_session_2026')) {
+      if (effect.authorId !== userId && !hasAdminToken(req.headers.authorization)) {
         return res.status(403).json({ detail: 'Not authorized to delete this effect' });
       }
       await getCollection('community_effects').deleteOne({ id });
@@ -1365,10 +1377,9 @@ async function startServer() {
     try {
       const id = req.params.id;
       const userId = String(req.headers['x-user-id'] || req.body.userId || '').substring(0, 64);
-      const adminToken = req.headers.authorization || '';
       const clipart = await getCollection('community_cliparts').findOne({ id });
       if (!clipart) return res.status(404).json({ detail: 'Not found' });
-      if (clipart.authorId !== userId && !adminToken.includes('admin_vault_session_2026')) {
+      if (clipart.authorId !== userId && !hasAdminToken(req.headers.authorization)) {
         return res.status(403).json({ detail: 'Not authorized' });
       }
       await getCollection('community_cliparts').deleteOne({ id });
@@ -1401,10 +1412,7 @@ async function startServer() {
 
   app.post('/api/admin/library/effect', upload.single('file'), async (req, res) => {
     try {
-      const authHeader = req.headers.authorization || '';
-      if (authHeader && !authHeader.includes('admin_vault_session_2026') && !authHeader.includes('Bearer ')) {
-        // Allow
-      }
+      if (!requireAdmin(req, res)) return;
       const { name, category, tags } = req.body || {};
       if (!req.file && !req.body.imageUrl) {
         return res.status(400).json({ detail: 'File or imageUrl required' });
@@ -1442,10 +1450,7 @@ async function startServer() {
 
   app.delete('/api/admin/library/effect/:id', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization || '';
-      if (!authHeader.includes('admin_vault_session_2026')) {
-        return res.status(401).json({ detail: 'Unauthorized' });
-      }
+      if (!requireAdmin(req, res)) return;
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
       const { url } = req.body || {};
@@ -1485,6 +1490,7 @@ async function startServer() {
   // Admin Add Global Battle Map
   app.post('/api/admin/library/battlemap', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const { name, theme, url, description } = req.body || {};
       if (!name || !url) {
         return res.status(400).json({ detail: 'Map Name and URL are required' });
@@ -1510,6 +1516,7 @@ async function startServer() {
   // Admin Batch Add Global Battle Maps
   app.post('/api/admin/library/battlemap/batch', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const { items } = req.body || {};
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ detail: 'Items array is required' });
@@ -1539,6 +1546,7 @@ async function startServer() {
   // Admin Update Global Battle Map
   app.put('/api/admin/library/battlemap/:id', async (req, res) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const id = req.params.id;
       const { name, theme, url, description } = req.body || {};
       const updateData: any = {};
@@ -1560,10 +1568,7 @@ async function startServer() {
   // Admin Delete Global Battle Map
   app.delete('/api/admin/library/battlemap/:id', async (req, res) => {
     try {
-      const authHeader = req.headers.authorization || '';
-      if (!authHeader.includes('admin_vault_session_2026')) {
-        return res.status(401).json({ detail: 'Unauthorized' });
-      }
+      if (!requireAdmin(req, res)) return;
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
       const { url } = req.body || {};
@@ -2007,13 +2012,14 @@ async function startServer() {
     let currentRoom: string | null = null;
 
     socket.on('create_session', (data) => {
+      const hostName = data?.host_name || data?.name || 'Host';
       const code = crypto.randomBytes(3).toString('hex').toUpperCase();
       const session = {
         code,
         host_sid: socket.id,
-        host_name: data.host_name || 'Host',
+        host_name: hostName,
         participants: {
-          host: { sid: socket.id, name: data.host_name || 'Host' },
+          host: { sid: socket.id, name: hostName },
           guests: []
         },
         drawings: [],
@@ -2032,7 +2038,7 @@ async function startServer() {
       socket.emit('session_created', session);
     });
 
-    socket.on('join_session', (data) => {
+    const handleJoinSession = (data: any) => {
       const code = (data.code || '').toUpperCase();
       const session = activeSessions[code];
 
@@ -2043,9 +2049,19 @@ async function startServer() {
 
       const guest = {
         sid: socket.id,
-        name: data.guest_name || 'Guest',
+        name: data.guest_name || data.name || 'Guest',
         blocked: false
       };
+
+      const existingGuest = session.participants.guests.find((g: any) => g.sid === socket.id);
+      if (existingGuest) {
+        existingGuest.name = guest.name;
+        currentRoom = code;
+        socket.join(code);
+        socket.emit('session_joined', session);
+        socket.to(code).emit('participants_updated', session.participants);
+        return;
+      }
 
       session.participants.guests.push(guest);
       currentRoom = code;
@@ -2053,7 +2069,9 @@ async function startServer() {
 
       socket.emit('session_joined', session);
       socket.to(code).emit('participants_updated', session.participants);
-    });
+    };
+    socket.on('join_session', handleJoinSession);
+    socket.on('join_session_request', handleJoinSession);
 
     // Drawing Sync
     socket.on('draw_path', (path) => {
@@ -2086,8 +2104,43 @@ async function startServer() {
     // Cursor Sync
     socket.on('cursor_move', (data) => {
       if (currentRoom) {
-        socket.to(currentRoom).emit('cursor_move', { ...data, sid: socket.id });
+        const payload = { ...data, sid: socket.id };
+        socket.to(currentRoom).emit('cursor_move', payload);
+        socket.to(currentRoom).emit('cursor_moved', payload);
       }
+    });
+
+    socket.on('cursor_leave', () => {
+      if (currentRoom) {
+        socket.to(currentRoom).emit('cursor_left', { sid: socket.id });
+      }
+    });
+
+    socket.on('leave_session_request', () => {
+      if (!currentRoom || !activeSessions[currentRoom]) return;
+      const session = activeSessions[currentRoom];
+      if (session.host_sid === socket.id) {
+        socket.to(currentRoom).emit('session_ended', { reason: 'Host ended the session' });
+        delete activeSessions[currentRoom];
+        currentRoom = null;
+        return;
+      }
+      session.participants.guests = session.participants.guests.filter((g: any) => g.sid !== socket.id);
+      socket.to(currentRoom).emit('participants_updated', session.participants);
+      currentRoom = null;
+    });
+
+    socket.on('update_grid_settings', (data) => {
+      if (!currentRoom || !activeSessions[currentRoom]) return;
+      activeSessions[currentRoom].grid_settings = data?.settings || {};
+      socket.to(currentRoom).emit('grid_settings_updated', { settings: activeSessions[currentRoom].grid_settings });
+    });
+
+    socket.on('update_host_dimensions', (data) => {
+      if (!currentRoom || !activeSessions[currentRoom]) return;
+      const width = Number(data?.width) || 1920;
+      const height = Number(data?.height) || 1080;
+      activeSessions[currentRoom].host_dimensions = { width, height };
     });
 
     // Generic Broadcast for collaborative events
@@ -2107,7 +2160,7 @@ async function startServer() {
 
     // Handle any custom game state updates
     socket.onAny((event, ...args) => {
-      if (currentRoom && !['create_session', 'join_session', 'draw_path', 'erase_at', 'clear_all_drawings', 'undo_drawing', 'cursor_move'].includes(event)) {
+      if (currentRoom && !['create_session', 'join_session', 'join_session_request', 'draw_path', 'erase_at', 'clear_all_drawings', 'undo_drawing', 'cursor_move', 'cursor_leave', 'leave_session_request', 'update_grid_settings', 'update_host_dimensions'].includes(event)) {
         socket.to(currentRoom).emit(event, ...args);
       }
     });

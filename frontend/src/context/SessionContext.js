@@ -108,6 +108,9 @@ export const SessionProvider = ({ children }) => {
         setError(null);
       }
     });
+    socket.on('host_reconnecting', () => {
+      setError("Host has disconnected. Waiting for host to return...");
+    });
 
     socket.on('session_ended', (data) => {
       setError(data.reason);
@@ -193,7 +196,7 @@ export const SessionProvider = ({ children }) => {
     });
 
     // Cursor tracking
-    socket.on('cursor_moved', (data) => {
+    const handleCursorMoved = (data) => {
       setRemoteCursors((prev) => ({
         ...prev,
         [data.sid]: data
@@ -204,7 +207,9 @@ export const SessionProvider = ({ children }) => {
         const nextList = [...list, { x: data.x, y: data.y, t: Date.now() }].slice(-10);
         return { ...prev, [data.sid]: nextList };
       });
-    });
+    };
+    socket.on('cursor_moved', handleCursorMoved);
+    socket.on('cursor_move', handleCursorMoved);
 
     socket.on('cursor_left', (data) => {
       setRemoteCursors((prev) => {
@@ -214,7 +219,7 @@ export const SessionProvider = ({ children }) => {
       });
     });
 
-    socket.on('location_pinged', (data) => {
+    const handlePing = (data) => {
       const ping = {
         id: "ping_" + Date.now() + "_" + Math.random(),
         x: data.x,
@@ -226,7 +231,9 @@ export const SessionProvider = ({ children }) => {
       setTimeout(() => {
         setPingMarkers((prev) => prev.filter((p) => p.id !== ping.id));
       }, 3000);
-    });
+    };
+    socket.on('location_pinged', handlePing);
+    socket.on('ping_location', handlePing);
 
     socket.on('dice_rolled', (roll) => {
       setDiceRolls((prev) => [...prev, roll].slice(-50));
@@ -315,7 +322,7 @@ export const SessionProvider = ({ children }) => {
     }
     // Socket connect runs async, listen on connection or emit directly if connected
     const run = () => {
-      socketRef.current.emit('create_session', { name });
+      socketRef.current.emit('create_session', { name, host_name: name });
       socketRef.current.emit('update_grid_settings', { settings: gridSettings });
       socketRef.current.emit('update_host_dimensions', hostDims);
     };
@@ -329,7 +336,9 @@ export const SessionProvider = ({ children }) => {
       socketRef.current.connect();
     }
     const run = () => {
-      socketRef.current.emit('join_session_request', { code, name });
+      const normalizedCode = String(code || '').toUpperCase();
+      const payload = { code: normalizedCode, name, guest_name: name };
+      socketRef.current.emit('join_session_request', payload);
     };
     if (socketRef.current.connected) run();
     else socketRef.current.once('connect', run);
