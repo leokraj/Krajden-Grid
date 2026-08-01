@@ -108,9 +108,6 @@ export const SessionProvider = ({ children }) => {
         setError(null);
       }
     });
-    socket.on('host_reconnecting', () => {
-      setError("Host has disconnected. Waiting for host to return...");
-    });
 
     socket.on('session_ended', (data) => {
       setError(data.reason);

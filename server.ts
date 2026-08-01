@@ -33,10 +33,22 @@ async function startServer() {
   const PORT = 3000;
   const ADMIN_SESSION_TOKEN = String(process.env.ADMIN_SESSION_TOKEN || 'admin_vault_session_2026').trim();
 
+  const extractBearerToken = (authHeader: unknown): string | null => {
+    const header = String(authHeader || '').trim();
+    if (!header) return null;
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (!match) return null;
+    const token = String(match[1] || '').trim();
+    return token || null;
+  };
+
   const hasAdminToken = (authHeader: unknown) => {
-    const header = String(authHeader || '');
+    if (!ADMIN_SESSION_TOKEN) return false;
+    const header = String(authHeader || '').trim();
     if (!header) return false;
-    return header.includes(ADMIN_SESSION_TOKEN);
+    const bearerToken = extractBearerToken(header);
+    if (bearerToken) return bearerToken === ADMIN_SESSION_TOKEN;
+    return header === ADMIN_SESSION_TOKEN;
   };
 
   const requireAdmin = (req: any, res: any): boolean => {
@@ -305,15 +317,15 @@ async function startServer() {
   // Helper: Create session token
   const createSessionToken = () => `sess_${crypto.randomBytes(16).toString('hex')}`;
 
+  const extractSessionToken = (req: express.Request): string | null => {
+    const cookieToken = typeof req.cookies?.session_token === 'string' ? req.cookies.session_token.trim() : '';
+    if (cookieToken) return cookieToken;
+    return extractBearerToken(req.headers.authorization);
+  };
+
   // Helper: Get current user
   const getCurrentUser = async (req: express.Request) => {
-    let sessionToken = req.cookies.session_token;
-    if (!sessionToken) {
-      const authHeader = req.headers.authorization || '';
-      if (authHeader.startsWith('Bearer ')) {
-        sessionToken = authHeader.substring(7);
-      }
-    }
+    const sessionToken = extractSessionToken(req);
     if (!sessionToken) return null;
 
     const sessionDoc = await getCollection('user_sessions').findOne({ session_token: sessionToken });
@@ -857,13 +869,7 @@ async function startServer() {
 
   // Auth: Logout
   app.post('/api/auth/logout', async (req, res) => {
-    let sessionToken = req.cookies.session_token;
-    if (!sessionToken) {
-      const authHeader = req.headers.authorization || '';
-      if (authHeader.startsWith('Bearer ')) {
-        sessionToken = authHeader.substring(7);
-      }
-    }
+    const sessionToken = extractSessionToken(req);
     if (sessionToken) {
       await getCollection('user_sessions').deleteOne({ session_token: sessionToken });
     }
