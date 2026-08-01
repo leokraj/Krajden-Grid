@@ -1125,30 +1125,24 @@ async function startServer() {
       }
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
-      const { url, name } = req.body || {};
+      const { url } = req.body || {};
 
-      let allItems = await getCollection('global_cliparts').find({}).toArray();
-      const initialCount = allItems.length;
+      // Use proper deleteOne — safe for both MongoDB and mockDb
+      const col = getCollection('global_cliparts');
 
-      allItems = allItems.filter((i: any) => {
-        if (!i) return false;
-        const iId = String(i.id || '');
-        const iUrl = String(i.imageUrl || i.url || '').trim();
+      // Try deleting by id field first
+      let result = await col.deleteOne({ id: decodedId });
 
-        if (iId === String(rawId) || iId === String(decodedId)) return false;
-        if (url && (iUrl === String(url).trim())) return false;
-        if (rawId && (iUrl === String(rawId).trim() || iUrl === String(decodedId).trim())) return false;
-        return true;
-      });
-
-      await getCollection('global_cliparts').deleteMany({});
-      mockDb['global_cliparts'] = allItems;
-      for (const item of allItems) {
-        await getCollection('global_cliparts').insertOne(item);
+      // If nothing deleted, try by imageUrl
+      if (!result?.deletedCount && url) {
+        await col.deleteOne({ imageUrl: url });
+        await col.deleteOne({ url: url });
       }
-      saveVaultClipartsDisk(allItems);
-      console.log(`[Admin Library] Deleted clipart/GIF id: ${rawId} (removed ${initialCount - allItems.length} items)`);
-      res.json({ success: true, id: rawId, remaining: allItems.length });
+
+      const remaining = await col.find({}).toArray();
+      saveVaultClipartsDisk(remaining);
+      console.log(`[Admin Library] Deleted clipart id: ${decodedId}, remaining: ${remaining.length}`);
+      res.json({ success: true, id: decodedId, remaining: remaining.length });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1448,32 +1442,23 @@ async function startServer() {
 
   app.delete('/api/admin/library/effect/:id', async (req, res) => {
     try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
-      const { url, name } = req.body || {};
-
-      let allItems = await getCollection('global_effects').find({}).toArray();
-      const initialCount = allItems.length;
-
-      allItems = allItems.filter((i: any) => {
-        if (!i) return false;
-        const iId = String(i.id || '');
-        const iUrl = String(i.imageUrl || i.url || '').trim();
-
-        if (iId === String(rawId) || iId === String(decodedId)) return false;
-        if (url && iUrl === String(url).trim()) return false;
-        if (rawId && (iUrl === String(rawId).trim() || iUrl === String(decodedId).trim())) return false;
-        return true;
-      });
-
-      await getCollection('global_effects').deleteMany({});
-      mockDb['global_effects'] = allItems;
-      for (const item of allItems) {
-        await getCollection('global_effects').insertOne(item);
+      const { url } = req.body || {};
+      const col = getCollection('global_effects');
+      await col.deleteOne({ id: decodedId });
+      if (url) {
+        await col.deleteOne({ imageUrl: url });
+        await col.deleteOne({ url: url });
       }
-      saveVaultEffectsDisk(allItems);
-      console.log(`[Admin Library] Deleted effect id: ${rawId} (removed ${initialCount - allItems.length} items)`);
-      res.json({ success: true, id: rawId, remaining: allItems.length });
+      const remaining = await col.find({}).toArray();
+      saveVaultEffectsDisk(remaining);
+      console.log('[Admin Library] Deleted effect id: ' + decodedId + ', remaining: ' + remaining.length);
+      res.json({ success: true, id: decodedId, remaining: remaining.length });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1575,36 +1560,27 @@ async function startServer() {
   // Admin Delete Global Battle Map
   app.delete('/api/admin/library/battlemap/:id', async (req, res) => {
     try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.includes('admin_vault_session_2026')) {
+        return res.status(401).json({ detail: 'Unauthorized' });
+      }
       const rawId = req.params.id;
       const decodedId = decodeURIComponent(rawId);
-      const { url, name } = req.body || {};
-
-      let allItems = await getCollection('global_battlemaps').find({}).toArray();
-      const initialCount = allItems.length;
-
-      allItems = allItems.filter((i: any) => {
-        if (!i) return false;
-        const iId = String(i.id || '');
-        const iUrl = String(i.url || i.imageUrl || '').trim();
-
-        if (iId === String(rawId) || iId === String(decodedId)) return false;
-        if (url && iUrl === String(url).trim()) return false;
-        if (rawId && (iUrl === String(rawId).trim() || iUrl === String(decodedId).trim())) return false;
-        return true;
-      });
-
-      await getCollection('global_battlemaps').deleteMany({});
-      mockDb['global_battlemaps'] = allItems;
-      for (const item of allItems) {
-        await getCollection('global_battlemaps').insertOne(item);
+      const { url } = req.body || {};
+      const col = getCollection('global_battlemaps');
+      await col.deleteOne({ id: decodedId });
+      if (url) {
+        await col.deleteOne({ url: url });
+        await col.deleteOne({ imageUrl: url });
       }
-      saveVaultBattlemapsDisk(allItems);
-      console.log(`[Admin Library] Deleted battle map id: ${rawId} (removed ${initialCount - allItems.length} items)`);
-      res.json({ success: true, id: rawId, remaining: allItems.length });
+      const remaining = await col.find({}).toArray();
+      saveVaultBattlemapsDisk(remaining);
+      console.log('[Admin Library] Deleted battlemap id: ' + decodedId + ', remaining: ' + remaining.length);
+      res.json({ success: true, id: decodedId, remaining: remaining.length });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
-  });
+  });;
 
   // === LICENSE ENDPOINTS ===
 
