@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "description": "Desktop Companion for Krajden Grid - Transparent overlay",
   "author": "Krajden Grid",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leokraj/Krajden-Grid.git"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --x64"
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --win --x64 --publish never"
   },
   "dependencies": {},
   "devDependencies": {
