@@ -442,6 +442,10 @@ export function EffectsControlPanel({ onClose }) {
       setLoading(false);
     };
     load();
+
+    // Reload when vault is updated from admin panel
+    window.addEventListener('krajden_library_updated', load);
+    return () => window.removeEventListener('krajden_library_updated', load);
   }, [userId]);
 
   const selectEffect = (effect) => {
