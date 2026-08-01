@@ -575,20 +575,8 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
-    markVaultIdDeleted(id, url);
-
-    setCliparts((prev) => prev.filter((i) => {
-      if (!i) return false;
-      if (id && (i.id === id || String(i.id) === String(id))) return false;
-      if (url && (i.imageUrl === url || i.url === url)) return false;
-      return true;
-    }));
-
-    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-    toast.success(`Deleted "${name}" from Vault`);
-
     try {
-      await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
+      const res = await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -596,8 +584,25 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         },
         body: JSON.stringify({ url, name }),
       });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`Failed to delete: ${err.detail || res.status}`);
+        return;
+      }
+
+      // Only update UI after confirmed backend delete
+      markVaultIdDeleted(id, url);
+      setCliparts((prev) => prev.filter((i) => {
+        if (!i) return false;
+        if (id && (i.id === id || String(i.id) === String(id))) return false;
+        if (url && (i.imageUrl === url || i.url === url)) return false;
+        return true;
+      }));
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted "${name}" from Vault`);
     } catch (err) {
-      // silent catch
+      toast.error('Delete error: ' + err.message);
     }
   };
 
@@ -612,20 +617,8 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
-    markVaultIdDeleted(id, url);
-
-    setBattlemaps((prev) => prev.filter((i) => {
-      if (!i) return false;
-      if (id && (i.id === id || String(i.id) === String(id))) return false;
-      if (url && (i.url === url || i.imageUrl === url)) return false;
-      return true;
-    }));
-
-    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-    toast.success(`Deleted battle map "${name}"`);
-
     try {
-      await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
+      const res = await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -633,8 +626,24 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         },
         body: JSON.stringify({ url, name }),
       });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`Failed to delete: ${err.detail || res.status}`);
+        return;
+      }
+
+      markVaultIdDeleted(id, url);
+      setBattlemaps((prev) => prev.filter((i) => {
+        if (!i) return false;
+        if (id && (i.id === id || String(i.id) === String(id))) return false;
+        if (url && (i.url === url || i.imageUrl === url)) return false;
+        return true;
+      }));
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted battle map "${name}"`);
     } catch (err) {
-      // silent catch
+      toast.error('Delete error: ' + err.message);
     }
   };
 
@@ -649,20 +658,8 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
-    markVaultIdDeleted(id, url);
-
-    setEffects((prev) => prev.filter((i) => {
-      if (!i) return false;
-      if (id && (i.id === id || String(i.id) === String(id))) return false;
-      if (url && (i.imageUrl === url || i.url === url)) return false;
-      return true;
-    }));
-
-    window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-    toast.success(`Deleted effect "${name}"`);
-
     try {
-      await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
+      const res = await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -670,8 +667,24 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         },
         body: JSON.stringify({ url, name }),
       });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`Failed to delete: ${err.detail || res.status}`);
+        return;
+      }
+
+      markVaultIdDeleted(id, url);
+      setEffects((prev) => prev.filter((i) => {
+        if (!i) return false;
+        if (id && (i.id === id || String(i.id) === String(id))) return false;
+        if (url && (i.imageUrl === url || i.url === url)) return false;
+        return true;
+      }));
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted effect "${name}"`);
     } catch (err) {
-      // silent catch
+      toast.error('Delete error: ' + err.message);
     }
   };
 
