@@ -3,6 +3,11 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 // Hide default application menu bar
 Menu.setApplicationMenu(null);
 
@@ -322,7 +327,7 @@ ipcMain.on('open-clipart-window', () => {
 });
 
 ipcMain.on('open-community-window', () => {
-  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 700);
+  createChildWindow('community', 'Krajden Grid - Community Clipart', 600, 700);
 });
 
 ipcMain.on('open-layers-window', () => {
@@ -338,6 +343,12 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow(initialUrl);
   });
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {

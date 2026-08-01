@@ -18,6 +18,8 @@
     "appId": "com.krajden.grid",
     "electronVersion": "31.7.7",
     "productName": "KrajdenGrid",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "executableName": "KrajdenGrid",
     "copyright": "Copyright © 2026 Krajden Grid",
     "directories": {
       "output": "dist"
@@ -25,11 +27,14 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "publisherName": "Krajden Grid"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Krajden Grid",

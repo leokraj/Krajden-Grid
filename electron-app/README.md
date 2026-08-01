@@ -33,7 +33,7 @@ You can compile a professional-looking, custom **NSIS Windows Installer (`.exe`)
    npm run dist
    ```
 3. Once completed, your custom Windows Installer `.exe` will be located inside the newly generated `dist/` folder:
-   - **Installer path**: `electron-app/dist/OverGrid Setup 1.0.0.exe`
+   - **Installer path**: `electron-app/dist/KrajdenGrid-Setup-1.0.0.exe`
 
 *Note: You can run the build from Windows, macOS, or Linux! It targets Windows 64-bit systems.*
 
