@@ -450,28 +450,6 @@ async function startServer() {
         deleteMany: (query: any) => db!.collection(name).deleteMany(query)
       };
 
-      const upsertByComputedKey = async (
-        collectionName: string,
-        item: any,
-        keyBuilder: (x: any) => string
-      ) => {
-        const col = getCollection(collectionName);
-        const existingItems = await col.find({}).toArray();
-        const newKey = keyBuilder(item);
-        const existing = (existingItems || []).find((x: any) => keyBuilder(x) === newKey);
-        if (existing?.id) {
-          const merged = {
-            ...item,
-            id: existing.id,
-            created_at: existing.created_at || item.created_at,
-            updated_at: new Date().toISOString(),
-          };
-          await col.updateOne({ id: existing.id }, { $set: merged });
-          return { item: merged, replaced: true };
-        }
-        await col.insertOne(item);
-        return { item, replaced: false };
-      };
     } else {
       if (!mockDb[name]) {
         mockDb[name] = [];
@@ -526,7 +504,31 @@ async function startServer() {
           return { deletedCount: initialLength - mockDb[name].length };
         }
       };
+
     }
+  };
+
+  const upsertByComputedKey = async (
+    collectionName: string,
+    item: any,
+    keyBuilder: (x: any) => string
+  ) => {
+    const col = getCollection(collectionName);
+    const existingItems = await col.find({}).toArray();
+    const newKey = keyBuilder(item);
+    const existing = (existingItems || []).find((x: any) => keyBuilder(x) === newKey);
+    if (existing?.id) {
+      const merged = {
+        ...item,
+        id: existing.id,
+        created_at: existing.created_at || item.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      await col.updateOne({ id: existing.id }, { $set: merged });
+      return { item: merged, replaced: true };
+    }
+    await col.insertOne(item);
+    return { item, replaced: false };
   };
 
   // Helper: Create session token
