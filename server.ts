@@ -199,6 +199,26 @@ const battlemapKey = (item: any) => {
   return `id:${item?.id || Math.random().toString(36).slice(2)}`;
 };
 
+const clipartWriteKey = (item: any) => {
+  const byName = toSlug(item?.name || '');
+  const byCategory = toSlug(item?.category || '');
+  if (byName) return `name:${byName}:${byCategory}`;
+  return clipartKey(item);
+};
+
+const effectWriteKey = (item: any) => {
+  const byName = toSlug(item?.name || '');
+  const byCategory = toSlug(item?.category || '');
+  if (byName) return `name:${byName}:${byCategory}`;
+  return effectKey(item);
+};
+
+const battlemapWriteKey = (item: any) => {
+  const byName = toSlug(item?.name || '');
+  if (byName) return `name:${byName}`;
+  return battlemapKey(item);
+};
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -428,6 +448,29 @@ async function startServer() {
         updateOne: (query: any, update: any, options?: any) => db!.collection(name).updateOne(query, update, options),
         deleteOne: (query: any) => db!.collection(name).deleteOne(query),
         deleteMany: (query: any) => db!.collection(name).deleteMany(query)
+      };
+
+      const upsertByComputedKey = async (
+        collectionName: string,
+        item: any,
+        keyBuilder: (x: any) => string
+      ) => {
+        const col = getCollection(collectionName);
+        const existingItems = await col.find({}).toArray();
+        const newKey = keyBuilder(item);
+        const existing = (existingItems || []).find((x: any) => keyBuilder(x) === newKey);
+        if (existing?.id) {
+          const merged = {
+            ...item,
+            id: existing.id,
+            created_at: existing.created_at || item.created_at,
+            updated_at: new Date().toISOString(),
+          };
+          await col.updateOne({ id: existing.id }, { $set: merged });
+          return { item: merged, replaced: true };
+        }
+        await col.insertOne(item);
+        return { item, replaced: false };
       };
     } else {
       if (!mockDb[name]) {
@@ -1246,11 +1289,11 @@ async function startServer() {
         tags: Array.isArray(tags) ? tags : [],
         created_at: new Date().toISOString()
       };
-      await getCollection('global_cliparts').insertOne(item);
+      const upsertResult = await upsertByComputedKey('global_cliparts', item, clipartWriteKey);
       const allItems = await getCollection('global_cliparts').find({}).toArray();
       saveVaultClipartsDisk(allItems);
-      console.log(`[Admin Library] Added new clipart/GIF: ${item.name} (${item.category})`);
-      res.json({ success: true, item });
+      console.log(`[Admin Library] ${upsertResult.replaced ? 'Replaced' : 'Added'} clipart/GIF: ${upsertResult.item.name} (${upsertResult.item.category})`);
+      res.json({ success: true, item: upsertResult.item, replaced: upsertResult.replaced });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1275,13 +1318,15 @@ async function startServer() {
         created_at: new Date().toISOString()
       }));
 
+      let replacedCount = 0;
       for (const item of preparedItems) {
-        await getCollection('global_cliparts').insertOne(item);
+        const result = await upsertByComputedKey('global_cliparts', item, clipartWriteKey);
+        if (result.replaced) replacedCount++;
       }
       const allItems = await getCollection('global_cliparts').find({}).toArray();
       saveVaultClipartsDisk(allItems);
-      console.log(`[Admin Library] Batch added ${preparedItems.length} cliparts/GIFs`);
-      res.json({ success: true, count: preparedItems.length, items: preparedItems });
+      console.log(`[Admin Library] Batch processed ${preparedItems.length} cliparts/GIFs (${replacedCount} replaced)`);
+      res.json({ success: true, count: preparedItems.length, replaced: replacedCount, items: preparedItems });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1617,11 +1662,11 @@ async function startServer() {
         created_at: new Date().toISOString(),
         isVault: true,
       };
-      await getCollection('global_effects').insertOne(item);
+      const upsertResult = await upsertByComputedKey('global_effects', item, effectWriteKey);
       const allEffects = await getCollection('global_effects').find({}).toArray();
       saveVaultEffectsDisk(allEffects);
-      console.log(`[Admin Effects] Added effect: ${item.name}`);
-      res.json({ success: true, item });
+      console.log(`[Admin Effects] ${upsertResult.replaced ? 'Replaced' : 'Added'} effect: ${upsertResult.item.name}`);
+      res.json({ success: true, item: upsertResult.item, replaced: upsertResult.replaced });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1687,11 +1732,11 @@ async function startServer() {
         description: description ? String(description).trim() : 'Tactical Battle Map',
         created_at: new Date().toISOString()
       };
-      await getCollection('global_battlemaps').insertOne(item);
+      const upsertResult = await upsertByComputedKey('global_battlemaps', item, battlemapWriteKey);
       const allItems = await getCollection('global_battlemaps').find({}).toArray();
       saveVaultBattlemapsDisk(allItems);
-      console.log(`[Admin Library] Added new battle map: ${item.name} (${item.theme})`);
-      res.json({ success: true, item });
+      console.log(`[Admin Library] ${upsertResult.replaced ? 'Replaced' : 'Added'} battle map: ${upsertResult.item.name} (${upsertResult.item.theme})`);
+      res.json({ success: true, item: upsertResult.item, replaced: upsertResult.replaced });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
@@ -1715,13 +1760,15 @@ async function startServer() {
         created_at: new Date().toISOString()
       }));
 
+      let replacedCount = 0;
       for (const item of preparedItems) {
-        await getCollection('global_battlemaps').insertOne(item);
+        const result = await upsertByComputedKey('global_battlemaps', item, battlemapWriteKey);
+        if (result.replaced) replacedCount++;
       }
       const allItems = await getCollection('global_battlemaps').find({}).toArray();
       saveVaultBattlemapsDisk(allItems);
-      console.log(`[Admin Library] Batch added ${preparedItems.length} battle maps`);
-      res.json({ success: true, count: preparedItems.length, items: preparedItems });
+      console.log(`[Admin Library] Batch processed ${preparedItems.length} battle maps (${replacedCount} replaced)`);
+      res.json({ success: true, count: preparedItems.length, replaced: replacedCount, items: preparedItems });
     } catch (e: any) {
       res.status(500).json({ detail: e.message });
     }
