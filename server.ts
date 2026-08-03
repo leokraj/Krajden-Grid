@@ -24,8 +24,180 @@ try {
 // Ensure uploads/videos directory exists
 const UPLOADS_DIR = path.join(resolvedDirname, 'uploads');
 const VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
+const VAULT_ROOT_DIR = path.join(UPLOADS_DIR, 'vault');
+const VAULT_TOKENS_DIR = path.join(VAULT_ROOT_DIR, 'tokens');
+const VAULT_MAPS_DIR = path.join(VAULT_ROOT_DIR, 'maps');
+const VAULT_EFFECTS_DIR = path.join(VAULT_ROOT_DIR, 'effects');
+const LEGACY_TOKENS_DIR = path.join(UPLOADS_DIR, 'tokens');
+const LEGACY_MAPS_DIR = path.join(UPLOADS_DIR, 'maps');
+const LEGACY_BATTLEMAPS_DIR = path.join(UPLOADS_DIR, 'battlemaps');
+const LEGACY_EFFECTS_DIR = path.join(UPLOADS_DIR, 'effects');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 if (!fs.existsSync(VIDEOS_DIR)) fs.mkdirSync(VIDEOS_DIR);
+if (!fs.existsSync(VAULT_ROOT_DIR)) fs.mkdirSync(VAULT_ROOT_DIR, { recursive: true });
+if (!fs.existsSync(VAULT_TOKENS_DIR)) fs.mkdirSync(VAULT_TOKENS_DIR, { recursive: true });
+if (!fs.existsSync(VAULT_MAPS_DIR)) fs.mkdirSync(VAULT_MAPS_DIR, { recursive: true });
+if (!fs.existsSync(VAULT_EFFECTS_DIR)) fs.mkdirSync(VAULT_EFFECTS_DIR, { recursive: true });
+if (!fs.existsSync(LEGACY_TOKENS_DIR)) fs.mkdirSync(LEGACY_TOKENS_DIR, { recursive: true });
+if (!fs.existsSync(LEGACY_MAPS_DIR)) fs.mkdirSync(LEGACY_MAPS_DIR, { recursive: true });
+if (!fs.existsSync(LEGACY_BATTLEMAPS_DIR)) fs.mkdirSync(LEGACY_BATTLEMAPS_DIR, { recursive: true });
+if (!fs.existsSync(LEGACY_EFFECTS_DIR)) fs.mkdirSync(LEGACY_EFFECTS_DIR, { recursive: true });
+
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp', '.avif']);
+const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
+const ALLOWED_ASSET_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS]);
+
+const toSlug = (input: string) => String(input || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '')
+  .slice(0, 120);
+
+const prettyNameFromFile = (filename: string) => {
+  const base = path.basename(filename, path.extname(filename));
+  return base
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || 'Untitled';
+};
+
+const stripQuery = (url: string) => String(url || '').split('?')[0];
+
+const scanAssetFiles = (dirs: string[]): Array<{ absolutePath: string; relativePath: string; ext: string; mtimeMs: number; }> => {
+  const files: Array<{ absolutePath: string; relativePath: string; ext: string; mtimeMs: number; }> = [];
+  const seen = new Set<string>();
+
+  const walk = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const absPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(absPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!ALLOWED_ASSET_EXTS.has(ext)) continue;
+      if (!absPath.startsWith(UPLOADS_DIR)) continue;
+      const relPath = path.relative(UPLOADS_DIR, absPath).split(path.sep).join('/');
+      if (!relPath || seen.has(relPath)) continue;
+      seen.add(relPath);
+      try {
+        const stat = fs.statSync(absPath);
+        files.push({ absolutePath: absPath, relativePath: relPath, ext, mtimeMs: stat.mtimeMs || Date.now() });
+      } catch (_) {}
+    }
+  };
+
+  for (const dir of dirs) {
+    walk(dir);
+  }
+
+  return files;
+};
+
+const toUploadsAssetUrl = (relativePath: string, mtimeMs: number) => `/uploads/${relativePath}?v=${Math.floor(mtimeMs || Date.now())}`;
+
+const loadVaultTokenFileItems = () => {
+  const files = scanAssetFiles([VAULT_TOKENS_DIR, LEGACY_TOKENS_DIR]);
+  return files.map((file) => {
+    const displayName = prettyNameFromFile(file.absolutePath);
+    const slug = toSlug(file.relativePath);
+    return {
+      id: `file_token_${slug}`,
+      name: displayName,
+      category: 'tokens',
+      type: VIDEO_EXTS.has(file.ext) ? 'video' : 'image',
+      imageUrl: toUploadsAssetUrl(file.relativePath, file.mtimeMs),
+      tags: ['tokens', 'file_vault'],
+      created_at: new Date(file.mtimeMs).toISOString(),
+      isVault: true,
+    };
+  });
+};
+
+const loadVaultMapFileItems = () => {
+  const files = scanAssetFiles([VAULT_MAPS_DIR, LEGACY_MAPS_DIR, LEGACY_BATTLEMAPS_DIR]);
+  return files.map((file) => {
+    const displayName = prettyNameFromFile(file.absolutePath);
+    const slug = toSlug(file.relativePath);
+    return {
+      id: `file_map_${slug}`,
+      name: displayName,
+      theme: 'Dungeon',
+      url: toUploadsAssetUrl(file.relativePath, file.mtimeMs),
+      description: 'File Vault Battle Map',
+      created_at: new Date(file.mtimeMs).toISOString(),
+      isVault: true,
+    };
+  });
+};
+
+const loadVaultEffectFileItems = () => {
+  const files = scanAssetFiles([VAULT_EFFECTS_DIR, LEGACY_EFFECTS_DIR]);
+  return files.map((file) => {
+    const displayName = prettyNameFromFile(file.absolutePath);
+    const slug = toSlug(file.relativePath);
+    return {
+      id: `file_effect_${slug}`,
+      name: displayName,
+      category: 'nature',
+      imageUrl: toUploadsAssetUrl(file.relativePath, file.mtimeMs),
+      tags: ['effects', 'file_vault'],
+      created_at: new Date(file.mtimeMs).toISOString(),
+      isVault: true,
+    };
+  });
+};
+
+const mergePreferredItems = (preferred: any[], fallback: any[], keyBuilder: (item: any) => string) => {
+  const out: any[] = [];
+  const seen = new Set<string>();
+  const pushIfNew = (item: any) => {
+    if (!item) return;
+    const key = keyBuilder(item);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(item);
+  };
+  for (const item of preferred || []) pushIfNew(item);
+  for (const item of fallback || []) pushIfNew(item);
+  return out;
+};
+
+const clipartKey = (item: any) => {
+  const byUrl = stripQuery(item?.imageUrl || item?.url || '');
+  if (byUrl) return `url:${byUrl}`;
+  const byName = toSlug(item?.name || '');
+  const byCategory = toSlug(item?.category || '');
+  if (byName) return `name:${byName}:${byCategory}`;
+  return `id:${item?.id || Math.random().toString(36).slice(2)}`;
+};
+
+const effectKey = (item: any) => {
+  const byUrl = stripQuery(item?.imageUrl || item?.url || '');
+  if (byUrl) return `url:${byUrl}`;
+  const byName = toSlug(item?.name || '');
+  const byCategory = toSlug(item?.category || '');
+  if (byName) return `name:${byName}:${byCategory}`;
+  return `id:${item?.id || Math.random().toString(36).slice(2)}`;
+};
+
+const battlemapKey = (item: any) => {
+  const byUrl = stripQuery(item?.url || item?.imageUrl || '');
+  if (byUrl) return `url:${byUrl}`;
+  const byName = toSlug(item?.name || '');
+  if (byName) return `name:${byName}`;
+  return `id:${item?.id || Math.random().toString(36).slice(2)}`;
+};
 
 async function startServer() {
   const app = express();
@@ -1046,18 +1218,14 @@ async function startServer() {
           }
         }
       }
-      // Deduplicate items by URL (when provided) before returning
-      const seenUrls = new Set();
-      const cleanItems = (items || []).filter((item: any) => {
-        if (!item) return false;
-        const url = (item.imageUrl || item.url || '').trim();
-        if (url && url.length > 5 && seenUrls.has(url)) return false;
-        if (url && url.length > 5) seenUrls.add(url);
-        return true;
-      });
-      res.json({ cliparts: cleanItems });
+      const fileTokenItems = loadVaultTokenFileItems();
+      const merged = mergePreferredItems(fileTokenItems, items || [], clipartKey);
+      res.json({ cliparts: merged });
     } catch (e: any) {
-      res.json({ cliparts: loadVaultClipartsDisk() });
+      const fileTokenItems = loadVaultTokenFileItems();
+      const fallback = loadVaultClipartsDisk();
+      const merged = mergePreferredItems(fileTokenItems, fallback || [], clipartKey);
+      res.json({ cliparts: merged });
     }
   });
 
@@ -1410,9 +1578,14 @@ async function startServer() {
           }
         }
       }
-      res.json({ effects: items || [] });
+      const fileEffectItems = loadVaultEffectFileItems();
+      const merged = mergePreferredItems(fileEffectItems, items || [], effectKey);
+      res.json({ effects: merged });
     } catch (e: any) {
-      res.json({ effects: loadVaultEffectsDisk() });
+      const fileEffectItems = loadVaultEffectFileItems();
+      const fallback = loadVaultEffectsDisk();
+      const merged = mergePreferredItems(fileEffectItems, fallback || [], effectKey);
+      res.json({ effects: merged });
     }
   });
 
@@ -1487,9 +1660,14 @@ async function startServer() {
           }
         }
       }
-      res.json({ battlemaps: items || [] });
+      const fileMapItems = loadVaultMapFileItems();
+      const merged = mergePreferredItems(fileMapItems, items || [], battlemapKey);
+      res.json({ battlemaps: merged });
     } catch (e: any) {
-      res.json({ battlemaps: loadVaultBattlemapsDisk() });
+      const fileMapItems = loadVaultMapFileItems();
+      const fallback = loadVaultBattlemapsDisk();
+      const merged = mergePreferredItems(fileMapItems, fallback || [], battlemapKey);
+      res.json({ battlemaps: merged });
     }
   });
 
