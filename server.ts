@@ -21,8 +21,14 @@ try {
   resolvedDirname = path.dirname(resolvedFilename);
 }
 
+const resolveUploadsDir = () => {
+  const configured = String(process.env.UPLOADS_DIR || '').trim();
+  if (!configured) return path.join(resolvedDirname, 'uploads');
+  return path.isAbsolute(configured) ? configured : path.resolve(resolvedDirname, configured);
+};
+
 // Ensure uploads/videos directory exists
-const UPLOADS_DIR = path.join(resolvedDirname, 'uploads');
+const UPLOADS_DIR = resolveUploadsDir();
 const VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
 const VAULT_ROOT_DIR = path.join(UPLOADS_DIR, 'vault');
 const VAULT_TOKENS_DIR = path.join(VAULT_ROOT_DIR, 'tokens');
@@ -32,8 +38,8 @@ const LEGACY_TOKENS_DIR = path.join(UPLOADS_DIR, 'tokens');
 const LEGACY_MAPS_DIR = path.join(UPLOADS_DIR, 'maps');
 const LEGACY_BATTLEMAPS_DIR = path.join(UPLOADS_DIR, 'battlemaps');
 const LEGACY_EFFECTS_DIR = path.join(UPLOADS_DIR, 'effects');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
-if (!fs.existsSync(VIDEOS_DIR)) fs.mkdirSync(VIDEOS_DIR);
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs.existsSync(VIDEOS_DIR)) fs.mkdirSync(VIDEOS_DIR, { recursive: true });
 if (!fs.existsSync(VAULT_ROOT_DIR)) fs.mkdirSync(VAULT_ROOT_DIR, { recursive: true });
 if (!fs.existsSync(VAULT_TOKENS_DIR)) fs.mkdirSync(VAULT_TOKENS_DIR, { recursive: true });
 if (!fs.existsSync(VAULT_MAPS_DIR)) fs.mkdirSync(VAULT_MAPS_DIR, { recursive: true });
