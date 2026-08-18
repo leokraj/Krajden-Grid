@@ -1,4 +1,4 @@
-import "../../App.css";
+import "@/App.css";
 import { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
