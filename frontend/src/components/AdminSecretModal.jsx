@@ -5,6 +5,17 @@ import { Label } from './ui/label';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
 import {
+  saveTokenToFirebase,
+  deleteTokenFromFirebase,
+  saveBattlemapToFirebase,
+  deleteBattlemapFromFirebase,
+  saveEffectToFirebase,
+  deleteEffectFromFirebase,
+  fetchTokensFromFirebase,
+  fetchBattlemapsFromFirebase,
+  fetchEffectsFromFirebase,
+} from '../lib/firebase';
+import {
   Shield,
   Lock,
   Unlock,
@@ -23,6 +34,10 @@ import {
   FolderPlus,
   RefreshCw,
   Zap,
+  Cloud,
+  CheckSquare,
+  Square,
+  Check,
 } from 'lucide-react';
 
 export default function AdminSecretModal({ isOpen, onClose }) {
@@ -33,6 +48,15 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
   // Active Tab: 'gifs' | 'maps' | 'effects'
   const [activeTab, setActiveTab] = useState('gifs');
+
+  // Firebase sync state
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+
+  // Multi-item selection states for batch deletion & operations
+  const [selectedClipartIds, setSelectedClipartIds] = useState(new Set());
+  const [selectedMapIds, setSelectedMapIds] = useState(new Set());
+  const [selectedEffectIds, setSelectedEffectIds] = useState(new Set());
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
 
   // Library Items state
   const [cliparts, setCliparts] = useState([]);
@@ -325,6 +349,15 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       }
 
       if (totalPublished > 0) {
+        // Persist all published items to Firebase Firestore in real-time
+        for (const item of itemsToPublish) {
+          saveTokenToFirebase({
+            ...item,
+            id: `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            isVault: true,
+            created_at: new Date().toISOString()
+          }).catch(e => console.warn('[Firebase] Token batch save error:', e));
+        }
         toast.success(`Batch uploaded & published ${totalPublished} asset(s)!`, { id: toastId });
         setGifName('');
         setGifUrl('');
@@ -369,6 +402,18 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
       const data = await safeJsonResponse(res);
       if (data.success) {
+        // Sync to Firebase Firestore
+        saveTokenToFirebase({
+          id: `token_${Date.now()}`,
+          name: title,
+          category: gifCategory,
+          type: 'image',
+          imageUrl: gifUrl.trim(),
+          tags: [gifCategory, 'admin_uploaded'],
+          isVault: true,
+          created_at: new Date().toISOString()
+        }).catch(e => console.warn('[Firebase] Token save note:', e));
+
         toast.success(`Added "${title}" to Global Vault!`);
         setGifName('');
         setGifUrl('');
@@ -447,6 +492,14 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       }
 
       if (totalPublished > 0) {
+        // Persist published battle maps to Firebase Firestore
+        for (const item of itemsToPublish) {
+          saveBattlemapToFirebase({
+            ...item,
+            id: `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            created_at: new Date().toISOString()
+          }).catch(e => console.warn('[Firebase] Battle map batch save error:', e));
+        }
         toast.success(`Published ${totalPublished} Battle Map(s) to Vault!`, { id: toastId });
         setMapName('');
         setMapUrl('');
@@ -491,6 +544,16 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
       const data = await res.json();
       if (res.ok && data.success) {
+        // Sync to Firebase Firestore
+        saveBattlemapToFirebase({
+          id: `map_${Date.now()}`,
+          name: mapName.trim(),
+          theme: mapTheme,
+          url: mapUrl.trim(),
+          description: mapDescription.trim() || `${mapTheme} Tactical Battle Map`,
+          created_at: new Date().toISOString()
+        }).catch(e => console.warn('[Firebase] Map save note:', e));
+
         toast.success(`Published battle map "${mapName}" to Vault!`);
         setMapName('');
         setMapUrl('');
@@ -537,6 +600,11 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       });
 
       if (res.ok) {
+        if (isMap) {
+          saveBattlemapToFirebase({ ...editingItem, ...payload }).catch(e => console.warn(e));
+        } else {
+          saveTokenToFirebase({ ...editingItem, ...payload }).catch(e => console.warn(e));
+        }
         toast.success(`Saved changes for "${editingItem.name}"`);
         setEditingItem(null);
         fetchLibraryData();
@@ -554,7 +622,7 @@ export default function AdminSecretModal({ isOpen, onClose }) {
   const markVaultIdDeleted = (id, url) => {
     try {
       const existing = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]')
-        .filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http')));
+        .filter(x => typeof x === 'string' && (x.length > 5 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('map_') || x.startsWith('clipart_') || x.startsWith('token_') || x.startsWith('data:') || x.startsWith('http')));
       const newSet = new Set([
         ...existing,
         ...(id ? [id, String(id)] : []),
@@ -564,6 +632,197 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     } catch (e) {}
   };
 
+  // --- Multi-Select Toggle & Batch Selection Helpers ---
+  const toggleSelectClipart = (id) => {
+    setSelectedClipartIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllCliparts = () => {
+    if (selectedClipartIds.size === cliparts.length) {
+      setSelectedClipartIds(new Set());
+    } else {
+      setSelectedClipartIds(new Set(cliparts.map((c) => c.id)));
+    }
+  };
+
+  const toggleSelectMap = (id) => {
+    setSelectedMapIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllMaps = () => {
+    if (selectedMapIds.size === battlemaps.length) {
+      setSelectedMapIds(new Set());
+    } else {
+      setSelectedMapIds(new Set(battlemaps.map((m) => m.id)));
+    }
+  };
+
+  const toggleSelectEffect = (id) => {
+    setSelectedEffectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllEffects = () => {
+    if (selectedEffectIds.size === effects.length) {
+      setSelectedEffectIds(new Set());
+    } else {
+      setSelectedEffectIds(new Set(effects.map((e) => e.id)));
+    }
+  };
+
+  // --- Batch Delete Handlers (Delete from Firebase Firestore + Backend + Local Vault) ---
+
+  const handleDeleteSelectedCliparts = async () => {
+    if (selectedClipartIds.size === 0) {
+      toast.info('No GIFs or tokens selected.');
+      return;
+    }
+    const count = selectedClipartIds.size;
+    setIsBatchDeleting(true);
+    const toastId = toast.loading(`Deleting ${count} selected token(s) from Firebase & Library...`);
+
+    try {
+      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+      const toDelete = cliparts.filter((c) => selectedClipartIds.has(c.id) || selectedClipartIds.has(String(c.id)));
+
+      await Promise.allSettled(
+        toDelete.map(async (item) => {
+          const id = item.id;
+          const url = item.imageUrl || item.url || item.imageData || item.src;
+          const name = item.name;
+
+          if (id) {
+            try { await deleteTokenFromFirebase(id, url); } catch(e) {}
+          }
+          try {
+            await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+              body: JSON.stringify({ url, name }),
+            });
+          } catch(e) {}
+
+          markVaultIdDeleted(id, url);
+        })
+      );
+
+      setCliparts((prev) => prev.filter((c) => !selectedClipartIds.has(c.id) && !selectedClipartIds.has(String(c.id))));
+      setSelectedClipartIds(new Set());
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted ${count} GIF(s)/token(s) permanently!`, { id: toastId });
+    } catch (err) {
+      toast.error('Batch delete error: ' + err.message, { id: toastId });
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
+  const handleDeleteSelectedMaps = async () => {
+    if (selectedMapIds.size === 0) {
+      toast.info('No battle maps selected.');
+      return;
+    }
+    const count = selectedMapIds.size;
+    setIsBatchDeleting(true);
+    const toastId = toast.loading(`Deleting ${count} selected battle map(s) from Firebase & Library...`);
+
+    try {
+      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+      const toDelete = battlemaps.filter((m) => selectedMapIds.has(m.id) || selectedMapIds.has(String(m.id)));
+
+      await Promise.allSettled(
+        toDelete.map(async (item) => {
+          const id = item.id;
+          const url = item.url || item.imageUrl;
+          const name = item.name;
+
+          if (id) {
+            try { await deleteBattlemapFromFirebase(id, url); } catch(e) {}
+          }
+          try {
+            await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+              body: JSON.stringify({ url, name }),
+            });
+          } catch(e) {}
+
+          markVaultIdDeleted(id, url);
+        })
+      );
+
+      setBattlemaps((prev) => prev.filter((m) => !selectedMapIds.has(m.id) && !selectedMapIds.has(String(m.id))));
+      setSelectedMapIds(new Set());
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted ${count} battle map(s) permanently!`, { id: toastId });
+    } catch (err) {
+      toast.error('Batch delete error: ' + err.message, { id: toastId });
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
+  const handleDeleteSelectedEffects = async () => {
+    if (selectedEffectIds.size === 0) {
+      toast.info('No effects selected.');
+      return;
+    }
+    const count = selectedEffectIds.size;
+    setIsBatchDeleting(true);
+    const toastId = toast.loading(`Deleting ${count} selected effect(s) from Firebase & Library...`);
+
+    try {
+      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+      const toDelete = effects.filter((e) => selectedEffectIds.has(e.id) || selectedEffectIds.has(String(e.id)));
+
+      await Promise.allSettled(
+        toDelete.map(async (item) => {
+          const id = item.id;
+          const url = item.imageUrl || item.url;
+          const name = item.name;
+
+          if (id) {
+            try { await deleteEffectFromFirebase(id, url); } catch(e) {}
+          }
+          try {
+            await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+              body: JSON.stringify({ url, name }),
+            });
+          } catch(e) {}
+
+          markVaultIdDeleted(id, url);
+        })
+      );
+
+      setEffects((prev) => prev.filter((e) => !selectedEffectIds.has(e.id) && !selectedEffectIds.has(String(e.id))));
+      setSelectedEffectIds(new Set());
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+      toast.success(`Deleted ${count} effect(s) permanently!`, { id: toastId });
+    } catch (err) {
+      toast.error('Batch delete error: ' + err.message, { id: toastId });
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
+  // --- Single Item Delete Handlers (with Firebase & Library sync) ---
+
   // Handle Delete Clipart / GIF Token
   const handleDeleteClipart = async (itemOrId, nameArg) => {
     const item = typeof itemOrId === 'object' ? itemOrId : cliparts.find(c => c.id === itemOrId);
@@ -571,27 +830,23 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Asset');
     const url = item ? (item.imageUrl || item.url || item.imageData || item.src) : null;
 
-    if (!window.confirm(`Delete "${name}" from global vault?`)) return;
-
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
     try {
-      const res = await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({ url, name }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(`Failed to delete: ${err.detail || res.status}`);
-        return;
+      if (id) {
+        await deleteTokenFromFirebase(id, url).catch(e => console.warn('[Firebase] delete error:', e));
       }
+      try {
+        await fetch(`/api/admin/library/clipart/${encodeURIComponent(id || 'unknown')}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ url, name }),
+        });
+      } catch(e) {}
 
-      // Only update UI after confirmed backend delete
       markVaultIdDeleted(id, url);
       setCliparts((prev) => prev.filter((i) => {
         if (!i) return false;
@@ -599,8 +854,13 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         if (url && (i.imageUrl === url || i.url === url)) return false;
         return true;
       }));
+      setSelectedClipartIds((prev) => {
+        const next = new Set(prev);
+        if (id) next.delete(id);
+        return next;
+      });
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-      toast.success(`Deleted "${name}" from Vault`);
+      toast.success(`Deleted "${name}" from Firebase and Vault Library`);
     } catch (err) {
       toast.error('Delete error: ' + err.message);
     }
@@ -613,25 +873,22 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Battle Map');
     const url = item ? (item.url || item.imageUrl) : null;
 
-    if (!window.confirm(`Delete battle map "${name}" from global vault?`)) return;
-
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
     try {
-      const res = await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({ url, name }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(`Failed to delete: ${err.detail || res.status}`);
-        return;
+      if (id) {
+        await deleteBattlemapFromFirebase(id, url).catch(e => console.warn('[Firebase] delete error:', e));
       }
+      try {
+        await fetch(`/api/admin/library/battlemap/${encodeURIComponent(id || 'unknown')}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ url, name }),
+        });
+      } catch(e) {}
 
       markVaultIdDeleted(id, url);
       setBattlemaps((prev) => prev.filter((i) => {
@@ -640,8 +897,13 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         if (url && (i.url === url || i.imageUrl === url)) return false;
         return true;
       }));
+      setSelectedMapIds((prev) => {
+        const next = new Set(prev);
+        if (id) next.delete(id);
+        return next;
+      });
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-      toast.success(`Deleted battle map "${name}"`);
+      toast.success(`Deleted battle map "${name}" from Firebase & Library`);
     } catch (err) {
       toast.error('Delete error: ' + err.message);
     }
@@ -654,25 +916,22 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     const name = typeof itemOrId === 'object' ? itemOrId?.name : (nameArg || item?.name || 'Effect');
     const url = item ? (item.imageUrl || item.url) : null;
 
-    if (!window.confirm(`Delete effect "${name}" from global vault?`)) return;
-
     const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
 
     try {
-      const res = await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({ url, name }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(`Failed to delete: ${err.detail || res.status}`);
-        return;
+      if (id) {
+        await deleteEffectFromFirebase(id, url).catch(e => console.warn('[Firebase] delete error:', e));
       }
+      try {
+        await fetch(`/api/admin/library/effect/${encodeURIComponent(id || name)}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ url, name }),
+        });
+      } catch(e) {}
 
       markVaultIdDeleted(id, url);
       setEffects((prev) => prev.filter((i) => {
@@ -681,8 +940,13 @@ export default function AdminSecretModal({ isOpen, onClose }) {
         if (url && (i.imageUrl === url || i.url === url)) return false;
         return true;
       }));
+      setSelectedEffectIds((prev) => {
+        const next = new Set(prev);
+        if (id) next.delete(id);
+        return next;
+      });
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
-      toast.success(`Deleted effect "${name}"`);
+      toast.success(`Deleted effect "${name}" from Firebase & Library`);
     } catch (err) {
       toast.error('Delete error: ' + err.message);
     }
@@ -718,6 +982,16 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       });
 
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        saveEffectToFirebase({
+          id: `eff_${Date.now()}`,
+          name: effectName.trim(),
+          category: effectCategory,
+          imageUrl: data.url || effectUrl.trim(),
+          tags: [effectCategory, 'admin_uploaded'],
+          created_at: new Date().toISOString()
+        }).catch(e => console.warn('[Firebase] effect save note:', e));
+
         toast.success(`Uploaded effect "${effectName}"`);
         setEffectName('');
         setEffectUrl('');
@@ -735,8 +1009,6 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
   // Handle Clear All Vault Cliparts/Tokens
   const handleClearAllCliparts = async () => {
-    if (!window.confirm("Are you sure you want to delete ALL tokens and cliparts from the Vault? This will permanently wipe all tokens in the vault!")) return;
-
     try {
       const backendUrl = window.location.origin;
       const adminToken = localStorage.getItem('krajden_admin_token') || '';
@@ -780,6 +1052,63 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       }
     } catch (err) {
       toast.error('Reseed error: ' + err.message);
+    }
+  };
+
+  // Explicit Upload & Sync to Firebase for Category
+  const handleSyncCategoryToFirebase = async (catType) => {
+    setIsSyncingFirebase(true);
+    const toastId = toast.loading(`Uploading & syncing ${catType.toUpperCase()} category to Firebase Firestore...`);
+
+    try {
+      let count = 0;
+      if (catType === 'gifs') {
+        const itemsToSave = cliparts.length > 0 ? cliparts : [];
+        for (const item of itemsToSave) {
+          const docId = String(item.id || `token_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+          await saveTokenToFirebase({
+            ...item,
+            id: docId,
+            imageUrl: item.imageUrl || item.url,
+            isVault: true,
+            created_at: item.created_at || new Date().toISOString()
+          });
+          count++;
+        }
+        toast.success(`☁️ Uploaded & synced ${count} Token(s) to Firebase! Saved in /tokens and live in App Library.`, { id: toastId, duration: 5000 });
+      } else if (catType === 'maps') {
+        const itemsToSave = battlemaps.length > 0 ? battlemaps : [];
+        for (const map of itemsToSave) {
+          const docId = String(map.id || `map_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+          await saveBattlemapToFirebase({
+            ...map,
+            id: docId,
+            url: map.url || map.imageUrl,
+            created_at: map.created_at || new Date().toISOString()
+          });
+          count++;
+        }
+        toast.success(`☁️ Uploaded & synced ${count} Battle Map(s) to Firebase! Saved in /battlemaps and live in App Library.`, { id: toastId, duration: 5000 });
+      } else if (catType === 'effects') {
+        const itemsToSave = effects.length > 0 ? effects : [];
+        for (const eff of itemsToSave) {
+          const docId = String(eff.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+          await saveEffectToFirebase({
+            ...eff,
+            id: docId,
+            imageUrl: eff.imageUrl || eff.url,
+            created_at: eff.created_at || new Date().toISOString()
+          });
+          count++;
+        }
+        toast.success(`☁️ Uploaded & synced ${count} Visual Effect(s) to Firebase! Saved in /effects and live in App Library.`, { id: toastId, duration: 5000 });
+      }
+      window.dispatchEvent(new CustomEvent('krajden_library_updated'));
+    } catch (err) {
+      console.error('[Firebase Sync Error]:', err);
+      toast.error(`Firebase upload error: ${err.message || 'Check connection'}`, { id: toastId });
+    } finally {
+      setIsSyncingFirebase(false);
     }
   };
 
@@ -933,6 +1262,40 @@ export default function AdminSecretModal({ isOpen, onClose }) {
               {activeTab === 'gifs' ? (
                 /* GIFs & Animated Tokens Tab */
                 <div className="space-y-6">
+                  {/* Firebase Cloud Sync & Status Bar for Tokens */}
+                  <div className="bg-gradient-to-r from-[#0d1f14] via-[#09150d] to-[#0d1f14] border border-emerald-500/40 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center shrink-0">
+                        <Cloud className="w-5 h-5 text-emerald-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold font-cinzel text-emerald-300 uppercase tracking-wider">
+                            Firebase Firestore Cloud Storage (Tokens & Cliparts)
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            ● Live in /tokens
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Total Vault Tokens: <strong className="text-white">{cliparts.length}</strong>. Click the button to upload and verify all tokens to Firebase so they are instantly accessible in the app's library.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled={isSyncingFirebase}
+                      onClick={() => handleSyncCategoryToFirebase('gifs')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 text-xs uppercase tracking-wider px-4 shrink-0 gap-2 shadow-md hover:shadow-emerald-500/20 cursor-pointer"
+                    >
+                      {isSyncingFirebase ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Uploading to Firebase...</>
+                      ) : (
+                        <><Cloud className="w-4 h-4" /> Upload to Firebase</>
+                      )}
+                    </Button>
+                  </div>
+
                   {/* Batch & Single Upload Box */}
                   <div
                     onDragOver={(e) => {
@@ -1055,28 +1418,65 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
                   {/* Active Library Items Grid */}
                   <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-xs font-bold font-cinzel tracking-widest text-gold uppercase">
-                        Global Vault GIFs & Tokens ({cliparts.length})
-                      </h4>
+                    {/* Multi-Select & Batch Action Toolbar */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-black/40 border border-white/10 rounded-xl p-3">
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          onClick={handleSelectAllCliparts}
+                          size="sm"
+                          variant="outline"
+                          className="border-white/20 hover:border-gold text-white text-xs font-mono flex items-center gap-1.5 h-8"
+                        >
+                          {selectedClipartIds.size === cliparts.length && cliparts.length > 0 ? (
+                            <><CheckSquare className="w-3.5 h-3.5 text-gold" /> Deselect All</>
+                          ) : (
+                            <><Square className="w-3.5 h-3.5 text-slate-400" /> Select All ({cliparts.length})</>
+                          )}
+                        </Button>
+                        <span className="text-xs font-cinzel font-bold text-gold uppercase tracking-wider">
+                          Vault GIFs & Tokens ({cliparts.length})
+                        </span>
+                        {selectedClipartIds.size > 0 && (
+                          <Badge className="bg-red-600 text-white font-mono text-[10px]">
+                            {selectedClipartIds.size} Selected
+                          </Badge>
+                        )}
+                      </div>
+
                       <div className="flex items-center gap-2">
+                        {selectedClipartIds.size > 0 && (
+                          <Button
+                            type="button"
+                            onClick={handleDeleteSelectedCliparts}
+                            disabled={isBatchDeleting}
+                            size="sm"
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs gap-1.5 h-8 shadow-md hover:shadow-red-500/30 cursor-pointer animate-pulse"
+                          >
+                            {isBatchDeleting ? (
+                              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...</>
+                            ) : (
+                              <><Trash2 className="w-3.5 h-3.5" /> Delete Selected ({selectedClipartIds.size}) from Firebase & Library</>
+                            )}
+                          </Button>
+                        )}
                         <Button
                           onClick={handleReseedVault}
                           size="sm"
                           variant="outline"
-                          className="border-gold/30 text-gold hover:bg-gold/10 text-xs font-bold gap-1.5"
+                          className="border-gold/30 text-gold hover:bg-gold/10 text-xs font-bold gap-1.5 h-8"
                         >
                           <RefreshCw className="w-3.5 h-3.5" />
-                          Restore Default Vault
+                          Restore Presets
                         </Button>
                         <Button
                           onClick={handleClearAllCliparts}
                           size="sm"
                           variant="destructive"
-                          className="bg-red-950/80 hover:bg-red-800 text-red-200 text-xs font-bold gap-1.5 border border-red-500/40 shadow-sm"
+                          className="bg-red-950/80 hover:bg-red-800 text-red-200 text-xs font-bold gap-1.5 border border-red-500/40 shadow-sm h-8"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                          Clear All Vault Tokens
+                          Clear All
                         </Button>
                       </div>
                     </div>
@@ -1088,54 +1488,78 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                       </div>
                     ) : cliparts.length === 0 ? (
                       <div className="p-8 border border-white/5 rounded-2xl bg-black/40 text-center text-slate-muted text-xs">
-                        No custom GIFs or tokens uploaded yet. Use the batch upload above to publish your assets!
+                        No custom GIFs or tokens in the vault. Use the batch upload above to publish your assets!
                       </div>
                     ) : (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {cliparts.map((item) => (
-                          <div
-                            key={item.id}
-                            className="bg-panel border border-white/10 rounded-xl p-3 flex flex-col justify-between hover:border-gold/40 transition-all group relative"
-                          >
-                            <div className="w-full aspect-square rounded-lg bg-black/60 border border-white/5 overflow-hidden flex items-center justify-center p-2 mb-2 relative">
-                              <img
-                                src={item.imageUrl || item.url || item.imageData || item.image_data || item.src}
-                                alt={item.name}
-                                className="max-w-full max-h-full object-contain"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs font-bold text-white truncate" title={item.name}>{item.name}</p>
-                              <Badge variant="outline" className="text-[9px] border-gold/30 text-gold bg-gold/5 font-mono">
-                                {item.category}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-3">
-                              <button
-                                onClick={() =>
-                                  setEditingItem({
-                                    id: item.id,
-                                    name: item.name,
-                                    category: item.category,
-                                    imageUrl: item.imageUrl,
-                                    type: 'gif',
-                                  })
-                                }
-                                className="flex-1 py-1.5 bg-white/5 hover:bg-gold hover:text-black text-slate-cool rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
+                        {cliparts.map((item) => {
+                          const isSelected = selectedClipartIds.has(item.id);
+                          return (
+                            <div
+                              key={item.id}
+                              className={`bg-panel border rounded-xl p-3 flex flex-col justify-between transition-all group relative cursor-pointer ${
+                                isSelected
+                                  ? 'border-red-500 ring-2 ring-red-500/80 bg-red-950/30'
+                                  : 'border-white/10 hover:border-gold/40'
+                              }`}
+                              onClick={() => toggleSelectClipart(item.id)}
+                            >
+                              {/* Selection Checkbox Pill */}
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSelectClipart(item.id);
+                                }}
+                                className="absolute top-2 left-2 z-10 p-1 rounded-md bg-black/80 hover:bg-black border border-white/20 transition-all cursor-pointer"
+                                title="Select item for batch delete"
                               >
-                                <Edit2 className="w-3 h-3" />
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDeleteClipart(item)}
-                                className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-red-400" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400 group-hover:text-gold" />
+                                )}
+                              </div>
+
+                              <div className="w-full aspect-square rounded-lg bg-black/60 border border-white/5 overflow-hidden flex items-center justify-center p-2 mb-2 relative">
+                                <img
+                                  src={item.imageUrl || item.url || item.imageData || item.image_data || item.src}
+                                  alt={item.name}
+                                  className="max-w-full max-h-full object-contain"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs font-bold text-white truncate" title={item.name}>{item.name}</p>
+                                <Badge variant="outline" className="text-[9px] border-gold/30 text-gold bg-gold/5 font-mono">
+                                  {item.category}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-3" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() =>
+                                    setEditingItem({
+                                      id: item.id,
+                                      name: item.name,
+                                      category: item.category,
+                                      imageUrl: item.imageUrl,
+                                      type: 'gif',
+                                    })
+                                  }
+                                  className="flex-1 py-1.5 bg-white/5 hover:bg-gold hover:text-black text-slate-cool rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteClipart(item)}
+                                  className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors cursor-pointer"
+                                  title="Delete from Firebase and Vault Library"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1143,6 +1567,40 @@ export default function AdminSecretModal({ isOpen, onClose }) {
               ) : activeTab === 'maps' ? (
                 /* Battle Maps Tab */
                 <div className="space-y-6">
+                  {/* Firebase Cloud Sync & Status Bar for Battle Maps */}
+                  <div className="bg-gradient-to-r from-[#0d1f14] via-[#09150d] to-[#0d1f14] border border-emerald-500/40 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center shrink-0">
+                        <Cloud className="w-5 h-5 text-emerald-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold font-cinzel text-emerald-300 uppercase tracking-wider">
+                            Firebase Firestore Cloud Storage (Battle Maps)
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            ● Live in /battlemaps
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Total Vault Maps: <strong className="text-white">{battlemaps.length}</strong>. Click the button to upload and verify all battle maps to Firebase so they are instantly accessible in the app's library.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled={isSyncingFirebase}
+                      onClick={() => handleSyncCategoryToFirebase('maps')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 text-xs uppercase tracking-wider px-4 shrink-0 gap-2 shadow-md hover:shadow-emerald-500/20 cursor-pointer"
+                    >
+                      {isSyncingFirebase ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Uploading to Firebase...</>
+                      ) : (
+                        <><Cloud className="w-4 h-4" /> Upload to Firebase</>
+                      )}
+                    </Button>
+                  </div>
+
                   {/* Batch Upload Battle Maps Box */}
                   <div
                     onDragOver={(e) => {
@@ -1268,9 +1726,48 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
                   {/* Active Battle Maps Grid */}
                   <div>
-                    <h4 className="text-xs font-bold font-cinzel tracking-widest text-gold uppercase mb-4">
-                      Global Vault Battle Maps ({battlemaps.length})
-                    </h4>
+                    {/* Multi-Select & Batch Action Toolbar for Battle Maps */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-black/40 border border-white/10 rounded-xl p-3">
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          onClick={handleSelectAllMaps}
+                          size="sm"
+                          variant="outline"
+                          className="border-white/20 hover:border-gold text-white text-xs font-mono flex items-center gap-1.5 h-8"
+                        >
+                          {selectedMapIds.size === battlemaps.length && battlemaps.length > 0 ? (
+                            <><CheckSquare className="w-3.5 h-3.5 text-gold" /> Deselect All</>
+                          ) : (
+                            <><Square className="w-3.5 h-3.5 text-slate-400" /> Select All ({battlemaps.length})</>
+                          )}
+                        </Button>
+                        <h4 className="text-xs font-bold font-cinzel tracking-widest text-gold uppercase">
+                          Global Vault Battle Maps ({battlemaps.length})
+                        </h4>
+                        {selectedMapIds.size > 0 && (
+                          <Badge className="bg-red-600 text-white font-mono text-[10px]">
+                            {selectedMapIds.size} Selected
+                          </Badge>
+                        )}
+                      </div>
+
+                      {selectedMapIds.size > 0 && (
+                        <Button
+                          type="button"
+                          onClick={handleDeleteSelectedMaps}
+                          disabled={isBatchDeleting}
+                          size="sm"
+                          className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs gap-1.5 h-8 shadow-md hover:shadow-red-500/30 cursor-pointer animate-pulse"
+                        >
+                          {isBatchDeleting ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...</>
+                          ) : (
+                            <><Trash2 className="w-3.5 h-3.5" /> Delete Selected ({selectedMapIds.size}) from Firebase & Library</>
+                          )}
+                        </Button>
+                      )}
+                    </div>
 
                     {isLoadingLibrary ? (
                       <div className="py-12 text-center text-slate-cool">
@@ -1283,56 +1780,80 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        {battlemaps.map((map) => (
-                          <div
-                            key={map.id}
-                            className="bg-panel border border-white/10 rounded-xl overflow-hidden hover:border-gold/40 transition-all flex flex-col justify-between"
-                          >
-                            <div className="w-full h-32 bg-black relative">
-                              <img
-                                src={map.url}
-                                alt={map.name}
-                                className="w-full h-full object-cover"
-                              />
-                              <Badge className="absolute top-2 left-2 bg-black/80 border border-gold/40 text-gold text-[9px] font-mono">
-                                {map.theme}
-                              </Badge>
-                            </div>
-                            <div className="p-3 space-y-2 flex-1 flex flex-col justify-between">
-                              <div>
-                                <p className="text-xs font-bold text-white truncate">{map.name}</p>
-                                <p className="text-[10px] text-slate-cool line-clamp-2 mt-0.5">
-                                  {map.description}
-                                </p>
+                        {battlemaps.map((map) => {
+                          const isSelected = selectedMapIds.has(map.id);
+                          return (
+                            <div
+                              key={map.id}
+                              className={`bg-panel border rounded-xl overflow-hidden transition-all flex flex-col justify-between cursor-pointer group relative ${
+                                isSelected
+                                  ? 'border-red-500 ring-2 ring-red-500/80 bg-red-950/30'
+                                  : 'border-white/10 hover:border-gold/40'
+                              }`}
+                              onClick={() => toggleSelectMap(map.id)}
+                            >
+                              {/* Selection Checkbox */}
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSelectMap(map.id);
+                                }}
+                                className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-black/80 hover:bg-black border border-white/20 transition-all cursor-pointer"
+                                title="Select battle map for batch delete"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-red-400" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400 group-hover:text-gold" />
+                                )}
                               </div>
-                              <div className="flex items-center gap-2 pt-2">
-                                <button
-                                  onClick={() =>
-                                    setEditingItem({
-                                      id: map.id,
-                                      name: map.name,
-                                      theme: map.theme,
-                                      url: map.url,
-                                      description: map.description,
-                                      type: 'map',
-                                    })
-                                  }
-                                  className="flex-1 py-1.5 bg-white/5 hover:bg-gold hover:text-black text-slate-cool rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteMap(map)}
-                                  className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors"
-                                  title="Delete Map"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+
+                              <div className="w-full h-32 bg-black relative">
+                                <img
+                                  src={map.url}
+                                  alt={map.name}
+                                  className="w-full h-full object-cover"
+                                />
+                                <Badge className="absolute top-2 left-2 bg-black/80 border border-gold/40 text-gold text-[9px] font-mono">
+                                  {map.theme}
+                                </Badge>
+                              </div>
+                              <div className="p-3 space-y-2 flex-1 flex flex-col justify-between">
+                                <div>
+                                  <p className="text-xs font-bold text-white truncate">{map.name}</p>
+                                  <p className="text-[10px] text-slate-cool line-clamp-2 mt-0.5">
+                                    {map.description}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    onClick={() =>
+                                      setEditingItem({
+                                        id: map.id,
+                                        name: map.name,
+                                        theme: map.theme,
+                                        url: map.url,
+                                        description: map.description,
+                                        type: 'map',
+                                      })
+                                    }
+                                    className="flex-1 py-1.5 bg-white/5 hover:bg-gold hover:text-black text-slate-cool rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteMap(map)}
+                                    className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] transition-colors cursor-pointer"
+                                    title="Delete from Firebase and App Library"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1340,6 +1861,40 @@ export default function AdminSecretModal({ isOpen, onClose }) {
               ) : (
                 /* Animated Effects Tab */
                 <div className="space-y-6">
+                  {/* Firebase Cloud Sync & Status Bar for Effects */}
+                  <div className="bg-gradient-to-r from-[#0d1f14] via-[#09150d] to-[#0d1f14] border border-emerald-500/40 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center shrink-0">
+                        <Cloud className="w-5 h-5 text-emerald-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold font-cinzel text-emerald-300 uppercase tracking-wider">
+                            Firebase Firestore Cloud Storage (Visual Effects)
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            ● Live in /effects
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Total Vault Effects: <strong className="text-white">{effects.length}</strong>. Click the button to upload and verify all visual effects to Firebase so they are instantly accessible in the app's library.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled={isSyncingFirebase}
+                      onClick={() => handleSyncCategoryToFirebase('effects')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 text-xs uppercase tracking-wider px-4 shrink-0 gap-2 shadow-md hover:shadow-emerald-500/20 cursor-pointer"
+                    >
+                      {isSyncingFirebase ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Uploading to Firebase...</>
+                      ) : (
+                        <><Cloud className="w-4 h-4" /> Upload to Firebase</>
+                      )}
+                    </Button>
+                  </div>
+
                   {/* Single Effect Upload Box */}
                   <div className="p-4 bg-black/60 border border-white/10 rounded-2xl space-y-4">
                     <div className="flex items-center gap-2 border-b border-white/10 pb-3">
@@ -1421,10 +1976,47 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
                   {/* Effects List Grid */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-bold font-cinzel text-white uppercase tracking-wider">
-                        Vault Effects ({effects.length})
-                      </h3>
+                    {/* Multi-Select Toolbar for Effects */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-black/40 border border-white/10 rounded-xl p-3">
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          onClick={handleSelectAllEffects}
+                          size="sm"
+                          variant="outline"
+                          className="border-white/20 hover:border-gold text-white text-xs font-mono flex items-center gap-1.5 h-8"
+                        >
+                          {selectedEffectIds.size === effects.length && effects.length > 0 ? (
+                            <><CheckSquare className="w-3.5 h-3.5 text-gold" /> Deselect All</>
+                          ) : (
+                            <><Square className="w-3.5 h-3.5 text-slate-400" /> Select All ({effects.length})</>
+                          )}
+                        </Button>
+                        <h3 className="text-xs font-bold font-cinzel text-white uppercase tracking-wider">
+                          Vault Effects ({effects.length})
+                        </h3>
+                        {selectedEffectIds.size > 0 && (
+                          <Badge className="bg-red-600 text-white font-mono text-[10px]">
+                            {selectedEffectIds.size} Selected
+                          </Badge>
+                        )}
+                      </div>
+
+                      {selectedEffectIds.size > 0 && (
+                        <Button
+                          type="button"
+                          onClick={handleDeleteSelectedEffects}
+                          disabled={isBatchDeleting}
+                          size="sm"
+                          className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs gap-1.5 h-8 shadow-md hover:shadow-red-500/30 cursor-pointer animate-pulse"
+                        >
+                          {isBatchDeleting ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...</>
+                          ) : (
+                            <><Trash2 className="w-3.5 h-3.5" /> Delete Selected ({selectedEffectIds.size}) from Firebase & Library</>
+                          )}
+                        </Button>
+                      )}
                     </div>
 
                     {effects.length === 0 ? (
@@ -1435,40 +2027,64 @@ export default function AdminSecretModal({ isOpen, onClose }) {
                       </div>
                     ) : (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                        {effects.map((effect) => (
-                          <div
-                            key={effect.id}
-                            className="bg-black/40 border border-white/10 rounded-xl overflow-hidden group hover:border-gold/40 transition-all flex flex-col"
-                          >
-                            <div className="aspect-video relative bg-black/60 overflow-hidden flex items-center justify-center">
-                              {effect.imageUrl?.includes('video/mp4') || effect.imageUrl?.endsWith('.mp4') ? (
-                                <video src={effect.imageUrl} autoPlay loop muted className="w-full h-full object-cover" />
-                              ) : (
-                                <img src={effect.imageUrl || effect.url} alt={effect.name} className="w-full h-full object-cover" />
-                              )}
-                              <span className="absolute top-1.5 left-1.5 bg-black/80 text-gold text-[8px] font-mono px-1.5 py-0.5 rounded uppercase">
-                                {effect.category || 'Effect'}
-                              </span>
-                            </div>
-
-                            <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
-                              <div>
-                                <p className="text-xs font-bold text-white truncate">{effect.name}</p>
+                        {effects.map((effect) => {
+                          const isSelected = selectedEffectIds.has(effect.id);
+                          return (
+                            <div
+                              key={effect.id}
+                              className={`bg-black/40 border rounded-xl overflow-hidden group transition-all flex flex-col cursor-pointer relative ${
+                                isSelected
+                                  ? 'border-red-500 ring-2 ring-red-500/80 bg-red-950/30'
+                                  : 'border-white/10 hover:border-gold/40'
+                              }`}
+                              onClick={() => toggleSelectEffect(effect.id)}
+                            >
+                              {/* Selection Checkbox */}
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSelectEffect(effect.id);
+                                }}
+                                className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-black/80 hover:bg-black border border-white/20 transition-all cursor-pointer"
+                                title="Select effect for batch delete"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-red-400" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400 group-hover:text-gold" />
+                                )}
                               </div>
 
-                              <div className="flex items-center gap-1.5 pt-1">
-                                <button
-                                  onClick={() => handleDeleteEffect(effect)}
-                                  className="w-full py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1"
-                                  title="Delete Effect"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  Delete Effect
-                                </button>
+                              <div className="aspect-video relative bg-black/60 overflow-hidden flex items-center justify-center">
+                                {effect.imageUrl?.includes('video/mp4') || effect.imageUrl?.endsWith('.mp4') ? (
+                                  <video src={effect.imageUrl} autoPlay loop muted className="w-full h-full object-cover" />
+                                ) : (
+                                  <img src={effect.imageUrl || effect.url} alt={effect.name} className="w-full h-full object-cover" />
+                                )}
+                                <span className="absolute top-1.5 left-1.5 bg-black/80 text-gold text-[8px] font-mono px-1.5 py-0.5 rounded uppercase">
+                                  {effect.category || 'Effect'}
+                                </span>
+                              </div>
+
+                              <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
+                                <div>
+                                  <p className="text-xs font-bold text-white truncate">{effect.name}</p>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    onClick={() => handleDeleteEffect(effect)}
+                                    className="w-full py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                    title="Delete from Firebase and App Library"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    Delete Effect
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

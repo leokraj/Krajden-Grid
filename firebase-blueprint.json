@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "Token": {
+      "title": "Token",
+      "description": "A token or clipart asset used in tactical tabletop grids",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "isVault": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "name", "imageUrl"]
+    },
+    "Battlemap": {
+      "title": "Battlemap",
+      "description": "A tactical battlemap background for the tabletop grid",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "theme": { "type": "string" },
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "isVault": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "name", "url"]
+    },
+    "Effect": {
+      "title": "Effect",
+      "description": "An animated or static effect layer (fog, river, lava, arcane)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "isVault": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "name", "imageUrl"]
+    },
+    "CommunityEffect": {
+      "title": "CommunityEffect",
+      "description": "Community-shared visual effect item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "authorName": { "type": "string" },
+        "authorId": { "type": "string" },
+        "likes": { "type": "number" },
+        "likedBy": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "name", "imageUrl"]
+    },
+    "CommunityClipart": {
+      "title": "CommunityClipart",
+      "description": "Community-shared token or clipart item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "authorName": { "type": "string" },
+        "authorId": { "type": "string" },
+        "likes": { "type": "number" },
+        "likedBy": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "name", "imageUrl"]
+    },
+    "UserClipart": {
+      "title": "UserClipart",
+      "description": "User specific token favorites and personal uploads",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "cliparts": { "type": "array" },
+        "favorites": { "type": "array" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["user_id"]
+    }
+  },
+  "firestore": {
+    "/tokens/{tokenId}": {
+      "schema": "Token",
+      "description": "Global and library tokens/cliparts stored in Firestore"
+    },
+    "/battlemaps/{battlemapId}": {
+      "schema": "Battlemap",
+      "description": "Global and library battlemaps stored in Firestore"
+    },
+    "/effects/{effectId}": {
+      "schema": "Effect",
+      "description": "Global and library visual effects stored in Firestore"
+    },
+    "/community_effects/{effectId}": {
+      "schema": "CommunityEffect",
+      "description": "Community shared effects in Firestore"
+    },
+    "/community_cliparts/{clipartId}": {
+      "schema": "CommunityClipart",
+      "description": "Community shared cliparts/tokens in Firestore"
+    },
+    "/user_cliparts/{userId}": {
+      "schema": "UserClipart",
+      "description": "User specific library preferences and tokens"
+    }
+  }
+}

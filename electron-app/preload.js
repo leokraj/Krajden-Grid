@@ -37,5 +37,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   openLayersWindow: () => {
     ipcRenderer.send('open-layers-window');
+  },
+  
+  openEffectsWindow: () => {
+    ipcRenderer.send('open-effects-window');
+  },
+  
+  openScenesWindow: () => {
+    ipcRenderer.send('open-scenes-window');
   }
 });

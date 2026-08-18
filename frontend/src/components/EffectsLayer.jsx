@@ -12,6 +12,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useGrid } from '../context/GridContext';
+import { subscribeEffects, saveEffectToFirebase, deleteEffectFromFirebase } from '../lib/firebase';
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -330,7 +331,21 @@ function UploadEffectForm({ onUploaded, endpoint }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Upload failed');
-      onUploaded?.(data.item);
+      
+      const createdItem = data.item || {
+        id: `eff_${Date.now()}`,
+        name: name.trim(),
+        category,
+        tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+        imageUrl: preview,
+        authorName: getLocalUserName(),
+        authorId: userId
+      };
+
+      // Persist to Firebase Firestore
+      saveEffectToFirebase(createdItem).catch(err => console.warn('[Firebase] effect save note:', err));
+
+      onUploaded?.(createdItem);
       setName(''); setTags(''); setFile(null); setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
     } catch (e) {
@@ -413,6 +428,7 @@ export function EffectsControlPanel({ onClose }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showUpload, setShowUpload] = useState(false);
+  const [firebaseEffects, setFirebaseEffects] = useState([]);
 
   const userId = getLocalUserId();
   const effectPaths = settings.effectPaths || [];
@@ -422,6 +438,16 @@ export function EffectsControlPanel({ onClose }) {
     setLikedIds(ids);
     try { localStorage.setItem('krajden_liked_effects', JSON.stringify(ids)); } catch(e) {}
   };
+
+  // Real-time Firebase Firestore Effects synchronization
+  useEffect(() => {
+    const unsubscribe = subscribeEffects((fbEffects) => {
+      if (Array.isArray(fbEffects)) {
+        setFirebaseEffects(fbEffects);
+      }
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -477,8 +503,8 @@ export function EffectsControlPanel({ onClose }) {
   };
 
   const handleDelete = async (effect) => {
-    if (!window.confirm(`Delete "${effect.name}"?`)) return;
     try {
+      deleteEffectFromFirebase(effect.id, effect.imageUrl || effect.url).catch(e => console.warn('[Firebase] effect delete note:', e));
       await fetch(`/api/community/effects/${effect.id}`, {
         method: 'DELETE',
         headers: { 'x-user-id': userId },
@@ -555,12 +581,27 @@ export function EffectsControlPanel({ onClose }) {
       {/* Tab content */}
       {tab === 'vault' && (
         <EffectGrid
-          effects={vaultEffects.filter(filterFn)}
+          effects={[...firebaseEffects, ...vaultEffects]
+            .filter((e, idx, arr) => arr.findIndex(x => x.id === e.id) === idx)
+            .filter(e => {
+              try {
+                const deleted = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
+                const eId = String(e.id || '').trim();
+                const eUrl = String(e.imageUrl || e.url || '').trim();
+                return !deleted.some(d => {
+                  const sD = String(d || '').trim();
+                  return (eId && sD === eId) || (eUrl && sD === eUrl);
+                });
+              } catch(err) {
+                return true;
+              }
+            })
+            .filter(filterFn)}
           onUse={selectEffect}
           likedIds={[]}
           userId={userId}
           activeId={activeEffectId}
-          loading={loading}
+          loading={loading && firebaseEffects.length === 0}
           emptyMsg="No vault effects yet — add via Admin panel."
         />
       )}

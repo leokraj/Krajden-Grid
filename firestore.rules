@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Tokens / Cliparts collection
+    match /tokens/{tokenId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.name is string && request.resource.data.imageUrl is string;
+      allow delete: if true;
+    }
+
+    // Battlemaps collection
+    match /battlemaps/{battlemapId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.name is string && request.resource.data.url is string;
+      allow delete: if true;
+    }
+
+    // Effects collection
+    match /effects/{effectId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.name is string && request.resource.data.imageUrl is string;
+      allow delete: if true;
+    }
+
+    // Community Effects collection
+    match /community_effects/{effectId} {
+      allow read: if true;
+      allow create: if request.resource.data.name is string && request.resource.data.imageUrl is string;
+      allow update, delete: if true;
+    }
+
+    // Community Cliparts collection
+    match /community_cliparts/{clipartId} {
+      allow read: if true;
+      allow create: if request.resource.data.name is string && request.resource.data.imageUrl is string;
+      allow update, delete: if true;
+    }
+
+    // User Cliparts collection
+    match /user_cliparts/{userId} {
+      allow read, write: if true;
+    }
+
+    // Default fallback
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -6,6 +6,11 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
 import { 
+  subscribeTokens, 
+  saveTokenToFirebase, 
+  deleteTokenFromFirebase 
+} from '../lib/firebase';
+import { 
   X, 
   Star,
   Upload,
@@ -16,7 +21,8 @@ import {
   GripVertical,
   ExternalLink,
   Minimize2,
-  Layers
+  Layers,
+  Cloud
 } from 'lucide-react';
 
 export const getFallbackTokenSvg = (name = 'Token') => {
@@ -334,7 +340,7 @@ const DND_CONDITIONS = [
 ];
 
 // Default clipart items - populated with Vault assets, D&D Hero Tokens, Monster Tokens, Dungeon Props, and 5e Conditions
-const DEFAULT_CLIPARTS = [
+export const DEFAULT_CLIPARTS = [
   ...DEFAULT_VAULT_CLIPARTS.map(item => ({ ...item, isVault: true })),
   ...DND_HERO_TOKENS.map(item => ({ ...item, isVault: true })),
   ...DND_MONSTER_TOKENS.map(item => ({ ...item, isVault: true })),
@@ -393,6 +399,7 @@ export const ClipartLibrary = ({
     };
 
     onAddCustomClipart?.(customItem);
+    saveTokenToFirebase(customItem).catch(e => console.warn('[Firebase] save error:', e));
     setUrlInput('');
     setUrlNameInput('');
     setShowUrlForm(false);
@@ -403,8 +410,9 @@ export const ClipartLibrary = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  // Global admin added cliparts & GIFs
+  // Global admin added cliparts & GIFs + Firebase Cloud Tokens
   const [globalAdminCliparts, setGlobalAdminCliparts] = useState([]);
+  const [firebaseTokens, setFirebaseTokens] = useState([]);
   const [deletedVaultIds, setDeletedVaultIds] = useState(() => {
     try {
       const raw = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
@@ -419,6 +427,16 @@ export const ClipartLibrary = ({
       localStorage.setItem('krajden_deleted_vault_ids', JSON.stringify(deletedVaultIds));
     } catch (e) {}
   }, [deletedVaultIds]);
+
+  // Subscribe to Firebase Firestore Tokens for real-time cloud persistence
+  useEffect(() => {
+    const unsubscribe = subscribeTokens((tokens) => {
+      if (Array.isArray(tokens)) {
+        setFirebaseTokens(tokens);
+      }
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const fetchGlobalCliparts = async () => {
@@ -473,16 +491,17 @@ export const ClipartLibrary = ({
     };
   }, []);
 
-  // Tag global admin cliparts as Vault assets
+  // Tag global admin & Firebase cliparts as Vault assets
   const taggedGlobalAdmin = globalAdminCliparts.map(g => normalizeClipartItem({ ...g, isVault: true }, true));
+  const taggedFirebaseTokens = firebaseTokens.map(f => normalizeClipartItem({ ...f, isVault: true }, true));
   const normalizedCustom = customCliparts.map(c => normalizeClipartItem({ ...c, isCustom: true }));
   const normalizedDefault = DEFAULT_CLIPARTS.map(d => normalizeClipartItem(d, true));
 
-  // Combine admin vault, user custom, and default cliparts with URL & ID deduplication
+  // Combine Firebase tokens, admin vault, user custom, and default cliparts with URL & ID deduplication
   const clipartMap = new Map();
   const seenUrls = new Set();
 
-  [...taggedGlobalAdmin, ...normalizedCustom, ...normalizedDefault].forEach(item => {
+  [...taggedFirebaseTokens, ...taggedGlobalAdmin, ...normalizedCustom, ...normalizedDefault].forEach(item => {
     if (!item) return;
     const url = (item.imageUrl || item.url || '').trim();
 
@@ -519,10 +538,13 @@ export const ClipartLibrary = ({
     const url = item ? (item.imageUrl || item.url || item.imageData || item.src) : null;
     const name = item ? item.name : 'asset';
 
-    if (!window.confirm(`Delete "${name}" from vault library?`)) return;
-
     if (item && item.isCustom && onRemoveCustomClipart) {
       onRemoveCustomClipart(id || item.id);
+    }
+
+    // Delete directly from Firebase Cloud Firestore
+    if (id || url) {
+      deleteTokenFromFirebase(id, url).catch(e => console.warn('[Firebase] token deletion error:', e));
     }
 
     setGlobalAdminCliparts(prev => prev.filter(i => {
@@ -678,6 +700,7 @@ export const ClipartLibrary = ({
               isCustom: true,
             };
             onAddCustomClipart?.(customItem);
+            saveTokenToFirebase(customItem).catch(e => console.warn('[Firebase] token save error:', e));
           };
           img.src = data.url;
           successCount++;
@@ -699,11 +722,13 @@ export const ClipartLibrary = ({
               category: 'custom',
               type: 'image',
               imageData: event.target.result,
+              imageUrl: event.target.result,
               width: img.width,
               height: img.height,
               isCustom: true,
             };
             onAddCustomClipart?.(customItem);
+            saveTokenToFirebase(customItem).catch(e => console.warn('[Firebase] token save error:', e));
           };
           img.src = event.target.result;
         };

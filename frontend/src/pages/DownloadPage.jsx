@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import AdminSecretModal from '../components/AdminSecretModal';
 import { 
@@ -9,22 +8,67 @@ import {
   Download, 
   Monitor, 
   Grid3X3,
-  Check,
-  Loader2,
-  Shield,
-  ExternalLink,
-  Lock,
-  AlertTriangle,
-  HelpCircle,
-  ShieldAlert,
+  Check, 
+  Loader2, 
+  Shield, 
+  ExternalLink, 
   Terminal,
   ChevronDown,
   ChevronUp,
+  Tv,
+  Sparkles,
+  HelpCircle,
+  Package,
+  Copy,
+  CheckCircle2,
+  AlertCircle,
+  Zap,
+  Code
 } from 'lucide-react';
+
+function KrajdenCrest({ className = "w-6 h-6" }) {
+  return (
+    <svg 
+      className={className} 
+      viewBox="0 0 100 100" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <line x1="50" y1="18" x2="50" y2="82" strokeWidth="2.5" />
+      <path d="M50 12 C46 22, 44 30, 50 40 C56 30, 54 22, 50 12 Z" fill="currentColor" stroke="none" />
+      <circle cx="50" cy="28" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M50 36 C32 20, 18 32, 22 52 C25 66, 42 66, 48 54" strokeWidth="2" />
+      <path d="M50 36 C68 20, 82 32, 78 52 C75 66, 58 66, 52 54" strokeWidth="2" />
+      <path d="M50 50 C38 42, 28 50, 32 64 C35 74, 46 72, 48 62" strokeWidth="1.5" />
+      <path d="M50 50 C62 42, 72 50, 68 64 C65 74, 54 72, 52 62" strokeWidth="1.5" />
+      <circle cx="50" cy="48" r="4.5" fill="currentColor" stroke="none" />
+      <circle cx="50" cy="48" r="7.5" strokeWidth="1" />
+      <path d="M30 48 H70" strokeWidth="1.5" />
+      <circle cx="30" cy="48" r="2" fill="currentColor" stroke="none" />
+      <circle cx="70" cy="48" r="2" fill="currentColor" stroke="none" />
+      <path d="M50 68 C42 78, 44 86, 50 90 C56 86, 58 78, 50 68 Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function WindowsIcon({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.551H10.949M0 12.6h9.75V22.05L0 20.7m10.949-8.1H24V24l-13.051-1.8" />
+    </svg>
+  );
+}
 
 export function DownloadPage() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [showSmartScreenHelp, setShowSmartScreenHelp] = useState(true);
+  const [copiedPowerShell, setCopiedPowerShell] = useState(false);
+  const [copiedCurlZip, setCopiedCurlZip] = useState(false);
+  const [copiedBatScript, setCopiedBatScript] = useState(false);
+  const [showBatScript, setShowBatScript] = useState(false);
 
   // Keyboard shortcut (Ctrl+Shift+A) to open DM Vault
   useEffect(() => {
@@ -37,6 +81,7 @@ export function DownloadPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
   const backendUrl = (() => {
     try {
       if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_BACKEND_URL) {
@@ -50,701 +95,433 @@ export function DownloadPage() {
     } catch (e) {}
     return window.location.origin;
   })();
-  const [downloading, setDownloading] = useState(false);
-  const [downloadingPortable, setDownloadingPortable] = useState(false);
-  const [downloadingBat, setDownloadingBat] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [portableProgress, setPortableProgress] = useState(0);
-  const [batProgress, setBatProgress] = useState(0);
-  const [error, setError] = useState(null);
 
-  const performStreamingDownload = useCallback(async (filename, setProg, setDown) => {
-    setDown(true);
-    setProg(0);
-    setError(null);
+  const publicUrl = backendUrl.replace('ais-dev-', 'ais-pre-');
+  const downloadZipUrl = `${publicUrl}/api/download/KrajdenGrid-Windows.zip`;
+  const downloadBatUrl = `${publicUrl}/api/download/Install-KrajdenGrid.bat`;
+  const ps1InstallCommand = `irm ${publicUrl}/api/download/Install-KrajdenGrid.ps1 | iex`;
 
-    const downloadUrl = `${backendUrl}/api/download/${filename}`;
+  const batScriptContent = `@echo off
+title Krajden Grid Desktop Launcher
+echo Launching Krajden Grid Overlay for Windows...
+set "TARGET_URL=${backendUrl}/fullscreen"
+if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized
+    exit /b
+)
+if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized
+    exit /b
+)
+if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized
+    exit /b
+)
+start "" "%TARGET_URL%"
+exit /b`;
 
-    try {
-      // 0. Fast check if file is hosted externally (e.g. GitHub Releases)
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [downloadSuccess, setDownloadSuccess] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+
+  // 100% Reliable Native File Saving & Blob trigger
+  const handleDownloadBat = async () => {
+    setDownloadError('');
+    // Try Native Windows File Picker (bypasses iframe restrictions)
+    if ('showSaveFilePicker' in window) {
       try {
-        const infoRes = await fetch(`${downloadUrl}?info=true`);
-        if (infoRes.ok) {
-          const infoData = await infoRes.json();
-          if (infoData && infoData.external && infoData.redirectUrl) {
-            console.log(`[StreamingDownload] Asset is served externally (${infoData.redirectUrl}). Triggering direct browser download...`);
-            const directLink = document.createElement('a');
-            directLink.href = infoData.redirectUrl;
-            directLink.download = filename;
-            directLink.target = '_blank';
-            directLink.rel = 'noopener noreferrer';
-            document.body.appendChild(directLink);
-            directLink.click();
-            document.body.removeChild(directLink);
-            setDown(false);
-            return;
-          }
-        }
-      } catch (infoErr) {
-        console.warn('[StreamingDownload] Info probe skipped:', infoErr);
-      }
-
-      const response = await fetch(downloadUrl, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-
-      // Check if the response was intercepted by the AI Studio proxy login/challenge check
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        throw new Error('AUTH_REDIRECT_INTERCEPTED');
-      }
-
-      const reader = response.body.getReader();
-      const contentLength = +response.headers.get('content-length') || 0;
-
-      let receivedLength = 0;
-      const chunks = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        chunks.push(value);
-        receivedLength += value.length;
-
-        if (contentLength > 0) {
-          setProg(Math.min(99, Math.round((receivedLength / contentLength) * 100)));
-        } else {
-          // If no content-length header, simulate active stream progress
-          setProg((prev) => Math.min(95, prev + 2));
-        }
-      }
-
-      setProg(100);
-      const blob = new Blob(chunks);
-      const blobUrl = URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-        setDown(false);
-      }, 1000);
-
-    } catch (e) {
-      console.warn(`[Krajden Grid] Streaming download of ${filename} encountered issue (${e.message}). Triggering direct browser download fallback...`);
-      try {
-        let finalFilename = filename;
-        if (filename.toLowerCase() === 'krajdengrid-setup.exe') {
-          finalFilename = 'KrajdenGrid-Windows.zip';
-        }
-        const directLink = document.createElement('a');
-        directLink.href = downloadUrl;
-        directLink.download = finalFilename;
-        directLink.target = '_blank';
-        directLink.rel = 'noopener noreferrer';
-        document.body.appendChild(directLink);
-        directLink.click();
-        document.body.removeChild(directLink);
-      } catch (fallbackError) {
-        console.error('[Krajden Grid] Fallback failed:', fallbackError);
-      }
-
-      if (e.message === 'AUTH_REDIRECT_INTERCEPTED' || e.message === 'Failed to fetch') {
-        setError(
-          <span className="block space-y-2">
-            <strong className="text-white uppercase tracking-wider block">🔒 Direct Download Triggered</strong>
-            <span>Your browser is downloading <strong>{filename}</strong> via direct link. If the download does not start automatically:</span>
-            <a 
-              href={downloadUrl} 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="inline-flex items-center justify-center mt-2 bg-gold hover:bg-gold-light text-black font-bold px-4 py-2.5 rounded-lg transition-all text-[10px] uppercase tracking-widest gap-2 shadow-md hover:shadow-lg"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Click Here to Download Directly
-            </a>
-          </span>
-        );
-      } else {
-        console.error(`[Krajden Grid] Download of ${filename} failed:`, e);
-        setError(`Download attempted via fallback link. If it did not start, please click "Open App in New Tab".`);
-      }
-      setDown(false);
-    }
-  }, [backendUrl]);
-
-  const performChunkedDownload = useCallback(async (filename, setProg, setDown) => {
-    setDown(true);
-    setProg(0);
-    setError(null);
-
-    const downloadUrl = `${backendUrl}/api/download/${filename}`;
-    let finalFilename = filename;
-    if (filename.toLowerCase() === 'krajdengrid-setup.exe') {
-      finalFilename = 'KrajdenGrid-Windows.zip';
-    }
-
-    try {
-      // 0. Fast check if file is hosted externally (e.g. GitHub Releases)
-      try {
-        const infoRes = await fetch(`${downloadUrl}?info=true`);
-        if (infoRes.ok) {
-          const infoData = await infoRes.json();
-          if (infoData && infoData.external && infoData.redirectUrl) {
-            console.log(`[ChunkedDownload] Asset is served externally (${infoData.redirectUrl}). Opening in new window...`);
-            window.open(infoData.redirectUrl, '_blank');
-            setDown(false);
-            return;
-          }
-        }
-      } catch (infoErr) {
-        console.warn('[ChunkedDownload] Info probe skipped:', infoErr);
-      }
-
-      // 1. Get the file size using a lightweight 206 request for the first byte
-      console.log(`[ChunkedDownload] Probing file size for ${filename}...`);
-      const probeResponse = await fetch(downloadUrl, {
-        headers: { 'Range': 'bytes=0-0' },
-        credentials: 'include'
-      });
-
-      if (!probeResponse.ok && probeResponse.status !== 206) {
-        throw new Error(`Server returned HTTP ${probeResponse.status} ${probeResponse.statusText}`);
-      }
-
-      // Check if the response was intercepted by proxy login/challenge check
-      const contentType = probeResponse.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        throw new Error('AUTH_REDIRECT_INTERCEPTED');
-      }
-
-      const contentRange = probeResponse.headers.get('Content-Range');
-      let fileSize = 0;
-      if (contentRange) {
-        // Content-Range format is "bytes 0-0/113324604"
-        const parts = contentRange.split('/');
-        if (parts.length === 2) {
-          fileSize = parseInt(parts[1], 10);
-        }
-      }
-
-      if (!fileSize) {
-        fileSize = parseInt(probeResponse.headers.get('content-length') || '0', 10);
-      }
-
-      console.log(`[ChunkedDownload] File size detected: ${fileSize} bytes`);
-
-      if (fileSize <= 0) {
-        throw new Error('Could not determine file size');
-      }
-
-      // 2. Download the file in chunks of 25MB to bypass Cloud Run 32MB limits
-      const chunkSize = 25 * 1024 * 1024; // 25 MB
-      const totalChunks = Math.ceil(fileSize / chunkSize);
-      const chunks = [];
-      let receivedBytes = 0;
-
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * chunkSize;
-        const end = Math.min((i + 1) * chunkSize - 1, fileSize - 1);
-        console.log(`[ChunkedDownload] Fetching chunk ${i + 1}/${totalChunks} (bytes ${start}-${end})...`);
-
-        const response = await fetch(downloadUrl, {
-          headers: { 'Range': `bytes=${start}-${end}` },
-          credentials: 'include'
+        const handle = await window.showSaveFilePicker({
+          suggestedName: 'KrajdenGrid.bat',
+          types: [{
+            description: 'Windows Batch Command File (*.bat)',
+            accept: { 'text/plain': ['.bat'] }
+          }]
         });
-
-        if (!response.ok && response.status !== 206) {
-          throw new Error(`Failed to fetch chunk ${i + 1}: ${response.statusText}`);
-        }
-
-        const buffer = await response.arrayBuffer();
-        chunks.push(buffer);
-        receivedBytes += buffer.byteLength;
-
-        // Update progress
-        const percent = Math.min(99, Math.round((receivedBytes / fileSize) * 100));
-        setProg(percent);
+        const writable = await handle.createWritable();
+        await writable.write(batScriptContent);
+        await writable.close();
+        setDownloadSuccess('KrajdenGrid.bat saved to your PC!');
+        setTimeout(() => setDownloadSuccess(''), 5000);
+        return;
+      } catch (pickerErr) {
+        if (pickerErr.name === 'AbortError') return;
+        console.warn('showSaveFilePicker fallback:', pickerErr);
       }
-
-      setProg(100);
-      console.log(`[ChunkedDownload] All chunks downloaded successfully. Assembly in progress...`);
-
-      // 3. Combine chunks into a single Blob and trigger browser save
-      // Map 'KrajdenGrid-Setup.exe' correctly to the saved filename
-      // The backend will serve the file renamed as 'KrajdenGrid-Windows.zip' if Setup.exe is requested but missing.
-      let finalFilename = filename;
-      if (filename.toLowerCase() === 'krajdengrid-setup.exe') {
-        finalFilename = 'KrajdenGrid-Windows.zip';
-      }
-
-      const blob = new Blob(chunks, { type: 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = finalFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-        setDown(false);
-      }, 1000);
-
-    } catch (e) {
-      console.warn(`[ChunkedDownload] Fetch failed (${e.message}). Triggering direct browser download fallback...`);
-      let finalFilename = filename;
-      if (filename.toLowerCase() === 'krajdengrid-setup.exe') {
-        finalFilename = 'KrajdenGrid-Windows.zip';
-      }
-
-      try {
-        const directLink = document.createElement('a');
-        directLink.href = downloadUrl;
-        directLink.download = finalFilename;
-        directLink.target = '_blank';
-        directLink.rel = 'noopener noreferrer';
-        document.body.appendChild(directLink);
-        directLink.click();
-        document.body.removeChild(directLink);
-      } catch (fallbackErr) {
-        console.error('[ChunkedDownload] Fallback failed:', fallbackErr);
-      }
-
-      if (e.message === 'AUTH_REDIRECT_INTERCEPTED' || e.message === 'Failed to fetch' || e.name === 'TypeError') {
-        setError(
-          <span className="block space-y-2">
-            <strong className="text-white uppercase tracking-wider block">🔒 Direct Download Triggered</strong>
-            <span>Your browser is downloading <strong>{finalFilename}</strong> directly. If the download does not start automatically:</span>
-            <a 
-              href={downloadUrl} 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="inline-flex items-center justify-center mt-2 bg-gold hover:bg-gold-light text-black font-bold px-4 py-2.5 rounded-lg transition-all text-[10px] uppercase tracking-widest gap-2 shadow-md hover:shadow-lg"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Click Here to Download Directly ({finalFilename})
-            </a>
-          </span>
-        );
-      } else {
-        setError(`Download attempted via fallback link. If it did not start, please click "Open App in New Tab".`);
-      }
-      setDown(false);
     }
-  }, [backendUrl]);
 
-  const handleDownload = useCallback(() => {
-    performChunkedDownload('KrajdenGrid-Setup.exe', setProgress, setDownloading);
-  }, [performChunkedDownload]);
+    // Fallback: Blob URL download
+    try {
+      const blob = new Blob([batScriptContent], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'KrajdenGrid.bat';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDownloadSuccess('KrajdenGrid.bat downloaded!');
+      setTimeout(() => setDownloadSuccess(''), 5000);
+    } catch (err) {
+      console.error('Download error:', err);
+      setDownloadError('Browser blocked iframe download. Please use the Copy Code or PowerShell option below!');
+    }
+  };
 
-  const handleDownloadPortable = useCallback(() => {
-    performChunkedDownload('KrajdenGrid-Portable.zip', setPortableProgress, setDownloadingPortable);
-  }, [performChunkedDownload]);
+  const handleDownloadZip = async () => {
+    setIsDownloadingZip(true);
+    setDownloadError('');
+    try {
+      // Direct stream fetch
+      const response = await fetch(downloadZipUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: 'KrajdenGrid-Windows.zip',
+            types: [{
+              description: 'ZIP Archive (*.zip)',
+              accept: { 'application/zip': ['.zip'] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          setDownloadSuccess('KrajdenGrid-Windows.zip saved to your PC!');
+          setTimeout(() => setDownloadSuccess(''), 5000);
+          setIsDownloadingZip(false);
+          return;
+        } catch (pickerErr) {
+          if (pickerErr.name === 'AbortError') {
+            setIsDownloadingZip(false);
+            return;
+          }
+        }
+      }
 
-  const handleDownloadBat = useCallback(() => {
-    performStreamingDownload('KrajdenGrid-Setup.bat', setBatProgress, setDownloadingBat);
-  }, [performStreamingDownload]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'KrajdenGrid-Windows.zip';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDownloadSuccess('KrajdenGrid-Windows.zip downloaded!');
+      setTimeout(() => setDownloadSuccess(''), 5000);
+    } catch (err) {
+      console.warn('Direct zip fetch failed:', err);
+      // Try direct link fallback
+      window.open(downloadZipUrl, '_blank');
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
 
-  const features = [
-    'Always-on-top transparent tactical grid',
-    'Click-through grid — interact with battlemaps below',
-    'Cast to multiple displays or tablet projectors',
-    'Real-time collaborative session sync',
-    'Live drawing, pings, and tokens shared live',
-    'Curated tabletop clipart & custom miniatures',
-    'Tactical global hotkeys (Ctrl+Shift+G/D/M/Q)',
-    'Full offline support for local campaigns',
-  ];
-
-  let isIframe = false;
-  try {
-    isIframe = typeof window !== 'undefined' && window.self !== window.top;
-  } catch (e) {
-    isIframe = true;
-  }
+  const ps1Command = `irm ${downloadBatUrl} -OutFile "$HOME\\Desktop\\KrajdenGrid.bat"; & "$HOME\\Desktop\\KrajdenGrid.bat"`;
+  const curlZipCommand = `curl.exe -L "${downloadZipUrl}" -o "$HOME\\Downloads\\KrajdenGrid-Windows.zip"`;
 
   return (
-    <div className="min-h-screen bg-background text-[#f3f4f6] selection:bg-gold/30 selection:text-gold relative overflow-hidden" data-testid="download-page">
-      {isIframe && (
-        <div className="bg-gradient-to-r from-amber-600 via-gold to-amber-600 text-black px-4 py-2.5 text-center text-xs font-bold flex items-center justify-center gap-2 relative z-50 shadow-md">
-          <span>💡 Running inside the AI Studio preview frame? For file downloads, OAuth logins, and tests to work, you must open the app in a new tab:</span>
-          <a
-            href={typeof window !== 'undefined' ? (window.location.origin + window.location.pathname) : '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-black text-white hover:bg-neutral-800 px-3 py-1 rounded-md text-[10px] uppercase tracking-wider transition-all inline-flex items-center gap-1 shadow"
-          >
-            Open in New Tab
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-      )}
-      <div className="absolute inset-0 grid-bg opacity-30 pointer-events-none" />
+    <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col selection:bg-[#caa055] selection:text-black relative overflow-x-hidden font-sans">
+      
+      {/* Background radial glow */}
+      <div 
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full blur-[160px] pointer-events-none opacity-20"
+        style={{ background: 'radial-gradient(circle at center, #caa055 0%, rgba(10, 10, 12, 0) 70%)' }}
+      />
 
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-[#050609]/80 backdrop-blur-md border-b border-border-gold/10">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link to="/">
-              <Button variant="ghost" size="sm" className="text-slate-cool hover:text-gold">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Tavern
-              </Button>
-            </Link>
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-sm bg-gold/5 border border-border-gold/30 flex items-center justify-center">
-                <Grid3X3 className="w-4 h-4 text-gold" />
+      <header className="sticky top-0 z-50 border-b border-white/5 bg-[#0a0a0c]/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <Link to="/" className="flex items-center gap-3 group cursor-pointer select-none">
+              <KrajdenCrest className="w-8 h-8 text-[#caa055] group-hover:scale-105 transition-transform" />
+              <div className="flex flex-col">
+                <span className="font-cinzel text-xl font-bold tracking-[0.15em] text-[#caa055] leading-none">
+                  KRAJDEN DUNGEONS
+                </span>
+                <span className="font-mono text-[9px] tracking-[0.25em] text-slate-400 mt-1 uppercase leading-none">
+                  OFFICIAL DOWNLOAD HUB
+                </span>
               </div>
-              <span className="font-bold text-base tracking-widest font-cinzel">
-                <span className="text-white">KRAJDEN </span>
-                <span className="text-gold">GRID</span>
-              </span>
-            </div>
+            </Link>
           </div>
 
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => setIsAdminOpen(true)} 
-            className="text-slate-cool hover:text-gold text-xs gap-1.5 font-mono border border-border-gold/10 hover:border-gold/30 rounded-lg px-3"
-            data-testid="header-dm-vault-btn"
-          >
-            <Lock className="w-3.5 h-3.5 text-gold" /> 
-            DM Vault
-          </Button>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <Link 
+              to="/"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-slate-300 hover:text-white text-xs font-mono transition-all"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Home</span>
+            </Link>
+
+            <button
+              onClick={() => setIsAdminOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#caa055]/30 bg-[#caa055]/10 text-[#caa055] hover:bg-[#caa055]/20 text-xs font-cinzel font-bold transition-all cursor-pointer"
+            >
+              <Shield className="w-3.5 h-3.5 text-[#caa055]" />
+              <span>Asset Vault</span>
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Hero + Download */}
-      <section className="py-20 md:py-28 relative z-10 animate-fade-in">
-        <div className="max-w-5xl mx-auto px-6">
-          
-          {/* Header text container */}
-          <div className="max-w-2xl mx-auto text-center mb-16">
-            <Badge 
-              variant="outline" 
-              className="mb-6 border-border-gold/30 text-gold bg-gold/5 px-4 py-1.5 font-mono uppercase tracking-widest flex items-center gap-2 w-fit mx-auto"
+      {/* Main Download Hub Content */}
+      <main className="flex-1 max-w-5xl mx-auto px-6 py-12 sm:py-16 space-y-10 text-center">
+        
+        {/* Page Header */}
+        <div className="space-y-4 max-w-3xl mx-auto">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#caa055]/10 border border-[#caa055]/30 text-[#caa055] text-xs font-mono uppercase tracking-wider">
+            <WindowsIcon className="w-3.5 h-3.5" />
+            <span>Native Windows Desktop Application (x64) &bull; No Browser Required</span>
+          </div>
+
+          <h1 className="font-cinzel text-3xl sm:text-5xl font-extrabold uppercase tracking-tight text-white leading-tight">
+            Install Krajden Grid <br />
+            <span className="text-[#caa055] italic">On Windows PC</span>
+          </h1>
+
+          <p className="text-slate-300 text-sm sm:text-base leading-relaxed font-sans max-w-2xl mx-auto">
+            This is the <strong>native Windows desktop executable (<code className="text-[#caa055]">KrajdenGrid.exe</code>)</strong> with full offline support, hardware-accelerated grid rendering, TV-table calibration, and multi-monitor windowing.
+          </p>
+
+          {/* Download status toast */}
+          {downloadSuccess && (
+            <div className="p-3 bg-green-500/20 border border-green-500/50 rounded-xl text-green-300 text-xs font-mono flex items-center gap-2 animate-in fade-in max-w-xl mx-auto">
+              <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+              <span>{downloadSuccess}</span>
+            </div>
+          )}
+
+          {downloadError && (
+            <div className="p-4 bg-amber-500/20 border border-amber-500/50 rounded-xl text-amber-200 text-xs font-mono text-left flex items-start gap-3 max-w-xl mx-auto">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <strong>Note:</strong> {downloadError}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* PRIMARY OPTION 1: 1-CLICK POWERSHELL NATIVE INSTALLER */}
+        <div className="max-w-4xl mx-auto p-6 sm:p-8 rounded-2xl bg-[#141519] border-2 border-[#caa055] shadow-2xl text-left space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-[#caa055]/20 flex items-center justify-center text-[#caa055]">
+                <Terminal className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono text-[#caa055] uppercase tracking-widest font-bold block">
+                  ⚡ FASTEST 1-CLICK WINDOWS INSTALL (RECOMMENDED)
+                </span>
+                <h3 className="font-cinzel text-lg sm:text-xl font-bold text-white uppercase">
+                  Automatic Windows App Installer
+                </h3>
+              </div>
+            </div>
+
+            <button
+              onClick={() => copyToClipboard(ps1InstallCommand, setCopiedPowerShell)}
+              className="bg-[#caa055] hover:bg-[#d5b271] text-black px-5 py-2.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shrink-0"
             >
-              <Shield className="w-3.5 h-3.5" />
-              Desktop Arsenal
-            </Badge>
-            <h1 className="text-4xl md:text-5.5xl font-black tracking-widest mb-4 text-white font-cinzel uppercase leading-tight">
-              SUMMON <span className="text-gold">KRAJDEN GRID</span>
-            </h1>
-            <p className="text-sm md:text-base text-slate-cool leading-relaxed font-sans">
-              Launch the transparent tactical grid directly above any desktop map application, browser, or virtual tabletop. Includes a 7-day free trial.
-            </p>
+              {copiedPowerShell ? <><Check className="w-4 h-4 text-green-900" /> Command Copied!</> : <><Copy className="w-4 h-4" /> Copy Install Command</>}
+            </button>
           </div>
 
-          {/* Cards Grid with ample horizontal space */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16 text-left">
-            {/* Developer Mode Local Shell */}
-            <Card className="bg-panel border border-[#caa055]/30 rounded-2xl glow-gold-leak flex flex-col justify-between transition-all duration-300 hover:border-gold/50">
-              <CardContent className="p-10 md:p-12 space-y-6 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="p-3 rounded-xl bg-gold/5 border border-border-gold/30 shrink-0">
-                      <Monitor className="w-6 h-6 text-gold" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-white tracking-widest font-cinzel uppercase">Local Electron Shell</h3>
-                      <p className="text-[10px] text-gold/80 font-mono tracking-wider">Developer & Testing Workflow (Highly Recommended)</p>
-                    </div>
-                  </div>
-                  
-                  <p className="text-xs text-slate-cool leading-relaxed mb-6">
-                    Run the exact transparent, always-on-top tabletop grid directly on your machine. This lightweight wrapper embeds the live preview with zero download latency or security warning prompts.
-                  </p>
+          <p className="text-xs text-slate-300 font-sans leading-relaxed">
+            Open <strong>Windows PowerShell</strong> (Press Windows Key, type <code className="text-[#caa055]">PowerShell</code>, press Enter), paste this line, and press Enter. It automatically downloads <strong>KrajdenGrid.exe</strong>, installs it to your PC, creates a <strong>Krajden Grid Desktop Icon</strong>, and launches the native Windows app:
+          </p>
 
-                  <div className="space-y-4 bg-black/60 border border-white/5 p-6 rounded-xl font-mono text-xs text-slate-cool">
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-gold font-bold shrink-0">1.</span>
-                      <span>Export this project as a ZIP from the top-right <strong className="text-white">Settings Gear → Export as ZIP</strong>.</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-gold font-bold shrink-0">2.</span>
-                      <span>Extract the files and open your terminal in the <code className="text-gold">electron-app</code> directory:</span>
-                    </div>
-                    <pre className="p-3 bg-black/80 rounded-lg text-[11px] text-white overflow-x-auto border border-white/5">cd electron-app</pre>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-gold font-bold shrink-0">3.</span>
-                      <span>Install dependencies & start local testing:</span>
-                    </div>
-                    <pre className="p-3 bg-black/80 rounded-lg text-[11px] text-white overflow-x-auto border border-white/5">npm install && npm start</pre>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-gold font-bold shrink-0">4.</span>
-                      <span>Package your beautiful Windows Installer (<code>.exe</code>):</span>
-                    </div>
-                    <pre className="p-3 bg-black/80 rounded-lg text-[11px] text-white overflow-x-auto border border-white/5">npm run dist</pre>
-                  </div>
+          <pre className="p-3.5 bg-black/95 rounded-xl text-xs text-amber-200 font-mono overflow-x-auto select-all border border-[#caa055]/30 leading-relaxed font-bold">
+            {ps1InstallCommand}
+          </pre>
+        </div>
+
+        {/* Download Options Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left max-w-4xl mx-auto">
+          
+          {/* Method 1: Complete Standalone Native ZIP */}
+          <div className="p-8 rounded-2xl bg-[#141519] border border-[#caa055]/40 flex flex-col justify-between space-y-6 shadow-xl relative">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="w-12 h-12 rounded-xl bg-[#caa055]/10 border border-[#caa055]/30 flex items-center justify-center text-[#caa055]">
+                  <Package className="w-6 h-6" />
                 </div>
-
-                <div className="pt-6 border-t border-white/5">
-                  <p className="text-[10px] text-slate-muted uppercase tracking-widest text-center font-mono">
-                    COMPATIBLE WITH WINDOWS, MACOS, AND LINUX
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Standard pre-compiled Windows setup */}
-            <Card className="bg-panel border border-[#caa055]/30 rounded-2xl glow-gold-leak flex flex-col justify-between transition-all duration-300 hover:border-gold/50">
-              <CardContent className="p-10 md:p-12 space-y-6 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="p-3 rounded-xl bg-gold/5 border border-border-gold/30 shrink-0">
-                      <Download className="w-6 h-6 text-gold" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-white tracking-widest font-cinzel uppercase">Windows Desktop App</h3>
-                      <p className="text-[10px] text-gold/80 font-mono tracking-wider">Official Precompiled Release</p>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-cool leading-relaxed mb-6">
-                    Run Krajden Grid as a native Windows desktop companion. Select your preferred package below to install or run portably.
-                  </p>
-
-                  {error && (
-                    <div className="p-6 rounded-xl bg-red-500/10 border border-red-500/20 space-y-3 text-xs text-red-300" data-testid="download-error">
-                      {error}
-                    </div>
-                  )}
-
-                  {downloadingBat && (
-                    <div className="space-y-3 bg-black/30 p-5 border border-white/5 rounded-xl mb-4 animate-fade-in">
-                      <div className="h-1 rounded-sm bg-background overflow-hidden">
-                        <div
-                          className="h-full bg-gold transition-all duration-300 rounded-sm"
-                          style={{ width: `${batProgress}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-muted font-mono uppercase tracking-widest">{batProgress < 100 ? 'Streaming Launcher...' : 'Complete!'} {batProgress}%</p>
-                    </div>
-                  )}
-
-                  {downloading && (
-                    <div className="space-y-3 bg-black/30 p-5 border border-white/5 rounded-xl mb-4 animate-fade-in">
-                      <div className="h-1 rounded-sm bg-background overflow-hidden">
-                        <div
-                          className="h-full bg-gold transition-all duration-300 rounded-sm"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-muted font-mono uppercase tracking-widest">{progress < 100 ? 'Streaming Installer...' : 'Complete!'} {progress}%</p>
-                    </div>
-                  )}
-
-                  {downloadingPortable && (
-                    <div className="space-y-3 bg-black/30 p-5 border border-white/5 rounded-xl mb-4 animate-fade-in">
-                      <div className="h-1 rounded-sm bg-background overflow-hidden">
-                        <div
-                          className="h-full bg-gold transition-all duration-300 rounded-sm"
-                          style={{ width: `${portableProgress}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-muted font-mono uppercase tracking-widest">{portableProgress < 100 ? 'Streaming Portable ZIP...' : 'Complete!'} {portableProgress}%</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  {/* OPTION 1: BATCH LAUNCHER */}
-                  <div>
-                    <Button
-                      size="lg"
-                      onClick={handleDownloadBat}
-                      disabled={downloading || downloadingPortable || downloadingBat}
-                      className="w-full bg-gold hover:bg-gold-light text-black font-bold h-12 text-xs tracking-[0.2em] transition-all rounded-xl shadow-lg shadow-gold/10 hover:shadow-gold/20"
-                    >
-                      {downloadingBat ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Downloading Launcher...</>
-                      ) : (
-                        <><Download className="w-4 h-4 mr-2" /> Download Setup.bat (~4 KB)</>
-                      )}
-                    </Button>
-                    <p className="text-[9px] text-gold/90 font-mono uppercase tracking-wider text-center mt-1.5 font-semibold">
-                      ⚡ RECOMMENDED: 100% immune to Windows SmartScreen blocks & starts instantly!
-                    </p>
-                  </div>
-
-                  {/* OPTION 2: EXE SETUP */}
-                  <div className="pt-2 border-t border-white/5">
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      onClick={handleDownload}
-                      disabled={downloading || downloadingPortable || downloadingBat}
-                      className="w-full border-white/20 hover:border-gold hover:bg-gold/5 text-white hover:text-gold font-bold h-12 text-xs tracking-[0.2em] transition-all rounded-xl"
-                      data-testid="download-windows-btn"
-                    >
-                      {downloading ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Downloading Installer...</>
-                      ) : (
-                        <><Download className="w-4 h-4 mr-2" /> Download Setup.exe (~36 MB)</>
-                      )}
-                    </Button>
-                    <p className="text-[9px] text-slate-muted font-mono uppercase tracking-wider text-center mt-1.5">
-                      Windows Standalone Installer wrapper.
-                    </p>
-                  </div>
-
-                  {/* OPTION 3: PORTABLE ZIP */}
-                  <div className="pt-2 border-t border-white/5">
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      onClick={handleDownloadPortable}
-                      disabled={downloading || downloadingPortable || downloadingBat}
-                      className="w-full border-[#caa055]/40 hover:border-gold hover:bg-gold/5 text-gold font-bold h-12 text-xs tracking-[0.2em] transition-all rounded-xl"
-                    >
-                      {downloadingPortable ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Downloading ZIP...</>
-                      ) : (
-                        <><Download className="w-4 h-4 mr-2" /> Download Portable ZIP (~120 MB)</>
-                      )}
-                    </Button>
-                    <p className="text-[9px] text-slate-muted font-mono uppercase tracking-wider text-center mt-1.5">
-                      100% Offline & Precompiled. Unzip anywhere and double-click.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Windows SmartScreen & Smart App Control Helper */}
-          <div className="mb-16 max-w-4xl mx-auto">
-            <div className="bg-[#111216] border border-amber-500/30 rounded-2xl p-6 md:p-8 shadow-xl text-left">
-              <div 
-                className="flex items-center justify-between cursor-pointer select-none"
-                onClick={() => setShowSmartScreenHelp(prev => !prev)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                    <ShieldAlert className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white tracking-wider font-cinzel uppercase flex items-center gap-2">
-                      Windows SmartScreen or Smart App Control Blocking the App?
-                      <span className="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono">FIX & UNBLOCK</span>
-                    </h3>
-                    <p className="text-[11px] text-gray-400 font-sans">
-                      Windows Defender flags custom indie software without a paid Microsoft EV certificate. Here is how to unblock it in 10 seconds.
-                    </p>
-                  </div>
-                </div>
-                <button className="text-gray-400 hover:text-white p-1">
-                  {showSmartScreenHelp ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                </button>
+                <Badge className="bg-[#caa055] text-black font-mono font-bold text-[10px] uppercase">
+                  Native .exe (125 MB)
+                </Badge>
               </div>
 
-              {showSmartScreenHelp && (
-                <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-gray-300">
-                  {/* Method 1: Batch Launcher */}
-                  <div className="bg-black/40 p-4 rounded-xl border border-amber-500/20 space-y-2">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold font-mono text-[11px] uppercase">
-                      <span className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] text-amber-400">1</span>
-                      Use Included Launcher
-                    </div>
-                    <p className="text-[11px] text-gray-300 leading-relaxed">
-                      Extract the <strong className="text-gold">KrajdenGrid-Portable.zip</strong>, then double-click:
-                    </p>
-                    <div className="bg-amber-500/10 border border-amber-500/30 p-2 rounded text-center text-amber-300 font-mono font-bold text-[11px]">
-                      📄 Launch-KrajdenGrid.bat
-                    </div>
-                    <p className="text-[10px] text-gray-400 font-sans">
-                      This script unblocks all extracted files via PowerShell automatically before launching <code className="text-white">KrajdenGrid.exe</code>.
-                    </p>
-                  </div>
+              <div>
+                <h2 className="font-cinzel text-xl font-bold text-white uppercase tracking-wide">
+                  Direct Standalone ZIP
+                </h2>
+                <span className="text-[11px] font-mono text-[#caa055] font-semibold block mt-0.5">
+                  KrajdenGrid-Windows.zip
+                </span>
+                <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                  Contains the native Windows executable <strong className="text-white font-mono">KrajdenGrid.exe</strong>. Extract the folder anywhere on your PC and double-click to launch without a browser.
+                </p>
+              </div>
 
-                  {/* Method 2: Defender Exclusion */}
-                  <div className="bg-black/40 p-4 rounded-xl border border-amber-500/20 space-y-2">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold font-mono text-[11px] uppercase">
-                      <span className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] text-amber-400">2</span>
-                      Add Defender Exclusion
-                    </div>
-                    <p className="text-[11px] text-gray-300 leading-relaxed">
-                      If Windows 11 <strong className="text-white">Smart App Control</strong> still blocks the EXE:
-                    </p>
-                    <ol className="list-decimal list-inside text-[10px] text-gray-300 space-y-1 font-mono">
-                      <li>Open <strong className="text-amber-300">Windows Security</strong> from Start</li>
-                      <li>Go to <strong className="text-white">Virus & threat protection settings</strong></li>
-                      <li>Click <strong className="text-amber-300">Add or remove exclusions</strong></li>
-                      <li>Add <strong className="text-white">Folder</strong> &rarr; Select unzipped folder</li>
-                    </ol>
-                  </div>
-
-                  {/* Method 3: PWA Web App */}
-                  <div className="bg-black/40 p-4 rounded-xl border border-amber-500/20 space-y-2">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold font-mono text-[11px] uppercase">
-                      <span className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] text-amber-400">3</span>
-                      Chrome / Edge Windowed App
-                    </div>
-                    <p className="text-[11px] text-gray-300 leading-relaxed">
-                      Run directly in browser with 0% chance of Windows blocks:
-                    </p>
-                    <a 
-                      href="/fullscreen" 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="block w-full bg-gold/10 hover:bg-gold/20 border border-gold/30 text-gold text-center py-2 rounded text-[11px] font-bold uppercase font-mono transition-colors"
-                    >
-                      🚀 Open Fullscreen Battleground
-                    </a>
-                    <p className="text-[10px] text-gray-400 font-sans">
-                      In Chrome/Edge menu, click <strong className="text-white font-mono">Cast, save & share &rarr; Install page as app</strong> for a standalone windowed desktop app!
-                    </p>
-                  </div>
+              <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-white/5 font-mono">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#caa055]" /> Native 64-bit Windows Executable (.exe)
                 </div>
-              )}
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#caa055]" /> 100% Offline with all 200+ token cliparts
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#caa055]" /> TV Table & Multi-Monitor Hardware Rendering
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <button
+                onClick={handleDownloadZip}
+                disabled={isDownloadingZip}
+                className="w-full h-12 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
+              >
+                {isDownloadingZip ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Downloading ZIP (~125 MB)...</>
+                ) : (
+                  <><Download className="w-4 h-4" /> Download Windows App (.zip)</>
+                )}
+              </button>
+
+              <div className="text-center">
+                <a
+                  href={downloadZipUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-[#caa055] hover:underline font-mono"
+                >
+                  Direct browser download link &rarr;
+                </a>
+              </div>
             </div>
           </div>
 
-          {/* Features Checklist */}
-          <div className="border-t border-white/5 pt-12 max-w-3xl mx-auto">
-            <h4 className="text-center text-xs font-bold font-cinzel tracking-[0.2em] uppercase text-gold/80 mb-8">
-              Krajden Grid Desktop Capabilities
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-left">
-              {features.map((feature, i) => (
-                <div key={i} className="flex items-center gap-3 text-xs text-slate-cool transition-all hover:text-white">
-                  <Check className="w-4 h-4 text-gold shrink-0" />
-                  <span className="font-sans text-xs leading-relaxed">{feature}</span>
+          {/* Method 2: 1-Click Installer .BAT File */}
+          <div className="p-8 rounded-2xl bg-[#141519] border border-white/15 flex flex-col justify-between space-y-6 shadow-xl relative">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[#caa055]">
+                  <Download className="w-6 h-6" />
                 </div>
-              ))}
+                <Badge variant="outline" className="text-slate-300 border-white/20 font-mono text-[10px]">
+                  Installer Helper
+                </Badge>
+              </div>
+
+              <div>
+                <h2 className="font-cinzel text-xl font-bold text-white uppercase tracking-wide">
+                  Installer Helper (.bat)
+                </h2>
+                <span className="text-[11px] font-mono text-slate-400 block mt-0.5">
+                  Install-KrajdenGrid.bat
+                </span>
+                <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                  Download this script and double-click it. It runs the Windows installer to set up <strong className="text-white">KrajdenGrid.exe</strong> and create desktop icons for you.
+                </p>
+              </div>
+
+              <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-white/5 font-mono">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#caa055]" /> Automatically creates Desktop icon
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#caa055]" /> Adds Krajden Grid to Windows Start Menu
+                </div>
+              </div>
             </div>
 
-            {/* Asset Vault Link */}
-            <div className="mt-12 pt-6 border-t border-white/5 text-center">
-              <button 
-                onClick={() => setIsAdminOpen(true)} 
-                className="inline-flex items-center gap-2 text-[11px] text-slate-muted hover:text-gold transition-colors font-mono tracking-wider opacity-80 hover:opacity-100"
-                data-testid="footer-dm-vault-btn"
+            <div className="space-y-3 pt-2">
+              <a
+                href={`${backendUrl}/api/download/Install-KrajdenGrid.bat`}
+                download="Install-KrajdenGrid.bat"
+                className="w-full h-12 border border-[#caa055]/50 hover:border-[#caa055] hover:bg-[#caa055]/10 text-[#caa055] font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
               >
-                <Lock className="w-3.5 h-3.5 text-gold/70" />
-                Asset Vault Admin
-                <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-slate-cool border border-white/10 font-sans">
-                  Ctrl+Shift+A
-                </span>
-              </button>
+                <Download className="w-4 h-4" /> Download Install-KrajdenGrid.bat
+              </a>
+
+              <div className="p-2 bg-black/80 rounded-xl border border-white/5 text-[10px] font-mono text-slate-400 text-center">
+                Double-click on your PC to install
+              </div>
             </div>
           </div>
 
         </div>
-      </section>
 
-      {/* Secret DM Admin Modal */}
+        {/* 3 Simple Setup Steps */}
+        <div className="max-w-4xl mx-auto pt-8 border-t border-white/5 space-y-6 text-left">
+          <h2 className="font-cinzel text-xl font-bold uppercase text-white tracking-wider text-center">
+            How to Run on Windows
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
+            <div className="p-4 rounded-xl bg-[#121316] border border-white/5 space-y-2">
+              <span className="text-[#caa055] font-bold text-sm">STEP 1</span>
+              <p className="text-slate-300 font-sans text-xs">
+                Copy and run the <strong>PowerShell Command</strong> above (or download the ZIP / BAT).
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#121316] border border-white/5 space-y-2">
+              <span className="text-[#caa055] font-bold text-sm">STEP 2</span>
+              <p className="text-slate-300 font-sans text-xs">
+                Double-click <code className="text-[#caa055]">KrajdenGrid.bat</code> on your Desktop.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#121316] border border-white/5 space-y-2">
+              <span className="text-[#caa055] font-bold text-sm">STEP 3</span>
+              <p className="text-slate-300 font-sans text-xs">
+                Move the window to your table monitor/TV and press <code className="text-[#caa055]">F11</code> for borderless tabletop gaming!
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Windows SmartScreen Notice */}
+        <div className="max-w-4xl mx-auto bg-[#121316] border border-amber-500/30 rounded-xl p-6 text-left space-y-2">
+          <div className="flex items-center gap-2 text-amber-300 font-mono text-xs font-bold">
+            <HelpCircle className="w-4 h-4" />
+            <span>Windows SmartScreen Note</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed font-sans">
+            Because Krajden Grid is an independent tabletop gaming tool, Windows may show <em>"Windows protected your PC"</em> on the first run. Click <strong>"More info"</strong> and then <strong>"Run anyway"</strong>.
+          </p>
+        </div>
+
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/5 bg-[#08080a] py-8">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 font-mono">
+          <div className="flex items-center gap-2">
+            <KrajdenCrest className="w-4 h-4 text-[#caa055]" />
+            <span>Krajden Dungeons &copy; {new Date().getFullYear()} &bull; All Rights Reserved</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <Link to="/" className="hover:text-[#caa055] transition-colors">
+              Home
+            </Link>
+            <button 
+              onClick={() => setIsAdminOpen(true)}
+              className="hover:text-[#caa055] transition-colors cursor-pointer"
+            >
+              DM Vault (Ctrl+Shift+A)
+            </button>
+            <Link to="/fullscreen" className="hover:text-[#caa055] transition-colors">
+              Web Canvas
+            </Link>
+          </div>
+        </div>
+      </footer>
+
       <AdminSecretModal 
         isOpen={isAdminOpen} 
         onClose={() => setIsAdminOpen(false)} 

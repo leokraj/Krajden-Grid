@@ -7,7 +7,7 @@ import { Toaster } from '../components/ui/sonner';
 import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
-import { EffectsDrawingOverlay } from '../components/EffectsLayer';
+import { EffectsDrawingOverlay, EffectsControlPanel } from '../components/EffectsLayer';
 
 export function FullscreenContent() {
   const { 
@@ -104,7 +104,7 @@ export function FullscreenContent() {
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } : undefined}
           >
             <div className="flex items-center gap-1.5 select-none">
-              <span className="text-xs font-semibold text-white">🗺️ Map Importer / Background Layers</span>
+              <span className="text-xs font-semibold text-white">🗺️ Battle Maps & Layers Library</span>
             </div>
             <button
               onClick={() => window.close()}
@@ -116,6 +116,34 @@ export function FullscreenContent() {
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
             <BackgroundLayersPanel />
+          </div>
+        </div>
+        <Toaster position="top-right" />
+      </div>
+    );
+  }
+
+  if (mode === 'effects') {
+    return (
+      <div className="fixed inset-0 bg-transparent text-white flex flex-col h-screen w-screen select-none p-1.5 animate-in fade-in duration-200" data-testid="fullscreen-effects-mode">
+        <div className="flex-1 bg-[#0d0d0f] rounded-2xl border border-white/15 overflow-hidden shadow-2xl flex flex-col p-4">
+          <div 
+            className="flex items-center justify-between border-b border-white/10 pb-2 mb-4 bg-white/5 p-2 rounded-t-xl shrink-0 cursor-move"
+            style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } : undefined}
+          >
+            <div className="flex items-center gap-1.5 select-none">
+              <span className="text-xs font-semibold text-white">✨ Animated Visual Effects Library</span>
+            </div>
+            <button
+              onClick={() => window.close()}
+              className="h-6 w-6 text-white/60 hover:text-white hover:bg-white/10 rounded flex items-center justify-center font-bold text-xs cursor-pointer"
+              style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } : undefined}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto pr-1">
+            <EffectsControlPanel onClose={() => window.close()} />
           </div>
         </div>
         <Toaster position="top-right" />

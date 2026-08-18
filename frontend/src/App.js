@@ -13,6 +13,9 @@ import JoinPage from "./pages/JoinPage";
 import DisplayPage from "./pages/DisplayPage";
 import RemotePage from "./pages/RemotePage";
 import AuthCallback from "./components/AuthCallback";
+import { testConnection, seedInitialVaultToFirebase } from "./lib/firebase";
+import { DEFAULT_CLIPARTS } from "./components/ClipartLibrary";
+import { DEFAULT_VAULT_BATTLEMAPS, DEFAULT_VAULT_EFFECTS } from "./data/vaultPresets";
 
 function AppRouter() {
   const location = useLocation();
@@ -50,9 +53,9 @@ function AppRouter() {
         <ExpiredGate>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/download" element={<DownloadPage />} />
             <Route path="/app" element={<AppPage />} />
             <Route path="/fullscreen" element={<FullscreenPage />} />
-            <Route path="/download" element={<DownloadPage />} />
             <Route path="/join/:code" element={<JoinPage />} />
             <Route path="/display" element={<DisplayPage />} />
             <Route path="/remote" element={<RemotePage />} />
@@ -61,9 +64,9 @@ function AppRouter() {
       ) : (
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/download" element={<DownloadPage />} />
           <Route path="/app" element={<AppPage />} />
           <Route path="/fullscreen" element={<FullscreenPage />} />
-          <Route path="/download" element={<DownloadPage />} />
           <Route path="/join/:code" element={<JoinPage />} />
           <Route path="/display" element={<DisplayPage />} />
           <Route path="/remote" element={<RemotePage />} />
@@ -85,6 +88,17 @@ function App() {
       document.documentElement.style.backgroundColor = '#0d0f12';
       document.body.style.backgroundColor = '#0d0f12';
     }
+
+    // Connect and bootstrap initial assets to Firebase Firestore if needed
+    const initFirebaseData = async () => {
+      try {
+        await testConnection();
+        await seedInitialVaultToFirebase(DEFAULT_CLIPARTS, DEFAULT_VAULT_BATTLEMAPS, DEFAULT_VAULT_EFFECTS);
+      } catch (err) {
+        console.warn('[Firebase] Boot check note:', err);
+      }
+    };
+    initFirebaseData();
   }, [isElectron]);
   
   return (

@@ -50,6 +50,24 @@ function startLocalWebServer() {
         return res.end('Forbidden');
       }
 
+      // If an API request reaches the local standalone server, respond with clean JSON rather than index.html
+      if (reqPath.startsWith('/api/')) {
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id'
+        });
+        if (reqPath.includes('battlemap')) {
+          return res.end(JSON.stringify({ battlemaps: [] }));
+        } else if (reqPath.includes('clipart') || reqPath.includes('token')) {
+          return res.end(JSON.stringify({ cliparts: [] }));
+        } else if (reqPath.includes('effect')) {
+          return res.end(JSON.stringify({ effects: [] }));
+        }
+        return res.end(JSON.stringify({ success: true }));
+      }
+
       fs.stat(filePath, (err, stats) => {
         if (err || !stats.isFile()) {
           // SPA fallback to index.html
@@ -318,15 +336,23 @@ ipcMain.on('google-auth', (event, authUrl) => {
 
 // Window creation actions requested by frontend panels
 ipcMain.on('open-clipart-window', () => {
-  createChildWindow('clipart', 'Krajden Grid - Clipart Library', 500, 700);
+  createChildWindow('clipart', 'Krajden Grid - Clipart & Token Library', 520, 720);
 });
 
 ipcMain.on('open-community-window', () => {
-  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 700);
+  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 720);
 });
 
 ipcMain.on('open-layers-window', () => {
-  createChildWindow('layers', 'Krajden Grid - Layers', 400, 600);
+  createChildWindow('layers', 'Krajden Grid - Battle Maps & Layers', 450, 650);
+});
+
+ipcMain.on('open-effects-window', () => {
+  createChildWindow('effects', 'Krajden Grid - Visual Effects Library', 480, 680);
+});
+
+ipcMain.on('open-scenes-window', () => {
+  createChildWindow('scenes', 'Krajden Grid - Saved Scenes', 450, 650);
 });
 
 app.whenReady().then(async () => {

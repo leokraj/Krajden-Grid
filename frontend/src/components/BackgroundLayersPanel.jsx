@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useGrid } from '../context/GridContext';
 import { useSession } from '../context/SessionContext';
 import { DEFAULT_VAULT_BATTLEMAPS } from '../data/vaultPresets';
+import { subscribeBattlemaps, saveBattlemapToFirebase, deleteBattlemapFromFirebase } from '../lib/firebase';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Slider } from './ui/slider';
@@ -9,7 +10,7 @@ import { Switch } from './ui/switch';
 import { toast } from 'sonner';
 import {
   Layers, Trash2, Eye, EyeOff, Lock, Unlock,
-  Plus, Upload, Video, Play, Pause, ChevronUp, ChevronDown, ExternalLink
+  Plus, Upload, Video, Play, Pause, ChevronUp, ChevronDown, ExternalLink, Cloud
 } from 'lucide-react';
 
 export const getFallbackMapSvg = (name = 'Battle Map') => {
@@ -49,21 +50,32 @@ export function BackgroundLayersPanel({ onUndock }) {
   const [showMapLibrary, setShowMapLibrary] = useState(false);
 
   const [globalBattleMaps, setGlobalBattleMaps] = useState([]);
+  const [firebaseMaps, setFirebaseMaps] = useState([]);
   const [deletedVaultIds, setDeletedVaultIds] = useState(() => {
     try {
       const raw = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
-      return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http'))) : [];
+      return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && (x.length > 5 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('map_') || x.startsWith('clipart_') || x.startsWith('token_') || x.startsWith('data:') || x.startsWith('http'))) : [];
     } catch (e) {
       return [];
     }
   });
+
+  // Subscribe to Firebase Firestore Battlemaps for real-time synchronization
+  useEffect(() => {
+    const unsubscribe = subscribeBattlemaps((maps) => {
+      if (Array.isArray(maps)) {
+        setFirebaseMaps(maps);
+      }
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const fetchGlobalMaps = async () => {
       try {
         const storedDeleted = JSON.parse(localStorage.getItem('krajden_deleted_vault_ids') || '[]');
         if (Array.isArray(storedDeleted)) {
-          const cleanDeleted = storedDeleted.filter(x => typeof x === 'string' && (x.length > 20 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('data:') || x.startsWith('http')));
+          const cleanDeleted = storedDeleted.filter(x => typeof x === 'string' && (x.length > 5 || x.startsWith('admin_') || x.startsWith('vault_') || x.startsWith('map_') || x.startsWith('clipart_') || x.startsWith('token_') || x.startsWith('data:') || x.startsWith('http')));
           setDeletedVaultIds(cleanDeleted);
         }
         const res = await fetch('/api/library/battlemaps');
@@ -84,10 +96,10 @@ export function BackgroundLayersPanel({ onUndock }) {
     return () => window.removeEventListener('krajden_library_updated', handleUpdate);
   }, [showMapLibrary]);
 
-  // Combine global admin battle maps with default preset maps, avoiding duplicate IDs and deleted vault items
+  // Combine Firebase battle maps, global admin battle maps with default preset maps
   const mapIds = new Set();
   const allVttMaps = [];
-  [...globalBattleMaps, ...VTT_MAPS].forEach(m => {
+  [...firebaseMaps, ...globalBattleMaps, ...VTT_MAPS].forEach(m => {
     if (!m) return;
     const mId = String(m.id || '').trim();
     const mUrl = String(m.url || m.imageUrl || '').trim();
@@ -113,7 +125,18 @@ export function BackgroundLayersPanel({ onUndock }) {
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
-        addBackgroundLayer(event.target.result, file.name);
+        const url = event.target.result;
+        addBackgroundLayer(url, file.name);
+        // Persist to Firebase
+        const mapDoc = {
+          id: `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          theme: 'Custom',
+          url: url,
+          description: 'Uploaded Battle Map',
+          created_at: new Date().toISOString()
+        };
+        saveBattlemapToFirebase(mapDoc).catch(err => console.warn('[Firebase] Map save note:', err));
       }
     };
     reader.readAsDataURL(file);

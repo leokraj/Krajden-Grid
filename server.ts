@@ -46,32 +46,14 @@ async function startServer() {
       fs.mkdirSync(downloadsDir, { recursive: true });
     }
 
-    // Restore KrajdenGrid-Setup.bat from template if missing
+    // Verify downloads directory
     const batDestPath = path.join(downloadsDir, 'KrajdenGrid-Setup.bat');
     const batTemplatePath = path.join(process.cwd(), 'KrajdenGrid-Setup.bat.template');
-    if (!fs.existsSync(batDestPath)) {
-      if (fs.existsSync(batTemplatePath)) {
-        console.log(`[Startup] Restoring KrajdenGrid-Setup.bat from template...`);
-        fs.copyFileSync(batTemplatePath, batDestPath);
-      } else {
-        console.error(`[Startup] KrajdenGrid-Setup.bat template not found!`);
-      }
-    }
-
-    // Run build assembly to generate KrajdenGrid-Portable.zip if missing
-    const zipPath = path.join(downloadsDir, 'KrajdenGrid-Portable.zip');
-    if (!fs.existsSync(zipPath)) {
-      console.log(`[Startup] KrajdenGrid-Portable.zip is missing. Creating placeholder file (downloads will redirect to GitHub Releases).`);
-      try {
-        fs.writeFileSync(zipPath, 'placeholder');
-      } catch (writeErr: any) {
-        console.warn(`[Startup] Could not write placeholder ZIP:`, writeErr.message);
-      }
-    } else {
-      console.log(`[Startup] KrajdenGrid-Portable.zip exists.`);
+    if (!fs.existsSync(batDestPath) && fs.existsSync(batTemplatePath)) {
+      fs.copyFileSync(batTemplatePath, batDestPath);
     }
   } catch (startupErr: any) {
-    console.error(`[Startup] Error ensuring downloads directory and assets:`, startupErr.message);
+    console.warn(`[Startup] Note on downloads directory:`, startupErr.message);
   }
 
   app.use(express.json({ limit: '50mb' }));
@@ -87,8 +69,11 @@ async function startServer() {
 
   // === MongoDB Client Setup ===
   let db: Db | null = null;
-  const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017';
-  const dbName = process.env.DB_NAME || 'overgrid';
+  let mongoUrl = (process.env.MONGO_URL || '').trim();
+  if (!mongoUrl.startsWith('mongodb://') && !mongoUrl.startsWith('mongodb+srv://')) {
+    mongoUrl = 'mongodb://127.0.0.1:27017';
+  }
+  const dbName = (process.env.DB_NAME || '').trim() || 'krajden_grid';
 
   try {
     const mongoClient = new MongoClient(mongoUrl, {
@@ -332,7 +317,7 @@ async function startServer() {
   });
 
   // Download endpoint
-  app.get('/api/download/:filename', (req, res) => {
+  app.get('/api/download/:filename', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
@@ -362,90 +347,103 @@ async function startServer() {
 
       let filePath = '';
 
-      // First check if the exact file exists locally and is a real file (not a small placeholder)
-      for (const dir of possibleDirs) {
-        const testPath = path.join(dir, filename);
-        if (fs.existsSync(testPath)) {
-          const stats = fs.statSync(testPath);
-          if (stats.size > 1000) {
-            filePath = testPath;
-            break;
-          }
-        }
+      // Dynamic Windows Native Desktop App Installer Script (PowerShell)
+      if (lowerFilename === 'install-krajdengrid.ps1') {
+        const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+        const rawOrigin = `${protocol}://${req.headers.host}`;
+        const publicOrigin = rawOrigin.replace('ais-dev-', 'ais-pre-');
+        const zipUrl = `${publicOrigin}/api/download/KrajdenGrid-Windows.zip`;
+
+        const ps1Script = `# =================================================================
+# KRAJDEN GRID - OFFICIAL NATIVE WINDOWS DESKTOP INSTALLER
+# =================================================================
+$ErrorActionPreference = 'Stop'
+$InstallDir = "$env:LOCALAPPDATA\\Programs\\KrajdenGrid"
+$ZipUrl = "${zipUrl}"
+$ZipPath = "$env:TEMP\\KrajdenGrid-Windows.zip"
+
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "        INSTALLING KRAJDEN GRID FOR WINDOWS               " -ForegroundColor Yellow
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "[1/4] Downloading native Windows desktop app (~125 MB)..." -ForegroundColor Green
+Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
+
+Write-Host "[2/4] Installing files to $InstallDir..." -ForegroundColor Green
+if (Test-Path $InstallDir) {
+    Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
+Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+
+# Unblock files for Windows Defender
+Get-ChildItem -Path $InstallDir -Recurse -ErrorAction SilentlyContinue | Unblock-File
+
+Write-Host "[3/4] Creating Desktop and Start Menu shortcuts..." -ForegroundColor Green
+$WshShell = New-Object -ComObject WScript.Shell
+
+# Desktop Shortcut
+$DesktopShortcut = $WshShell.CreateShortcut("$env:USERPROFILE\\Desktop\\Krajden Grid.lnk")
+$DesktopShortcut.TargetPath = "$InstallDir\\KrajdenGrid.exe"
+$DesktopShortcut.WorkingDirectory = $InstallDir
+$DesktopShortcut.Description = "Krajden Grid - Tabletop Battlemap & Grid System"
+$DesktopShortcut.Save()
+
+# Start Menu Shortcut
+$StartMenuDir = "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Krajden Grid"
+if (-not (Test-Path $StartMenuDir)) { New-Item -ItemType Directory -Path $StartMenuDir -Force | Out-Null }
+$StartShortcut = $WshShell.CreateShortcut("$StartMenuDir\\Krajden Grid.lnk")
+$StartShortcut.TargetPath = "$InstallDir\\KrajdenGrid.exe"
+$StartShortcut.WorkingDirectory = $InstallDir
+$StartShortcut.Description = "Krajden Grid"
+$StartShortcut.Save()
+
+Write-Host "[4/4] Launching Krajden Grid native desktop application..." -ForegroundColor Cyan
+Start-Process "$InstallDir\\KrajdenGrid.exe"
+
+Write-Host ""
+Write-Host "SUCCESS: Krajden Grid is installed! A shortcut was placed on your Desktop." -ForegroundColor Green
+Write-Host "==========================================================" -ForegroundColor Cyan
+`;
+        const buffer = Buffer.from(ps1Script.replace(/\r?\n/g, '\r\n'), 'utf8');
+        res.setHeader('Content-Length', buffer.length);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="Install-KrajdenGrid.ps1"');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(buffer);
       }
 
-      // Alias/fallback KrajdenGrid-Setup.exe to KrajdenGrid-Portable.zip as KrajdenGrid-Windows.zip if Setup.exe is missing
-      if (!filePath && lowerFilename === 'krajdengrid-setup.exe') {
-        console.log(`[Download] KrajdenGrid-Setup.exe not found on Linux. Falling back to KrajdenGrid-Portable.zip (renamed/aliased as KrajdenGrid-Windows.zip)`);
-        for (const dir of possibleDirs) {
-          const testPath = path.join(dir, 'KrajdenGrid-Portable.zip');
-          if (fs.existsSync(testPath)) {
-            const stats = fs.statSync(testPath);
-            if (stats.size > 1000) {
-              filePath = testPath;
-              targetFilenameToServe = 'KrajdenGrid-Windows.zip';
-              break;
-            }
-          }
-        }
+      // Dynamic Native Installer Batch Wrapper
+      if (lowerFilename === 'install-krajdengrid.bat') {
+        const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+        const rawOrigin = `${protocol}://${req.headers.host}`;
+        const publicOrigin = rawOrigin.replace('ais-dev-', 'ais-pre-');
+        const ps1Url = `${publicOrigin}/api/download/Install-KrajdenGrid.ps1`;
+
+        const batInstaller = `@echo off\r\ntitle Installing Krajden Grid Native Windows App...\r\necho ============================================================\r\necho        INSTALLING KRAJDEN GRID FOR WINDOWS\r\necho ============================================================\r\necho Downloading and installing the standalone Windows application...\r\necho.\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "irm '${ps1Url}' | iex"\r\npause\r\nexit /b\r\n`;
+
+        const buffer = Buffer.from(batInstaller, 'utf8');
+        res.setHeader('Content-Length', buffer.length);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="Install-KrajdenGrid.bat"');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(buffer);
       }
 
-      // If we don't have a valid local file, provide iframe-safe download redirect
-      if (!filePath) {
-        let redirectUrl = '';
-        if (lowerFilename === 'krajdengrid-portable.zip') {
-          redirectUrl = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Portable.zip';
-        } else if (lowerFilename === 'krajdengrid-setup.exe' || lowerFilename === 'krajdengrid-windows.zip') {
-          redirectUrl = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Windows.zip';
-        }
-
-        if (redirectUrl) {
-          if (req.query.info === 'true') {
-            return res.json({ external: true, redirectUrl });
-          }
-          console.log(`[Download] ${filename} not found locally. Serving iframe-safe launcher page for ${redirectUrl}`);
-          return res.send(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>Downloading ${filename}...</title>
-                <style>
-                  body { background: #0c0d10; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
-                  .card { background: #151821; border: 1px solid #caa055; padding: 40px; border-radius: 16px; max-width: 450px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-                  a { display: inline-block; background: #caa055; color: #000; font-weight: bold; padding: 14px 28px; border-radius: 8px; text-decoration: none; margin-top: 20px; letter-spacing: 1px; }
-                  a:hover { background: #e0b465; }
-                </style>
-              </head>
-              <body>
-                <div class="card">
-                  <h2>Krajden Grid Download</h2>
-                  <p>Click below to download <strong>${filename}</strong> directly in a new window:</p>
-                  <a href="${redirectUrl}" target="_blank" rel="noopener noreferrer">Download File</a>
-                  <script>
-                    window.open('${redirectUrl}', '_blank');
-                  </script>
-                </div>
-              </body>
-            </html>
-          `);
-        }
-      }
-
-      console.log(`[Download] Requested: ${requestedFilename} -> Sanitized: ${filename} -> Serving: ${targetFilenameToServe}`);
-      console.log(`[Download] Selected path: ${filePath || 'NOT FOUND'}`);
-
-      if (!filePath || !fs.existsSync(filePath)) {
-        console.warn(`[Download] File not found in any search paths: ${filename}`);
-        return res.status(404).json({ detail: 'File not found' });
-      }
-
-      // Special dynamic modification for .bat setup scripts to use the correct domain
-      if (filename.toLowerCase() === 'krajdengrid-setup.bat') {
+      // Special dynamic modification for .bat setup and launcher scripts to use the correct domain
+      if (lowerFilename.endsWith('.bat')) {
         const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
         const origin = `${protocol}://${req.headers.host}`;
-        console.log(`[Download] Dynamically injecting origin ${origin} into KrajdenGrid-Setup.bat`);
+        console.log(`[Download] Dynamically generating/injecting origin ${origin} into ${filename}`);
         
-        let batContent = fs.readFileSync(filePath, 'utf8');
+        let batContent = '';
+        if (filePath && fs.existsSync(filePath)) {
+          batContent = fs.readFileSync(filePath, 'utf8');
+        } else {
+          batContent = `@echo off\r\ntitle Krajden Grid Desktop Launcher\r\necho ============================================================\r\necho             KRAJDEN GRID - INSTANT LAUNCHER\r\necho ============================================================\r\necho Launching Krajden Grid in Desktop Overlay Mode...\r\necho.\r\nset "TARGET_URL=${origin}/fullscreen"\r\nif exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (\r\n    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nif exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (\r\n    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nif exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (\r\n    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nstart "" "%TARGET_URL%"\r\nexit /b\r\n`;
+        }
+
         // Replace any hardcoded ais-dev/ais-pre URLs with the dynamic origin
         batContent = batContent.replace(
           /https:\/\/ais-(dev|pre)-uozjwodwx7ctzjsx4334de-668611332745\.us-east1\.run\.app/g,
@@ -454,106 +452,103 @@ async function startServer() {
           /https:\/\/ais-(dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app/g,
           origin
         );
+
+        // Ensure Windows CRLF line endings
+        batContent = batContent.replace(/\r?\n/g, '\r\n');
         
         const buffer = Buffer.from(batContent, 'utf8');
         res.setHeader('Content-Length', buffer.length);
-        res.setHeader('Content-Type', 'text/plain');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Cache-Control', 'public, max-age=0');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         return res.send(buffer);
+      }
+
+      // First check if the exact file exists locally
+      for (const dir of possibleDirs) {
+        const testPath = path.join(dir, filename);
+        if (fs.existsSync(testPath)) {
+          const stats = fs.statSync(testPath);
+          if (stats.size > 0) {
+            filePath = testPath;
+            break;
+          }
+        }
+      }
+
+      // Alias/fallback KrajdenGrid-Setup.exe to KrajdenGrid-Portable.zip as KrajdenGrid-Windows.zip if Setup.exe is missing
+      if (!filePath && (lowerFilename === 'krajdengrid-setup.exe' || lowerFilename === 'krajdengrid-windows.zip')) {
+        console.log(`[Download] ${filename} requested. Finding KrajdenGrid-Portable.zip to serve...`);
+        for (const dir of possibleDirs) {
+          const testPath = path.join(dir, 'KrajdenGrid-Portable.zip');
+          if (fs.existsSync(testPath)) {
+            const stats = fs.statSync(testPath);
+            if (stats.size > 0) {
+              filePath = testPath;
+              targetFilenameToServe = 'KrajdenGrid-Windows.zip';
+              break;
+            }
+          }
+        }
+      }
+
+      console.log(`[Download] Requested: ${requestedFilename} -> Sanitized: ${filename} -> Serving: ${targetFilenameToServe}`);
+      console.log(`[Download] Selected path: ${filePath || 'NOT FOUND'}`);
+
+      if (!filePath || !fs.existsSync(filePath)) {
+        if (lowerFilename.endsWith('.zip')) {
+          console.log(`[Download] Generating portable zip archive on the fly for: ${filename}`);
+          const AdmZip = (await import('adm-zip')).default;
+          const zip = new AdmZip();
+          
+          const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+          const origin = `${protocol}://${req.headers.host}`;
+          
+          const batLauncher = `@echo off\r\ntitle Krajden Grid Desktop Launcher\r\necho ============================================================\r\necho             KRAJDEN GRID - DESKTOP LAUNCHER\r\necho ============================================================\r\necho Launching Krajden Grid in Desktop Overlay Mode...\r\necho.\r\nset "TARGET_URL=${origin}/fullscreen"\r\nif exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (\r\n    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nif exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (\r\n    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nif exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (\r\n    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --app="%TARGET_URL%" --window-size=1920,1080 --start-maximized\r\n    exit /b\r\n)\r\nstart "" "%TARGET_URL%"\r\nexit /b\r\n`;
+          
+          const ps1Launcher = `# Krajden Grid PowerShell Launcher\r\n$url = "${origin}/fullscreen"\r\nif (Test-Path "\${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe") {\r\n    Start-Process "\${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe" -ArgumentList "--app=$url --window-size=1920,1080 --start-maximized"\r\n} elseif (Test-Path "\${env:ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe") {\r\n    Start-Process "\${env:ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe" -ArgumentList "--app=$url --window-size=1920,1080 --start-maximized"\r\n} else {\r\n    Start-Process $url\r\n}\r\n`;
+
+          const readme = `=================================================================\r\nKRAJDEN GRID - OFFICIAL TABLETOP BATTLEMAP & GRID TOOL\r\n=================================================================\r\n\r\nQUICK START:\r\n1. Double-click "Launch-KrajdenGrid.bat" to start in Desktop App Mode.\r\n2. Move window to your gaming table TV / monitor.\r\n3. Press F11 for borderless fullscreen grid view!\r\n\r\nFor support or questions, visit:\r\n${origin}\r\n=================================================================\r\n`;
+
+          zip.addFile('Launch-KrajdenGrid.bat', Buffer.from(batLauncher, 'utf8'));
+          zip.addFile('Launch-KrajdenGrid.ps1', Buffer.from(ps1Launcher, 'utf8'));
+          zip.addFile('README.txt', Buffer.from(readme, 'utf8'));
+
+          // If frontend/dist exists, add offline assets
+          const distPath = path.join(process.cwd(), 'frontend', 'dist');
+          if (fs.existsSync(distPath)) {
+            zip.addLocalFolder(distPath, 'offline_app');
+          }
+
+          const zipBuffer = zip.toBuffer();
+          res.setHeader('Content-Length', zipBuffer.length);
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFilenameToServe}"`);
+          res.setHeader('Cache-Control', 'public, max-age=0');
+          return res.send(zipBuffer);
+        }
+
+        console.warn(`[Download] File not found in any search paths: ${filename}`);
+        return res.status(404).json({ detail: 'File not found' });
       }
 
       // Set long timeouts for this specific route (e.g., 30 minutes) to prevent premature termination of large file downloads
       req.setTimeout(30 * 60 * 1000);
       res.setTimeout(30 * 60 * 1000);
 
-      const stats = fs.statSync(filePath);
-      const fileSize = stats.size;
-      console.log(`[Download] Serving file size: ${fileSize} bytes`);
-
-      // Determine content type
-      let contentType = 'application/octet-stream';
-      if (targetFilenameToServe.endsWith('.zip')) {
-        contentType = 'application/zip';
-      } else if (targetFilenameToServe.endsWith('.bat')) {
-        contentType = 'text/plain';
-      } else if (targetFilenameToServe.endsWith('.exe')) {
-        contentType = 'application/octet-stream';
-      }
-
-      // Set download headers
-      res.setHeader('Content-Disposition', `attachment; filename="${targetFilenameToServe}"`);
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'public, max-age=0');
-
-      let fileStream: fs.ReadStream | null = null;
-
-      // Handle connection close or abort safely without crashing the server or throwing unhandled errors
-      const cleanup = () => {
-        req.off('close', onAbort);
-        res.off('close', onAbort);
-        res.off('finish', cleanup);
-      };
-
-      const onAbort = () => {
-        console.log(`[Download] Connection closed or aborted by client for: ${filename}`);
-        if (fileStream) {
-          console.log(`[Download] Destroying fileStream for aborted transfer: ${filename}`);
-          fileStream.destroy();
-        }
-        cleanup();
-      };
-
-      req.on('close', onAbort);
-      res.on('close', onAbort);
-      res.on('finish', cleanup);
-
-      // Check for Range request
-      const range = req.headers.range;
-      if (range) {
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-        if (start >= fileSize || end >= fileSize || start > end) {
-          res.setHeader('Content-Range', `bytes */${fileSize}`);
-          return res.status(416).json({ detail: 'Requested range not satisfiable' });
-        }
-
-        const chunksize = (end - start) + 1;
-        res.status(206);
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-        res.setHeader('Content-Length', chunksize);
-        res.setHeader('Content-Type', contentType);
-
-        // Use 64KB maximum buffer size (highWaterMark) for chunked chunk streaming
-        fileStream = fs.createReadStream(filePath, { start, end, highWaterMark: 64 * 1024 });
-        
-        fileStream.on('error', (streamErr) => {
-          console.error(`[Download] Stream error during range transfer of ${filename}:`, streamErr);
+      console.log(`[Download] Sending file via res.download: ${filePath} as ${targetFilenameToServe}`);
+      return res.download(filePath, targetFilenameToServe, (downloadErr) => {
+        if (downloadErr) {
           if (!res.headersSent) {
-            res.status(500).end();
+            console.error(`[Download] Error sending ${filename}:`, downloadErr);
+            res.status(500).json({ detail: 'Download failed: ' + (downloadErr.message || 'Unknown error') });
+          } else {
+            console.log(`[Download] Client aborted or completed transfer for: ${filename}`);
           }
-        });
-
-        fileStream.pipe(res);
-      } else {
-        // Full file transfer
-        res.setHeader('Content-Length', fileSize);
-        res.setHeader('Content-Type', contentType);
-
-        // Use 64KB maximum buffer size (highWaterMark) for chunked chunk streaming
-        fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
-
-        fileStream.on('error', (streamErr) => {
-          console.error(`[Download] Stream error during transfer of ${filename}:`, streamErr);
-          if (!res.headersSent) {
-            res.status(500).end();
-          }
-        });
-
-        fileStream.pipe(res);
-      }
+        } else {
+          console.log(`[Download] Successfully completed transfer for: ${filename}`);
+        }
+      });
 
     } catch (err: any) {
       console.error('[Download] Uncaught exception in download route:', err);
@@ -2114,19 +2109,31 @@ async function startServer() {
   });
 
   // === VITE MIDDLEWARE ===
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      configFile: path.join(resolvedDirname, 'vite.config.ts'),
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
+  const viteConfigFile = path.join(process.cwd(), 'vite.config.ts');
+  if (process.env.NODE_ENV !== 'production' && fs.existsSync(viteConfigFile)) {
+    try {
+      const vite = await createViteServer({
+        configFile: viteConfigFile,
+        server: { middlewareMode: true, hmr: false },
+        appType: 'spa'
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr: any) {
+      console.error('[Vite] Error creating vite server:', viteErr.message);
+    }
   } else {
     const distPath = path.join(process.cwd(), 'frontend', 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        const indexPath = path.join(distPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          res.sendFile(indexPath);
+        } else {
+          res.status(200).send('<!doctype html><html><body><div id="root"></div></body></html>');
+        }
+      });
+    }
   }
 
   server.listen(PORT, '0.0.0.0', () => {
