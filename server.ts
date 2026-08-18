@@ -347,12 +347,23 @@ async function startServer() {
 
       let filePath = '';
 
+      // First check if the exact file exists locally
+      for (const dir of possibleDirs) {
+        const testPath = path.join(dir, filename);
+        if (fs.existsSync(testPath)) {
+          const stats = fs.statSync(testPath);
+          if (stats.size > 0) {
+            filePath = testPath;
+            break;
+          }
+        }
+      }
+
       // Dynamic Windows Native Desktop App Installer Script (PowerShell)
       if (lowerFilename === 'install-krajdengrid.ps1') {
         const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-        const rawOrigin = `${protocol}://${req.headers.host}`;
-        const publicOrigin = rawOrigin.replace('ais-dev-', 'ais-pre-');
-        const zipUrl = `${publicOrigin}/api/download/KrajdenGrid-Windows.zip`;
+        const origin = `${protocol}://${req.headers.host}`;
+        const zipUrl = `${origin}/api/download/KrajdenGrid-Windows.zip`;
 
         const ps1Script = `# =================================================================
 # KRAJDEN GRID - OFFICIAL NATIVE WINDOWS DESKTOP INSTALLER
@@ -417,9 +428,8 @@ Write-Host "==========================================================" -Foregro
       // Dynamic Native Installer Batch Wrapper
       if (lowerFilename === 'install-krajdengrid.bat') {
         const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-        const rawOrigin = `${protocol}://${req.headers.host}`;
-        const publicOrigin = rawOrigin.replace('ais-dev-', 'ais-pre-');
-        const ps1Url = `${publicOrigin}/api/download/Install-KrajdenGrid.ps1`;
+        const origin = `${protocol}://${req.headers.host}`;
+        const ps1Url = `${origin}/api/download/Install-KrajdenGrid.ps1`;
 
         const batInstaller = `@echo off\r\ntitle Installing Krajden Grid Native Windows App...\r\necho ============================================================\r\necho        INSTALLING KRAJDEN GRID FOR WINDOWS\r\necho ============================================================\r\necho Downloading and installing the standalone Windows application...\r\necho.\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "irm '${ps1Url}' | iex"\r\npause\r\nexit /b\r\n`;
 

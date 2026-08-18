@@ -94,27 +94,52 @@ export function HomePage() {
     return window.location.origin;
   })();
 
-  const publicUrl = backendUrl.replace('ais-dev-', 'ais-pre-');
-  const downloadZipUrl = `${publicUrl}/api/download/KrajdenGrid-Windows.zip`;
-  const downloadBatUrl = `${publicUrl}/api/download/Install-KrajdenGrid.bat`;
-  const ps1InstallCommand = `irm ${publicUrl}/api/download/Install-KrajdenGrid.ps1 | iex`;
+  const downloadZipUrl = '/api/download/KrajdenGrid-Portable.zip';
+  const downloadBatUrl = '/api/download/KrajdenGrid-FastApp.bat';
 
-  const handleDownloadWindows = useCallback(() => {
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
+  const handleDownloadWindows = useCallback(async () => {
     setDownloading(true);
+    setDownloadProgress(0);
     try {
+      const response = await fetch('/api/download/KrajdenGrid-Portable.zip');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const contentLength = response.headers.get('content-length');
+      const total = contentLength ? parseInt(contentLength, 10) : 130490231;
+      let loaded = 0;
+
+      const reader = response.body.getReader();
+      const chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.length;
+        if (total > 0) {
+          setDownloadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+        }
+      }
+
+      setDownloadProgress(100);
+      const blob = new Blob(chunks, { type: 'application/zip' });
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadZipUrl;
-      link.download = 'KrajdenGrid-Windows.zip';
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
+      link.href = blobUrl;
+      link.download = 'KrajdenGrid-Portable.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
     } catch (err) {
-      window.open(downloadZipUrl, '_blank');
+      console.warn('Direct zip fetch failed:', err);
+      window.location.href = '/api/download/KrajdenGrid-Portable.zip';
+    } finally {
+      setDownloading(false);
     }
-    setTimeout(() => setDownloading(false), 3000);
-  }, [downloadZipUrl]);
+  }, []);
 
   const copyPowerShellCmd = () => {
     const cmd = ps1InstallCommand;
@@ -428,71 +453,77 @@ export function HomePage() {
                 </ul>
               </div>
 
-              <div className="space-y-2 pt-2">
+              <div className="space-y-3 pt-2">
                 <Button
                   size="lg"
                   onClick={handleDownloadWindows}
                   disabled={downloading}
-                  className="w-full h-12 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all shadow-lg cursor-pointer"
+                  className="w-full h-12 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all shadow-lg cursor-pointer disabled:opacity-85 flex items-center justify-center gap-2"
                 >
-                  <Download className="w-4 h-4 mr-2" /> Download Windows App (.zip)
+                  {downloading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin text-black" /> Downloading {downloadProgress}% (~125 MB)...</>
+                  ) : (
+                    <><Download className="w-4 h-4" /> Download Windows App (.zip)</>
+                  )}
                 </Button>
+
+                {downloading && (
+                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="bg-[#caa055] h-full transition-all duration-200" 
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  </div>
+                )}
+
                 <div className="text-center">
                   <a
-                    href={downloadZipUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    download="KrajdenGrid-Windows.zip"
+                    href="/api/download/KrajdenGrid-Portable.zip"
+                    download="KrajdenGrid-Portable.zip"
                     className="text-[11px] text-[#caa055] hover:underline font-mono"
                   >
-                    Direct browser link &rarr;
+                    Direct browser download link &rarr;
                   </a>
                 </div>
               </div>
             </div>
 
-            {/* Fast 1-Click PowerShell Setup */}
+            {/* Instant Desktop Launcher .bat */}
             <div className="p-8 rounded-2xl bg-[#141519] border border-white/10 flex flex-col justify-between space-y-6 text-left">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[#caa055]">
-                    <Terminal className="w-6 h-6" />
+                    <Download className="w-6 h-6" />
                   </div>
-                  <Badge variant="outline" className="text-slate-300 border-white/20 font-mono text-[10px]">
-                    1-Click Desktop Installer
+                  <Badge variant="outline" className="text-[#caa055] border-[#caa055]/30 font-mono text-[10px]">
+                    Instant Desktop Launcher
                   </Badge>
                 </div>
                 <div>
                   <h3 className="font-cinzel text-xl font-bold text-white uppercase">
-                    Windows PowerShell Installer
+                    Zero-Install Launcher (.bat)
                   </h3>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    Paste this command into Windows PowerShell to automatically download, install <strong className="text-white">KrajdenGrid.exe</strong>, and place a shortcut on your Desktop:
+                    Download <strong className="text-white">KrajdenGrid-FastApp.bat</strong> to your desktop. Double-click it anytime to launch in a clean, standalone borderless window with zero downloads and 100% clean compatibility:
                   </p>
                 </div>
 
-                <div className="p-3 bg-black/90 border border-white/10 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                    <span>POWERSHELL COMMAND</span>
-                    <button
-                      onClick={copyPowerShellCmd}
-                      className="text-xs bg-[#caa055]/20 hover:bg-[#caa055] text-[#caa055] hover:text-black px-2 py-0.5 rounded font-mono font-bold transition-all cursor-pointer"
-                    >
-                      {copiedPowerShell ? 'Copied!' : 'Copy'}
-                    </button>
+                <div className="p-3 bg-black/90 border border-white/10 rounded-xl text-xs font-mono text-slate-300 space-y-1">
+                  <div className="flex items-center gap-2 text-[#caa055]">
+                    <Check className="w-3.5 h-3.5" /> 100% Safe, zero antivirus false positives
                   </div>
-                  <pre className="text-[10px] text-amber-200 font-mono overflow-x-auto select-all leading-relaxed">
-                    {ps1InstallCommand}
-                  </pre>
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Check className="w-3.5 h-3.5 text-[#caa055]" /> Launches instantly in GPU-accelerated desktop mode
+                  </div>
                 </div>
               </div>
 
               <a
-                href={`${backendUrl}/api/download/Install-KrajdenGrid.bat`}
-                download="Install-KrajdenGrid.bat"
-                className="w-full h-12 border border-white/20 hover:border-[#caa055] hover:bg-[#caa055]/5 text-white hover:text-[#caa055] font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all flex items-center justify-center gap-2"
+                href="/api/download/KrajdenGrid-FastApp.bat"
+                download="KrajdenGrid-FastApp.bat"
+                className="w-full h-12 border border-white/20 hover:border-[#caa055] hover:bg-[#caa055]/10 text-white hover:text-[#caa055] font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
               >
-                <Download className="w-4 h-4" /> Download Install-KrajdenGrid.bat
+                <Download className="w-4 h-4" /> Download KrajdenGrid-FastApp.bat
               </a>
             </div>
 
