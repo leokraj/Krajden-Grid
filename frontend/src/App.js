@@ -1,5 +1,5 @@
-import "@/App.css";
-import { useEffect } from "react";
+import "../../App.css";
+import { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { LicenseProvider } from "./context/LicenseContext";
@@ -8,14 +8,22 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import HomePage from "./pages/HomePage";
 import AppPage from "./pages/AppPage";
 import DownloadPage from "./pages/DownloadPage";
-import FullscreenPage from "./pages/FullscreenPage";
-import JoinPage from "./pages/JoinPage";
 import DisplayPage from "./pages/DisplayPage";
 import RemotePage from "./pages/RemotePage";
 import AuthCallback from "./components/AuthCallback";
 import { testConnection, seedInitialVaultToFirebase } from "./lib/firebase";
 import { DEFAULT_CLIPARTS } from "./components/ClipartLibrary";
 import { DEFAULT_VAULT_BATTLEMAPS, DEFAULT_VAULT_EFFECTS } from "./data/vaultPresets";
+
+// Lazy imports fix the Vite bundler initialization error caused by mixed
+// static/dynamic imports of the same module (FullscreenPage is also
+// dynamically imported by JoinPage, causing 'Cannot access X before initialization')
+const FullscreenPage = lazy(() => import("./pages/FullscreenPage"));
+const JoinPage = lazy(() => import("./pages/JoinPage"));
+
+const PageLoader = () => (
+  <div style={{ background: '#08080a', width: '100vw', height: '100vh' }} />
+);
 
 function AppRouter() {
   const location = useLocation();
@@ -55,8 +63,8 @@ function AppRouter() {
             <Route path="/" element={<HomePage />} />
             <Route path="/download" element={<DownloadPage />} />
             <Route path="/app" element={<AppPage />} />
-            <Route path="/fullscreen" element={<FullscreenPage />} />
-            <Route path="/join/:code" element={<JoinPage />} />
+            <Route path="/fullscreen" element={<Suspense fallback={<PageLoader />}><FullscreenPage /></Suspense>} />
+            <Route path="/join/:code" element={<Suspense fallback={<PageLoader />}><JoinPage /></Suspense>} />
             <Route path="/display" element={<DisplayPage />} />
             <Route path="/remote" element={<RemotePage />} />
           </Routes>
@@ -66,8 +74,8 @@ function AppRouter() {
           <Route path="/" element={<HomePage />} />
           <Route path="/download" element={<DownloadPage />} />
           <Route path="/app" element={<AppPage />} />
-          <Route path="/fullscreen" element={<FullscreenPage />} />
-          <Route path="/join/:code" element={<JoinPage />} />
+          <Route path="/fullscreen" element={<Suspense fallback={<PageLoader />}><FullscreenPage /></Suspense>} />
+          <Route path="/join/:code" element={<Suspense fallback={<PageLoader />}><JoinPage /></Suspense>} />
           <Route path="/display" element={<DisplayPage />} />
           <Route path="/remote" element={<RemotePage />} />
         </Routes>
