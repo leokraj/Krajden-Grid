@@ -1,17 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Shield, Download, Monitor, Grid3X3, Layers, Zap, Eye, Sword, ChevronDown } from 'lucide-react';
+import { Shield, Download, ChevronDown } from 'lucide-react';
 import AdminSecretModal from '../components/AdminSecretModal';
 
-// Direct GitHub Release URLs — no backend server involved
-const GITHUB_RELEASE = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0';
-const DOWNLOAD_ZIP = `${GITHUB_RELEASE}/KrajdenGrid-Windows.zip`;
-const DOWNLOAD_BAT = `${GITHUB_RELEASE}/KrajdenGrid-Setup.bat`;
+const DOWNLOAD_URL = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Windows.zip';
 
 function KrajdenCrest({ className = 'w-6 h-6' }) {
   return (
     <svg className={className} viewBox="0 0 100 100" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="50" y1="18" x2="50" y2="82" strokeWidth="2.5" />
       <path d="M50 12 C46 22, 44 30, 50 40 C56 30, 54 22, 50 12 Z" fill="currentColor" stroke="none" />
       <circle cx="50" cy="28" r="1.5" fill="currentColor" stroke="none" />
@@ -29,28 +25,23 @@ function KrajdenCrest({ className = 'w-6 h-6' }) {
   );
 }
 
-function WindowsIcon({ className = 'w-5 h-5' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.551H10.949M0 12.6h9.75V22.05L0 20.7m10.949-8.1H24V24l-13.051-1.8" />
-    </svg>
-  );
-}
-
-const FEATURES = [
-  { icon: Grid3X3, title: 'Precision Grid Overlay', desc: 'Transparent always-on-top grid that conforms to any screen or projector — calibrate once, play forever.' },
-  { icon: Layers, title: 'Battle Map Layers', desc: 'Stack video backgrounds, fog of war masks, and hand-drawn terrain directly behind your grid.' },
-  { icon: Eye, title: 'Fog of War', desc: 'Reveal rooms progressively with freehand, rectangle, or circle fog brushes. Hide ambushes until the moment strikes.' },
-  { icon: Sword, title: 'Token Library', desc: 'Place heroes, monsters, and props from the vault. Right-click for size presets, conditions, and layering.' },
-  { icon: Zap, title: 'Live Session Sync', desc: 'Share a session code and sync tokens, drawings, and measurements with players in real time.' },
-  { icon: Monitor, title: 'Projector Ready', desc: 'Project over your physical table or span across multiple monitors — the grid scales to any setup.' },
-];
-
-const INSTALL_STEPS = [
-  { num: '01', title: 'Download the ZIP', desc: 'Click the button above. Your browser will save KrajdenGrid-Windows.zip to your Downloads folder.' },
-  { num: '02', title: 'Extract anywhere', desc: 'Right-click the ZIP → Extract All. Pick any folder — your Desktop, Documents, wherever you prefer.' },
-  { num: '03', title: 'Run KrajdenGrid.exe', desc: 'Open the extracted folder and double-click KrajdenGrid.exe. No installation required — it runs immediately.' },
-  { num: '04', title: 'Windows SmartScreen?', desc: 'If Windows shows a blue "Unknown publisher" warning, click More info → Run anyway. This is normal for unsigned indie apps.' },
+const FAQS = [
+  {
+    q: 'What do I do after downloading?',
+    a: 'Unzip the file anywhere on your PC, open the folder, and double-click KrajdenGrid.exe. No installation needed.'
+  },
+  {
+    q: 'Windows shows a security warning — is it safe?',
+    a: 'Yes. As an indie app without a paid code-signing certificate, Windows Defender may show a blue "Unknown publisher" screen. Click More info → Run anyway to proceed.'
+  },
+  {
+    q: 'Does it work without internet?',
+    a: 'The app loads its interface from our servers, so an internet connection is required on first launch. Grid tools and drawing work offline after loading.'
+  },
+  {
+    q: 'How do I update to a new version?',
+    a: 'Download the latest ZIP from this page and replace your old folder. No uninstaller needed.'
+  },
 ];
 
 export function DownloadPage() {
@@ -68,195 +59,213 @@ export function DownloadPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const faqs = [
-    { q: 'Does it work without internet?', a: 'Krajden Grid loads its interface from our servers, so an internet connection is required. Once loaded, most grid and drawing tools work offline — but token vault, live sessions, and battle map sync require a connection.' },
-    { q: 'Will my antivirus flag it?', a: 'Some antivirus software flags unsigned executables from independent developers. Krajden Grid is safe — you can verify the source on our GitHub repository. If your AV blocks it, add an exception or use "Run anyway" in Windows Defender.' },
-    { q: 'What Windows version is required?', a: 'Windows 10 or Windows 11, 64-bit. The app is built on Electron which requires these minimum versions.' },
-    { q: 'How do I update?', a: 'Download the latest ZIP from this page and replace your old folder. No uninstaller needed — just overwrite or delete the old folder and extract the new one.' },
-    { q: 'Can multiple players connect to one session?', a: 'Yes — the DM starts a session from the controls panel and shares a code. Players join via the web app or their own desktop copy. Tokens, drawings, and pings sync in real time.' },
-  ];
-
   return (
-    <div className="min-h-screen bg-[#08080a] text-white overflow-x-hidden font-sans selection:bg-[#caa055] selection:text-black">
+    <div style={{
+      minHeight: '100vh',
+      background: '#08080a',
+      color: '#fff',
+      fontFamily: 'Inter, sans-serif',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+    }}>
 
       {/* Ambient glow */}
-      <div className="pointer-events-none fixed inset-0 z-0"
-        style={{ background: 'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(202,160,85,0.08) 0%, transparent 70%)' }} />
+      <div style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
+        background: 'radial-gradient(ellipse 80% 40% at 50% 0%, rgba(202,160,85,0.07) 0%, transparent 70%)'
+      }} />
 
       {/* Nav */}
-      <header className="sticky top-0 z-50 border-b border-white/5 bg-[#08080a]/90 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5 group">
-            <KrajdenCrest className="w-7 h-7 text-[#caa055]" />
-            <span className="font-cinzel text-base font-bold tracking-widest text-[#caa055] uppercase">Krajden Grid</span>
-          </Link>
-          <button
-            onClick={() => setIsAdminOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-[#caa055]/20 bg-[#caa055]/5 text-[#caa055]/60 hover:text-[#caa055] hover:bg-[#caa055]/10 text-xs font-cinzel font-bold transition-all"
-          >
-            <Shield className="w-3 h-3" />
-            DM Vault
-          </button>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 50, width: '100%',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        background: 'rgba(8,8,10,0.92)', backdropFilter: 'blur(12px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 32px', height: 56,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <KrajdenCrest className="w-7 h-7" style={{ color: '#caa055', width: 28, height: 28 }} />
+          <span style={{
+            fontFamily: 'Cinzel, serif', fontSize: 15, fontWeight: 700,
+            letterSpacing: '0.18em', color: '#caa055', textTransform: 'uppercase'
+          }}>Krajden Grid</span>
         </div>
+        <button onClick={() => setIsAdminOpen(true)} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 12px', borderRadius: 8,
+          border: '1px solid rgba(202,160,85,0.2)',
+          background: 'rgba(202,160,85,0.05)',
+          color: 'rgba(202,160,85,0.5)', cursor: 'pointer',
+          fontSize: 11, fontFamily: 'Cinzel, serif', fontWeight: 700,
+          letterSpacing: '0.1em', textTransform: 'uppercase',
+          transition: 'all 0.2s',
+        }}>
+          <Shield style={{ width: 12, height: 12 }} />
+          DM Vault
+        </button>
       </header>
 
       {/* Hero */}
-      <section className="max-w-5xl mx-auto px-6 pt-20 pb-16 text-center relative z-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#caa055]/10 border border-[#caa055]/25 text-[#caa055] text-xs font-mono uppercase tracking-widest mb-8">
-          <WindowsIcon className="w-3 h-3" />
+      <main style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        padding: '80px 32px 60px', textAlign: 'center',
+        position: 'relative', zIndex: 1, maxWidth: 640, width: '100%',
+      }}>
+
+        <KrajdenCrest style={{ width: 64, height: 64, color: 'rgba(202,160,85,0.3)', marginBottom: 32 }} />
+
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '4px 14px', borderRadius: 999,
+          background: 'rgba(202,160,85,0.08)',
+          border: '1px solid rgba(202,160,85,0.2)',
+          color: '#caa055', fontSize: 10,
+          fontFamily: 'monospace', letterSpacing: '0.15em',
+          textTransform: 'uppercase', marginBottom: 28,
+        }}>
           Windows 10 / 11 · 64-bit · Free Early Access
         </div>
 
-        <h1 className="font-cinzel text-4xl sm:text-6xl font-extrabold uppercase tracking-tight text-white leading-none mb-4">
-          Your Table.<br />
-          <span className="text-[#caa055]">Your Grid.</span>
+        <h1 style={{
+          fontFamily: 'Cinzel, serif', fontSize: 'clamp(32px, 6vw, 56px)',
+          fontWeight: 900, textTransform: 'uppercase',
+          letterSpacing: '-0.01em', lineHeight: 1.05,
+          color: '#fff', marginBottom: 20,
+        }}>
+          Krajden Grid
         </h1>
 
-        <p className="text-white/50 text-lg max-w-xl mx-auto mb-12 leading-relaxed">
-          A transparent overlay grid for tabletop gaming on any screen or projector —
-          with tokens, fog of war, battle maps, and live session sync.
+        <p style={{
+          color: 'rgba(255,255,255,0.45)', fontSize: 16,
+          lineHeight: 1.7, marginBottom: 48, maxWidth: 480,
+        }}>
+          A transparent overlay grid for tabletop gaming. Place tokens, reveal fog of war,
+          sync battle maps, and run live sessions — projected over your table or on any screen.
         </p>
 
-        {/* Primary download button */}
-        <div className="flex flex-col items-center gap-4">
-          <a
-            href={DOWNLOAD_ZIP}
-            className="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-[#caa055] text-[#08080a] font-cinzel font-extrabold text-lg uppercase tracking-widest hover:bg-[#d4b060] active:scale-95 transition-all shadow-[0_0_40px_rgba(202,160,85,0.25)] hover:shadow-[0_0_60px_rgba(202,160,85,0.4)]"
-          >
-            <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-            Download for Windows
-          </a>
-          <p className="text-white/25 text-xs font-mono">
-            KrajdenGrid-Windows.zip · ~121 MB · No installer required
-          </p>
+        {/* THE ONE DOWNLOAD BUTTON */}
+        <a
+          href={DOWNLOAD_URL}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 12,
+            padding: '18px 40px', borderRadius: 14,
+            background: '#caa055', color: '#08080a',
+            fontFamily: 'Cinzel, serif', fontWeight: 900,
+            fontSize: 15, letterSpacing: '0.12em',
+            textTransform: 'uppercase', textDecoration: 'none',
+            boxShadow: '0 0 50px rgba(202,160,85,0.3)',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = '#d4b060';
+            e.currentTarget.style.boxShadow = '0 0 70px rgba(202,160,85,0.5)';
+            e.currentTarget.style.transform = 'scale(1.02)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = '#caa055';
+            e.currentTarget.style.boxShadow = '0 0 50px rgba(202,160,85,0.3)';
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+        >
+          <Download style={{ width: 20, height: 20 }} />
+          Download for Windows
+        </a>
 
-          {/* Secondary: .bat option */}
-          <div className="mt-2 flex items-center gap-3">
-            <div className="h-px w-16 bg-white/10" />
-            <span className="text-white/25 text-xs uppercase tracking-wider">or</span>
-            <div className="h-px w-16 bg-white/10" />
+        <p style={{
+          marginTop: 16, color: 'rgba(255,255,255,0.2)',
+          fontSize: 12, fontFamily: 'monospace',
+        }}>
+          KrajdenGrid-Windows.zip · ~121 MB · Unzip and run — no installer
+        </p>
+
+        {/* Minimal install steps */}
+        <div style={{
+          marginTop: 56, display: 'flex', flexDirection: 'column', gap: 0,
+          width: '100%', borderTop: '1px solid rgba(255,255,255,0.05)',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+          padding: '32px 0',
+        }}>
+          {[
+            ['1', 'Download', 'Click the button above — the ZIP saves to your Downloads folder'],
+            ['2', 'Unzip', 'Right-click the ZIP → Extract All → choose any folder'],
+            ['3', 'Run', 'Open the folder → double-click KrajdenGrid.exe'],
+          ].map(([num, title, desc]) => (
+            <div key={num} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 20,
+              padding: '16px 0',
+              borderBottom: num !== '3' ? '1px solid rgba(255,255,255,0.04)' : 'none',
+            }}>
+              <span style={{
+                fontFamily: 'Cinzel, serif', fontSize: 24, fontWeight: 900,
+                color: 'rgba(202,160,85,0.15)', lineHeight: 1, minWidth: 32,
+                textAlign: 'right',
+              }}>{num}</span>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'rgba(255,255,255,0.7)', marginBottom: 4 }}>{title}</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', lineHeight: 1.6 }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* FAQ */}
+        <div style={{ marginTop: 48, width: '100%', textAlign: 'left' }}>
+          <div style={{
+            fontSize: 10, fontFamily: 'Cinzel, serif', fontWeight: 700,
+            letterSpacing: '0.2em', textTransform: 'uppercase',
+            color: 'rgba(202,160,85,0.4)', marginBottom: 20, textAlign: 'center',
+          }}>
+            Common Questions
           </div>
-          <a
-            href={DOWNLOAD_BAT}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 text-xs font-mono transition-all"
-          >
-            <WindowsIcon className="w-3.5 h-3.5" />
-            Download Setup.bat (auto-installs, ~4 KB)
-          </a>
-          <p className="text-white/20 text-[10px] font-mono -mt-2">
-            Run as Administrator · Downloads and configures automatically
-          </p>
-        </div>
-      </section>
-
-      {/* Divider */}
-      <div className="max-w-5xl mx-auto px-6">
-        <div className="h-px bg-gradient-to-r from-transparent via-[#caa055]/20 to-transparent" />
-      </div>
-
-      {/* Install steps */}
-      <section className="max-w-5xl mx-auto px-6 py-16 relative z-10">
-        <h2 className="font-cinzel text-sm font-bold uppercase tracking-[0.2em] text-[#caa055]/60 text-center mb-10">
-          Getting Started
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {INSTALL_STEPS.map((step) => (
-            <div key={step.num} className="flex flex-col gap-3 p-5 rounded-xl border border-white/5 bg-white/[0.02] hover:border-[#caa055]/20 transition-colors">
-              <span className="font-cinzel text-3xl font-black text-[#caa055]/20 leading-none">{step.num}</span>
-              <h3 className="font-cinzel text-sm font-bold text-white tracking-wide">{step.title}</h3>
-              <p className="text-white/40 text-xs leading-relaxed">{step.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Divider */}
-      <div className="max-w-5xl mx-auto px-6">
-        <div className="h-px bg-gradient-to-r from-transparent via-[#caa055]/20 to-transparent" />
-      </div>
-
-      {/* Features */}
-      <section className="max-w-5xl mx-auto px-6 py-16 relative z-10">
-        <h2 className="font-cinzel text-sm font-bold uppercase tracking-[0.2em] text-[#caa055]/60 text-center mb-10">
-          What's Inside
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="flex gap-4 p-5 rounded-xl border border-white/5 bg-white/[0.02] hover:border-[#caa055]/15 transition-colors group">
-              <div className="mt-0.5 shrink-0">
-                <f.icon className="w-5 h-5 text-[#caa055]/50 group-hover:text-[#caa055]/80 transition-colors" />
-              </div>
-              <div>
-                <h3 className="font-cinzel text-sm font-bold text-white/80 mb-1">{f.title}</h3>
-                <p className="text-white/35 text-xs leading-relaxed">{f.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Divider */}
-      <div className="max-w-5xl mx-auto px-6">
-        <div className="h-px bg-gradient-to-r from-transparent via-[#caa055]/20 to-transparent" />
-      </div>
-
-      {/* FAQ */}
-      <section className="max-w-3xl mx-auto px-6 py-16 relative z-10">
-        <h2 className="font-cinzel text-sm font-bold uppercase tracking-[0.2em] text-[#caa055]/60 text-center mb-10">
-          Common Questions
-        </h2>
-        <div className="flex flex-col divide-y divide-white/5">
-          {faqs.map((faq, i) => (
-            <div key={i}>
+          {FAQS.map((faq, i) => (
+            <div key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
               <button
                 onClick={() => setFaqOpen(faqOpen === i ? null : i)}
-                className="w-full flex items-center justify-between py-4 text-left group"
+                style={{
+                  width: '100%', display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', padding: '16px 0', background: 'none',
+                  border: 'none', cursor: 'pointer', textAlign: 'left', gap: 12,
+                }}
               >
-                <span className="text-white/70 text-sm font-medium group-hover:text-white transition-colors pr-4">{faq.q}</span>
-                <ChevronDown className={`w-4 h-4 text-[#caa055]/50 shrink-0 transition-transform ${faqOpen === i ? 'rotate-180' : ''}`} />
+                <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, fontWeight: 500 }}>
+                  {faq.q}
+                </span>
+                <ChevronDown style={{
+                  width: 14, height: 14, color: 'rgba(202,160,85,0.4)',
+                  flexShrink: 0, transform: faqOpen === i ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s',
+                }} />
               </button>
               {faqOpen === i && (
-                <p className="text-white/40 text-sm pb-4 leading-relaxed">{faq.a}</p>
+                <p style={{
+                  color: 'rgba(255,255,255,0.35)', fontSize: 13,
+                  lineHeight: 1.7, paddingBottom: 16, margin: 0,
+                }}>
+                  {faq.a}
+                </p>
               )}
             </div>
           ))}
         </div>
-      </section>
-
-      {/* Bottom CTA */}
-      <section className="max-w-5xl mx-auto px-6 pb-20 relative z-10">
-        <div className="rounded-2xl border border-[#caa055]/20 bg-[#caa055]/5 p-10 text-center">
-          <KrajdenCrest className="w-10 h-10 text-[#caa055]/40 mx-auto mb-4" />
-          <h2 className="font-cinzel text-2xl font-bold text-white mb-3">Ready to run the session?</h2>
-          <p className="text-white/40 text-sm mb-8 max-w-md mx-auto">
-            Early access is free. Download, unzip, and your grid is live in under a minute.
-          </p>
-          <a
-            href={DOWNLOAD_ZIP}
-            className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl bg-[#caa055] text-[#08080a] font-cinzel font-extrabold text-sm uppercase tracking-widest hover:bg-[#d4b060] active:scale-95 transition-all"
-          >
-            <Download className="w-4 h-4" />
-            Download Krajden Grid
-          </a>
-        </div>
-      </section>
+      </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 py-8 relative z-10">
-        <div className="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <KrajdenCrest className="w-4 h-4 text-[#caa055]/40" />
-            <span className="text-white/20 text-xs font-cinzel tracking-widest uppercase">Krajden Grid</span>
-          </div>
-          <div className="flex items-center gap-6 text-xs text-white/20">
-            <span>Early Access v1.0</span>
-            <a href="https://github.com/leokraj/Krajden-Grid" target="_blank" rel="noopener noreferrer"
-              className="hover:text-white/50 transition-colors">GitHub</a>
-            <button onClick={() => setIsAdminOpen(true)} className="hover:text-[#caa055]/60 transition-colors">
-              DM Vault (Ctrl+Shift+A)
-            </button>
-          </div>
-        </div>
+      <footer style={{
+        width: '100%', borderTop: '1px solid rgba(255,255,255,0.05)',
+        padding: '24px 32px', display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', position: 'relative', zIndex: 1,
+      }}>
+        <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 11, fontFamily: 'Cinzel, serif', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+          Krajden Grid · Early Access v1.0
+        </span>
+        <button onClick={() => setIsAdminOpen(true)} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'rgba(255,255,255,0.1)', fontSize: 11,
+        }}>
+          DM Vault
+        </button>
       </footer>
 
       {isAdminOpen && <AdminSecretModal isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} />}
