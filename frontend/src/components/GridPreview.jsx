@@ -1,5 +1,6 @@
 import React from 'react';
 import { GridCanvas } from './GridCanvas';
+import { EffectsDrawingOverlay } from './EffectsLayer';
 import { Card } from './ui/card';
 import { ShieldAlert, Cast } from 'lucide-react';
 
@@ -9,6 +10,7 @@ export const GridPreview = ({ interactive = true }) => {
       {/* Aspect-ratio constrained live preview container */}
       <div className="flex-1 relative overflow-hidden bg-[#0d0e10]">
         <GridCanvas interactive={interactive} className="absolute inset-0" />
+        <EffectsDrawingOverlay />
       </div>
 
       {/* Floating preview status footer */}

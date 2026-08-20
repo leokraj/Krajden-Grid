@@ -3,6 +3,7 @@ import { GridProvider, useGrid } from '../context/GridContext';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import SessionContext from '../context/SessionContext';
 import { GridCanvas } from '../components/GridCanvas';
+import { EffectsDrawingOverlay } from '../components/EffectsLayer';
 import { useAuth } from '../context/AuthContext';
 import { CommunityBrowser } from '../components/CommunityBrowser';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
@@ -900,9 +901,13 @@ const RemoteContent = () => {
         {isGuest && hostDimensions ? (
           <div className="absolute inset-0">
             <GridCanvas interactive={true} fullscreen={true} className="absolute inset-0" />
+            <EffectsDrawingOverlay />
           </div>
         ) : (
-          <GridCanvas interactive={true} fullscreen={true} className="absolute inset-0" />
+          <>
+            <GridCanvas interactive={true} fullscreen={true} className="absolute inset-0" />
+            <EffectsDrawingOverlay />
+          </>
         )}
 
         {/* Mode indicator overlay */}

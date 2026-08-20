@@ -659,7 +659,15 @@ export const ClipartLibrary = ({
   const handleDragStart = (e, item) => {
     const normalized = normalizeClipartItem(item);
     setDraggedItem(normalized);
-    e.dataTransfer.setData('application/json', JSON.stringify(normalized));
+    if (typeof window !== 'undefined') {
+      window.__draggedClipartItem = normalized;
+    }
+    try {
+      e.dataTransfer.setData('application/json', JSON.stringify(normalized));
+      e.dataTransfer.setData('text/plain', JSON.stringify(normalized));
+    } catch (err) {
+      console.warn('[ClipartLibrary] dataTransfer error:', err);
+    }
     e.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -1085,6 +1093,7 @@ export const PlacedClipart = ({
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+  const dragOffsetRef = useRef({ dx: 0, dy: 0 });
   const dragStartRef = useRef({ x: 0, y: 0, clipX: 0, clipY: 0 });
   const [localScale, setLocalScale] = useState(clipart.scale || 50);
   const [localRotation, setLocalRotation] = useState(clipart.rotation || 0);
@@ -1121,6 +1130,7 @@ export const PlacedClipart = ({
     e.stopPropagation();
     onSelect?.(e);
     setIsDragging(true);
+    dragOffsetRef.current = { dx: 0, dy: 0 };
     setDragOffset({ dx: 0, dy: 0 });
     dragStartRef.current = { x: e.clientX, y: e.clientY, clipX: clipart.x, clipY: clipart.y };
     if (onDragStartExtra) onDragStartExtra(clipart);
@@ -1130,6 +1140,7 @@ export const PlacedClipart = ({
     if (!isDragging) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
+    dragOffsetRef.current = { dx, dy };
     setDragOffset({ dx, dy });
     if (onDragMoveExtra) onDragMoveExtra(dx, dy);
   }, [isDragging, onDragMoveExtra]);
@@ -1137,15 +1148,19 @@ export const PlacedClipart = ({
   const handleMouseUp = useCallback(() => {
     if (!isDragging) return;
     setIsDragging(false);
-    const newX = dragStartRef.current.clipX + dragOffset.dx;
-    const newY = dragStartRef.current.clipY + dragOffset.dy;
+    const finalDx = dragOffsetRef.current.dx;
+    const finalDy = dragOffsetRef.current.dy;
+    const newX = dragStartRef.current.clipX + finalDx;
+    const newY = dragStartRef.current.clipY + finalDy;
     const pos = snapToGrid ? snapPosition(newX, newY) : { x: newX, y: newY };
-    if (dragOffset.dx !== 0 || dragOffset.dy !== 0) {
+    if (finalDx !== 0 || finalDy !== 0) {
       onUpdate?.({ ...clipart, x: pos.x, y: pos.y });
+      if (onLiveMove) onLiveMove({ x: pos.x, y: pos.y, scale: clipart.scale, rotation: clipart.rotation });
     }
-    if (onDragEndExtra) onDragEndExtra(dragOffset.dx, dragOffset.dy);
+    if (onDragEndExtra) onDragEndExtra(finalDx, finalDy);
+    dragOffsetRef.current = { dx: 0, dy: 0 };
     setDragOffset({ dx: 0, dy: 0 });
-  }, [isDragging, dragOffset, snapToGrid, snapPosition, clipart, onUpdate, onDragEndExtra]);
+  }, [isDragging, snapToGrid, snapPosition, clipart, onUpdate, onLiveMove, onDragEndExtra]);
 
   useEffect(() => {
     if (isDragging) {
@@ -1308,7 +1323,10 @@ export const PlacedClipart = ({
         willChange: isDragging ? 'left, top' : 'auto',
       }}
       onMouseDown={handleMouseDown}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.(e);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

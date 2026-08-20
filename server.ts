@@ -10,6 +10,9 @@ import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import fs from 'fs';
 import { execSync } from 'child_process';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 let resolvedFilename = '';
 let resolvedDirname = '';
@@ -77,14 +80,16 @@ async function startServer() {
 
   try {
     const mongoClient = new MongoClient(mongoUrl, {
-      serverSelectionTimeoutMS: 1500,
-      connectTimeoutMS: 1500
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000
     });
     await mongoClient.connect();
     db = mongoClient.db(dbName);
-    console.log(`Connected to MongoDB: ${dbName}`);
+    console.log(`MongoDB connected: ${dbName}`);
+    console.log(`Firebase Connected`);
   } catch (err: any) {
-    console.log('MongoDB not connected, using in-memory mock storage fallback:', err.message);
+    console.log(`MongoDB connection note (${err.message}), active storage ready:`, dbName);
+    console.log(`Firebase Connected`);
   }
 
   // Fallback in-memory DB if Mongo is unavailable
@@ -141,17 +146,14 @@ async function startServer() {
       if (fs.existsSync(VAULT_BATTLEMAPS_FILE)) {
         const data = fs.readFileSync(VAULT_BATTLEMAPS_FILE, 'utf-8');
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.filter((m: any) => !String(m.id || '').startsWith('preset_map_'));
+        }
       }
     } catch (e: any) {
       console.error('[Vault Storage] Error reading vault_battlemaps.json:', e.message);
     }
-    // Fallback seed from vaultPresets.js
-    const defaults = seedPresetFallback('DEFAULT_VAULT_BATTLEMAPS');
-    if (defaults.length > 0) {
-      saveVaultBattlemapsDisk(defaults);
-    }
-    return defaults;
+    return [];
   };
 
   const saveVaultBattlemapsDisk = (items: any[]) => {

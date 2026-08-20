@@ -1062,46 +1062,74 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     try {
       let count = 0;
+      let errors = 0;
       if (catType === 'gifs') {
         const itemsToSave = cliparts.length > 0 ? cliparts : [];
-        for (const item of itemsToSave) {
+        for (let i = 0; i < itemsToSave.length; i++) {
+          const item = itemsToSave[i];
           const docId = String(item.id || `token_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
-          await saveTokenToFirebase({
-            ...item,
-            id: docId,
-            imageUrl: item.imageUrl || item.url,
-            isVault: true,
-            created_at: item.created_at || new Date().toISOString()
-          });
-          count++;
+          try {
+            await saveTokenToFirebase({
+              ...item,
+              id: docId,
+              imageUrl: item.imageUrl || item.url,
+              isVault: true,
+              created_at: item.created_at || new Date().toISOString()
+            });
+            count++;
+          } catch (e) {
+            console.warn(`[Firebase Token Sync Warning] ${item.name || docId}:`, e.message);
+            errors++;
+          }
+          if ((i + 1) % 5 === 0 || i === itemsToSave.length - 1) {
+            toast.loading(`Syncing tokens (${i + 1}/${itemsToSave.length})...`, { id: toastId });
+          }
         }
-        toast.success(`☁️ Uploaded & synced ${count} Token(s) to Firebase! Saved in /tokens and live in App Library.`, { id: toastId, duration: 5000 });
+        toast.success(`☁️ Uploaded & synced ${count} Token(s) to Firebase! Saved in /tokens and live in App Library.${errors > 0 ? ` (${errors} skipped)` : ''}`, { id: toastId, duration: 5000 });
       } else if (catType === 'maps') {
         const itemsToSave = battlemaps.length > 0 ? battlemaps : [];
-        for (const map of itemsToSave) {
+        for (let i = 0; i < itemsToSave.length; i++) {
+          const map = itemsToSave[i];
           const docId = String(map.id || `map_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
-          await saveBattlemapToFirebase({
-            ...map,
-            id: docId,
-            url: map.url || map.imageUrl,
-            created_at: map.created_at || new Date().toISOString()
-          });
-          count++;
+          try {
+            await saveBattlemapToFirebase({
+              ...map,
+              id: docId,
+              url: map.url || map.imageUrl,
+              created_at: map.created_at || new Date().toISOString()
+            });
+            count++;
+          } catch (e) {
+            console.warn(`[Firebase Battlemap Sync Warning] ${map.name || docId}:`, e.message);
+            errors++;
+          }
+          if ((i + 1) % 5 === 0 || i === itemsToSave.length - 1) {
+            toast.loading(`Syncing battle maps (${i + 1}/${itemsToSave.length})...`, { id: toastId });
+          }
         }
-        toast.success(`☁️ Uploaded & synced ${count} Battle Map(s) to Firebase! Saved in /battlemaps and live in App Library.`, { id: toastId, duration: 5000 });
+        toast.success(`☁️ Uploaded & synced ${count} Battle Map(s) to Firebase! Saved in /battlemaps and live in App Library.${errors > 0 ? ` (${errors} skipped)` : ''}`, { id: toastId, duration: 5000 });
       } else if (catType === 'effects') {
         const itemsToSave = effects.length > 0 ? effects : [];
-        for (const eff of itemsToSave) {
+        for (let i = 0; i < itemsToSave.length; i++) {
+          const eff = itemsToSave[i];
           const docId = String(eff.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
-          await saveEffectToFirebase({
-            ...eff,
-            id: docId,
-            imageUrl: eff.imageUrl || eff.url,
-            created_at: eff.created_at || new Date().toISOString()
-          });
-          count++;
+          try {
+            await saveEffectToFirebase({
+              ...eff,
+              id: docId,
+              imageUrl: eff.imageUrl || eff.url,
+              created_at: eff.created_at || new Date().toISOString()
+            });
+            count++;
+          } catch (e) {
+            console.warn(`[Firebase Effect Sync Warning] ${eff.name || docId}:`, e.message);
+            errors++;
+          }
+          if ((i + 1) % 5 === 0 || i === itemsToSave.length - 1) {
+            toast.loading(`Syncing visual effects (${i + 1}/${itemsToSave.length})...`, { id: toastId });
+          }
         }
-        toast.success(`☁️ Uploaded & synced ${count} Visual Effect(s) to Firebase! Saved in /effects and live in App Library.`, { id: toastId, duration: 5000 });
+        toast.success(`☁️ Uploaded & synced ${count} Visual Effect(s) to Firebase! Saved in /effects and live in App Library.${errors > 0 ? ` (${errors} skipped)` : ''}`, { id: toastId, duration: 5000 });
       }
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
     } catch (err) {

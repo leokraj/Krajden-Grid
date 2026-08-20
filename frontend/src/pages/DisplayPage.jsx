@@ -3,6 +3,7 @@ import { GridProvider, useGrid } from '../context/GridContext';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import SessionContext from '../context/SessionContext';
 import { GridCanvas } from '../components/GridCanvas';
+import { EffectsDrawingOverlay } from '../components/EffectsLayer';
 import { Monitor, Wifi, ArrowRight } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -87,9 +88,13 @@ const DisplayCanvas = () => {
       {isGuest && hostDimensions ? (
         <GuestViewport hostWidth={hostDimensions.width} hostHeight={hostDimensions.height}>
           <GridCanvas interactive={false} fullscreen={true} className="absolute inset-0" />
+          <EffectsDrawingOverlay />
         </GuestViewport>
       ) : (
-        <GridCanvas interactive={false} fullscreen={true} className="absolute inset-0" />
+        <>
+          <GridCanvas interactive={false} fullscreen={true} className="absolute inset-0" />
+          <EffectsDrawingOverlay />
+        </>
       )}
       {/* Session indicator */}
       <div className="fixed top-3 right-3 z-50 bg-[#050609]/80 backdrop-blur-sm border border-border-gold rounded-sm px-3 py-1.5 flex items-center gap-2 opacity-50 hover:opacity-100 transition-all">

@@ -6,7 +6,7 @@ import { PlacedClipart } from './ClipartLibrary';
 import { PlacedBackgroundImage } from './PlacedBackgroundImage';
 import { RadialContextMenu } from './RadialContextMenu';
 
-export const GridCanvas = ({ className = '', interactive = false, fullscreen = false }) => {
+export const GridCanvas = ({ className = '', interactive = true, fullscreen = false }) => {
   const canvasRef = useRef(null);
   const drawingCanvasRef = useRef(null);
   const bgCanvasRef = useRef(null);
@@ -130,6 +130,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
 
   const handleClipartSelect = useCallback((clipart, e) => {
     if (setSelectedBgLayerId) setSelectedBgLayerId(null);
+    if (setSelectedClipartId) setSelectedClipartId(clipart.instanceId);
     const isShift = e && e.shiftKey;
 
     if (isShift) {
@@ -156,7 +157,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         }
       }
     }
-  }, [setSelectedBgLayerId, setSelectedClipartIds, settings.placedCliparts, selectedClipartIds]);
+  }, [setSelectedBgLayerId, setSelectedClipartId, setSelectedClipartIds, settings.placedCliparts, selectedClipartIds]);
 
   const handleGroupDragStart = useCallback((leadClipart) => {
     const allCliparts = settings.placedCliparts || [];
@@ -477,11 +478,27 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
     }
 
     // Handle dropping clipart items from the library
-    const data = e.dataTransfer.getData('application/json');
-    if (!data) return;
+    let rawData = '';
+    try {
+      rawData = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain') || '';
+    } catch (err) {
+      console.warn('[GridCanvas] dataTransfer read warning:', err);
+    }
+
+    let clipart = null;
+    if (rawData) {
+      try {
+        clipart = JSON.parse(rawData);
+      } catch (err) {
+        console.warn('[GridCanvas] JSON parse error on drop:', err);
+      }
+    }
+    if (!clipart && typeof window !== 'undefined' && window.__draggedClipartItem) {
+      clipart = window.__draggedClipartItem;
+    }
+    if (!clipart) return;
     
     try {
-      const clipart = JSON.parse(data);
       const url = clipart.imageUrl || clipart.url || clipart.imageData || clipart.image_data || clipart.src || '';
       const newClipart = {
         ...clipart,
@@ -489,8 +506,8 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
         imageData: clipart.imageData || (url.startsWith('data:') ? url : undefined),
         x: dropX,
         y: dropY,
-        scale: 50,
-        rotation: 0,
+        scale: clipart.scale || 50,
+        rotation: clipart.rotation || 0,
       };
       const instanceId = addPlacedClipart(newClipart);
       
@@ -1914,7 +1931,7 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       >
         {/* Local Placed Cliparts */}
         {settings.placedCliparts?.map((clipart) => {
-          const isSelected = selectedClipartIds.includes(clipart.instanceId);
+          const isSelected = (selectedClipartIds || []).includes(clipart.instanceId) || selectedClipartId === clipart.instanceId;
           const isPartMap = groupDragStartPositionsRef.current && groupDragStartPositionsRef.current[clipart.instanceId];
           const activeGroupOffset = isPartMap ? groupDragOffset : null;
 
@@ -2059,12 +2076,15 @@ export const GridCanvas = ({ className = '', interactive = false, fullscreen = f
       )}
 
       {/* Cursor circle — shows tool tip size */}
-      {cursorPos && interactive && (settings.drawingEnabled || settings.eraserEnabled || (settings.maskEnabled && settings.maskTool === 'brush')) && (() => {
+      {cursorPos && interactive && (settings.drawingEnabled || settings.eraserEnabled || settings.effectsEnabled || (settings.maskEnabled && settings.maskTool === 'brush')) && (() => {
         let size = 0;
         let color = 'rgba(255,255,255,0.6)';
         if (settings.eraserEnabled) {
           size = settings.eraserSize || 20;
           color = 'rgba(255,160,60,0.7)';
+        } else if (settings.effectsEnabled) {
+          size = settings.effectBrushSize || 60;
+          color = 'rgba(202,160,85,0.85)';
         } else if (settings.maskEnabled && settings.maskTool === 'brush') {
           size = settings.maskBrushSize || 30;
           color = 'rgba(180,120,255,0.7)';

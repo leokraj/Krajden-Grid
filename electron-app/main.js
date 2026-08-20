@@ -50,7 +50,7 @@ function startLocalWebServer() {
         return res.end('Forbidden');
       }
 
-      // If an API request reaches the local standalone server, respond with clean JSON rather than index.html
+      // If an API request reaches the local standalone server, respond with real vault data
       if (reqPath.startsWith('/api/')) {
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
@@ -58,12 +58,35 @@ function startLocalWebServer() {
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id'
         });
+
+        const loadLocalJson = (fileName) => {
+          try {
+            // Check userData directory first, fallback to app bundle data directory
+            const userDir = app.getPath ? app.getPath('userData') : path.join(__dirname, 'data');
+            const userFilePath = path.join(userDir, fileName);
+            if (fs.existsSync(userFilePath)) {
+              return JSON.parse(fs.readFileSync(userFilePath, 'utf-8'));
+            }
+            const bundleFilePath = path.join(__dirname, 'data', fileName);
+            if (fs.existsSync(bundleFilePath)) {
+              return JSON.parse(fs.readFileSync(bundleFilePath, 'utf-8'));
+            }
+          } catch (e) {
+            console.error('[Electron] Error reading', fileName, e.message);
+          }
+          return [];
+        };
+
         if (reqPath.includes('battlemap')) {
-          return res.end(JSON.stringify({ battlemaps: [] }));
+          const maps = loadLocalJson('vault_battlemaps.json');
+          const cleanMaps = (Array.isArray(maps) ? maps : []).filter(m => !String(m.id || '').startsWith('preset_map_'));
+          return res.end(JSON.stringify({ battlemaps: cleanMaps }));
         } else if (reqPath.includes('clipart') || reqPath.includes('token')) {
-          return res.end(JSON.stringify({ cliparts: [] }));
+          const cliparts = loadLocalJson('vault_cliparts.json');
+          return res.end(JSON.stringify({ cliparts: Array.isArray(cliparts) ? cliparts : [] }));
         } else if (reqPath.includes('effect')) {
-          return res.end(JSON.stringify({ effects: [] }));
+          const effects = loadLocalJson('vault_effects.json');
+          return res.end(JSON.stringify({ effects: Array.isArray(effects) ? effects : [] }));
         }
         return res.end(JSON.stringify({ success: true }));
       }

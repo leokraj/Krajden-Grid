@@ -148,6 +148,9 @@ export function DownloadPage() {
         {/* THE ONE DOWNLOAD BUTTON */}
         <a
           href={DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          download="KrajdenGrid-Windows.zip"
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 12,
             padding: '18px 40px', borderRadius: 14,

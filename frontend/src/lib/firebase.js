@@ -55,6 +55,80 @@ export async function testConnection() {
   }
 }
 
+/**
+ * Optimizes and compresses base64 images so they never exceed Firestore's 1MB document limit (1,048,576 bytes).
+ * Scales high-resolution battle maps / tokens to max 1920px and compresses to WebP / JPEG (target ~150-400 KB).
+ */
+export async function optimizeBase64ForFirestore(dataUrl, maxDimension = 1920, targetQuality = 0.80) {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  // If already under 450 KB (approx 460,000 chars), no compression needed
+  if (dataUrl.length < 450 * 1024) {
+    return dataUrl;
+  }
+
+  // If it is SVG, no need to rasterize
+  if (dataUrl.startsWith('data:image/svg')) {
+    return dataUrl;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+
+          // Scale down if larger than maxDimension
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d', { alpha: true });
+          if (!ctx) return resolve(dataUrl);
+
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Try WebP first
+          let compressed = canvas.toDataURL('image/webp', targetQuality);
+          // If not supported or still > 600KB, try JPEG with 0.75
+          if (!compressed || compressed.startsWith('data:image/png') || compressed.length > 600 * 1024) {
+            const jpeg = canvas.toDataURL('image/jpeg', 0.75);
+            if (jpeg && jpeg.length < (compressed ? compressed.length : dataUrl.length)) {
+              compressed = jpeg;
+            }
+          }
+
+          if (compressed && compressed.length < dataUrl.length) {
+            resolve(compressed);
+          } else {
+            resolve(dataUrl);
+          }
+        } catch (canvasErr) {
+          console.warn('[Firebase Optimizer] Canvas compression note:', canvasErr);
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    } catch (e) {
+      resolve(dataUrl);
+    }
+  });
+}
+
 // ── TOKENS & CLIPARTS ─────────────────────────────────────────────────────────
 
 export function subscribeTokens(onUpdate) {
@@ -84,12 +158,36 @@ export async function saveTokenToFirebase(token) {
   if (!db || !token) return;
   const docId = String(token.id || `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'tokens', docId);
+
+  // Compress image if it is an oversized data URL
+  let imageUrl = token.imageUrl || token.url || '';
+  if (imageUrl.startsWith('data:image/')) {
+    imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.82);
+  }
+
   const data = {
     ...token,
     id: docId,
+    imageUrl: imageUrl,
+    url: imageUrl,
+    name: token.name || 'Unnamed Token',
     updated_at: new Date().toISOString()
   };
-  await setDoc(docRef, data, { merge: true });
+
+  try {
+    await setDoc(docRef, data, { merge: true });
+  } catch (err) {
+    // If still oversized (e.g. huge animated GIF > 1MB), aggressively scale down
+    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
+      console.warn('[Firebase] Token oversized, applying aggressive compression...');
+      const fallbackUrl = await optimizeBase64ForFirestore(imageUrl, 512, 0.65);
+      data.imageUrl = fallbackUrl;
+      data.url = fallbackUrl;
+      await setDoc(docRef, data, { merge: true });
+    } else {
+      throw err;
+    }
+  }
   return data;
 }
 
@@ -123,7 +221,9 @@ export function subscribeBattlemaps(onUpdate) {
   if (!db) return () => {};
   const colRef = collection(db, 'battlemaps');
   return onSnapshot(colRef, (snapshot) => {
-    const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+    const items = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }))
+      .filter(m => !String(m.id || '').startsWith('preset_map_'));
     onUpdate(items);
   }, (err) => {
     console.warn('[Firebase] Battlemaps subscription fallback/offline:', err.message);
@@ -135,7 +235,9 @@ export async function fetchBattlemapsFromFirebase() {
   try {
     const colRef = collection(db, 'battlemaps');
     const snap = await getDocs(colRef);
-    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+    return snap.docs
+      .map(d => ({ ...d.data(), id: d.id }))
+      .filter(m => !String(m.id || '').startsWith('preset_map_'));
   } catch (e) {
     console.warn('[Firebase] fetchBattlemaps error:', e.message);
     return [];
@@ -146,12 +248,34 @@ export async function saveBattlemapToFirebase(mapItem) {
   if (!db || !mapItem) return;
   const docId = String(mapItem.id || `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'battlemaps', docId);
+
+  // Compress battle map if it is an oversized data URL
+  let mapUrl = mapItem.url || mapItem.imageUrl || '';
+  if (mapUrl.startsWith('data:image/')) {
+    mapUrl = await optimizeBase64ForFirestore(mapUrl, 1920, 0.78);
+  }
+
   const data = {
     ...mapItem,
     id: docId,
+    url: mapUrl,
+    name: mapItem.name || 'Battle Map',
     updated_at: new Date().toISOString()
   };
-  await setDoc(docRef, data, { merge: true });
+
+  try {
+    await setDoc(docRef, data, { merge: true });
+  } catch (err) {
+    // If still oversized (e.g. 4MB+ raw bitmap), apply aggressive downscaling
+    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
+      console.warn('[Firebase] Battlemap oversized, applying secondary compression...');
+      const fallbackUrl = await optimizeBase64ForFirestore(mapUrl, 1280, 0.65);
+      data.url = fallbackUrl;
+      await setDoc(docRef, data, { merge: true });
+    } else {
+      throw err;
+    }
+  }
   return data;
 }
 
@@ -208,12 +332,35 @@ export async function saveEffectToFirebase(effectItem) {
   if (!db || !effectItem) return;
   const docId = String(effectItem.id || `effect_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'effects', docId);
+
+  // Compress effect image if it is an oversized data URL
+  let imageUrl = effectItem.imageUrl || effectItem.url || '';
+  if (imageUrl.startsWith('data:image/')) {
+    imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.80);
+  }
+
   const data = {
     ...effectItem,
     id: docId,
+    imageUrl: imageUrl,
+    url: imageUrl,
+    name: effectItem.name || 'Visual Effect',
     updated_at: new Date().toISOString()
   };
-  await setDoc(docRef, data, { merge: true });
+
+  try {
+    await setDoc(docRef, data, { merge: true });
+  } catch (err) {
+    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
+      console.warn('[Firebase] Effect oversized, applying secondary compression...');
+      const fallbackUrl = await optimizeBase64ForFirestore(imageUrl, 512, 0.65);
+      data.imageUrl = fallbackUrl;
+      data.url = fallbackUrl;
+      await setDoc(docRef, data, { merge: true });
+    } else {
+      throw err;
+    }
+  }
   return data;
 }
 

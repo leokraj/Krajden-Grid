@@ -137,11 +137,20 @@ const defaultSettings = {
   pingMode: false,
   pingColor: '#FFD700',
   pingLabel: '',
-  // Effects drawing tool
+  // Effects Reverse-Mask Painting tool
   effectsEnabled: false,
   effectPaths: [],
   activeEffectId: null,
   activeEffectUrl: null,
+  effectTool: 'brush', // 'brush' | 'marquee' | 'bezier' | 'eraser'
+  effectBrushSize: 60,
+  effectTile: true,
+  effectTileScale: 100,
+  effectOpacity: 0.9,
+  effectSpeed: 1,
+  effectBlendMode: 'normal', // 'normal' | 'screen' | 'lighter' | 'overlay'
+  effectInvert: false,
+  effectFeather: 4,
   // Fog of war shape tools (rect + circle in addition to freehand brush)
   maskShapeTool: null,
   maskShapeRadius: 80,
@@ -753,6 +762,17 @@ export const GridProvider = ({ children }) => {
       ...prev,
       effectPaths: (prev.effectPaths || []).filter((e) => e.id !== id),
     }));
+  }, []);
+
+  const undoLastEffectPath = useCallback(() => {
+    setSettings((prev) => {
+      const paths = prev.effectPaths || [];
+      if (paths.length === 0) return prev;
+      return {
+        ...prev,
+        effectPaths: paths.slice(0, paths.length - 1),
+      };
+    });
   }, []);
 
   const clearEffectPaths = useCallback(() => {
@@ -1507,6 +1527,7 @@ export const GridProvider = ({ children }) => {
     addEffectPath,
     updateEffectPath,
     removeEffectPath,
+    undoLastEffectPath,
     clearEffectPaths,
     clearAllCliparts,
     selectedClipartId,
