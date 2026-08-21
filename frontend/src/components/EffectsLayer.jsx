@@ -376,23 +376,17 @@ export function EffectsDrawingOverlay({ canvasSize }) {
       const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
 
-      // Group paths by effectUrl to minimize texture switches
+      // Build the full list of paths to render (committed + live preview)
       const pathsToRender = [...effectPaths];
 
-      // Add active live drawing stroke / marquee to render list if drawing
       if (isDrawing && activeEffectUrl) {
-        if (effectTool === 'brush' && currentStroke.length > 0) {
+        if ((effectTool === 'brush' || effectTool === 'bezier') && currentStroke.length > 0) {
           pathsToRender.push({
-            id: 'live_stroke',
-            type: 'brush',
-            points: currentStroke,
-            effectUrl: activeEffectUrl,
-            width: effectBrushSize,
-            opacity: effectOpacity,
-            tile: effectTile,
-            tileScale: effectTileScale,
-            blendMode: effectBlendMode,
-            isLive: true
+            id: 'live_stroke', type: effectTool,
+            points: currentStroke, effectUrl: activeEffectUrl,
+            width: effectBrushSize, opacity: effectOpacity,
+            tile: effectTile, tileScale: effectTileScale,
+            blendMode: effectBlendMode, isLive: true,
           });
         } else if (effectTool === 'marquee' && marqueeStart && marqueeCurrent) {
           const x = Math.min(marqueeStart.x, marqueeCurrent.x);
@@ -400,185 +394,174 @@ export function EffectsDrawingOverlay({ canvasSize }) {
           const w = Math.abs(marqueeCurrent.x - marqueeStart.x);
           const h = Math.abs(marqueeCurrent.y - marqueeStart.y);
           pathsToRender.push({
-            id: 'live_marquee',
-            type: 'marquee',
+            id: 'live_marquee', type: 'marquee',
             rect: { x, y, width: w, height: h },
             effectUrl: activeEffectUrl,
-            opacity: effectOpacity,
-            tile: effectTile,
-            tileScale: effectTileScale,
-            blendMode: effectBlendMode,
-            isLive: true
-          });
-        } else if (effectTool === 'bezier' && currentStroke.length > 1) {
-          pathsToRender.push({
-            id: 'live_bezier',
-            type: 'bezier',
-            points: currentStroke,
-            effectUrl: activeEffectUrl,
-            width: effectBrushSize,
-            opacity: effectOpacity,
-            tile: effectTile,
-            tileScale: effectTileScale,
-            blendMode: effectBlendMode,
-            isLive: true
+            opacity: effectOpacity, tile: effectTile,
+            tileScale: effectTileScale, blendMode: effectBlendMode, isLive: true,
           });
         }
       }
 
-      // Render each effect mask layer
       pathsToRender.forEach((effect) => {
         const {
-          type = 'brush',
-          points = [],
-          rect,
-          effectUrl,
-          width: strokeWidth = 60,
-          opacity = 0.9,
-          tile = true,
-          tileScale = 100,
-          blendMode = 'normal',
-          isLive = false
+          type = 'brush', points = [], rect,
+          effectUrl, width: strokeWidth = 60,
+          opacity = 0.9, tile = true, tileScale = 100,
+          blendMode = 'normal', isLive = false,
         } = effect;
 
         if (!effectUrl) return;
         const media = mediaElementsRef.current.get(effectUrl);
+        if (!media) return;
 
+        // Check media is ready to draw
+        const isVideo = media instanceof HTMLVideoElement;
+        const isImage = media instanceof HTMLImageElement;
+        const ready = isVideo
+          ? media.readyState >= 2 && media.videoWidth > 0
+          : isImage && media.complete && media.naturalWidth > 0;
+
+        if (!ready) {
+          // Draw a gold placeholder glow while loading
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.strokeStyle = '#caa055';
+          ctx.lineWidth = strokeWidth;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          if (points.length >= 2) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+            ctx.stroke();
+          }
+          ctx.restore();
+          return;
+        }
+
+        // ── OFFSCREEN MASK TECHNIQUE ──────────────────────────────────────────
+        // Step 1: Draw the shape (stroke or rect) in white on an offscreen canvas
+        // Step 2: Tile/draw the video onto a second offscreen canvas
+        // Step 3: Use destination-in to clip the video to the shape
+        // Step 4: Composite the result onto the main canvas
+        // This is the only reliable way to clip thick strokes with video textures.
+
+        const offMask = document.createElement('canvas');
+        offMask.width = width;
+        offMask.height = height;
+        const mCtx = offMask.getContext('2d');
+
+        // Draw the mask shape in white
+        mCtx.fillStyle = '#fff';
+        mCtx.strokeStyle = '#fff';
+        mCtx.lineCap = 'round';
+        mCtx.lineJoin = 'round';
+        mCtx.lineWidth = strokeWidth;
+
+        if (type === 'marquee' && rect) {
+          mCtx.fillRect(rect.x, rect.y, rect.width, rect.height);
+        } else if (points.length === 1) {
+          mCtx.beginPath();
+          mCtx.arc(points[0].x, points[0].y, strokeWidth / 2, 0, Math.PI * 2);
+          mCtx.fill();
+        } else if (points.length >= 2) {
+          mCtx.beginPath();
+          mCtx.moveTo(points[0].x, points[0].y);
+          if (type === 'bezier' && points.length >= 3) {
+            // Smooth bezier through all points
+            for (let i = 1; i < points.length - 1; i++) {
+              const cpx = (points[i].x + points[i + 1].x) / 2;
+              const cpy = (points[i].y + points[i + 1].y) / 2;
+              mCtx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
+            }
+            mCtx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+          } else {
+            for (let i = 1; i < points.length; i++) {
+              mCtx.lineTo(points[i].x, points[i].y);
+            }
+          }
+          mCtx.stroke();
+        }
+
+        // Draw the video/image texture onto the mask canvas using destination-in
+        // This clips the texture to exactly the white shape we drew above
+        const mediaW = isVideo ? media.videoWidth : media.naturalWidth;
+        const mediaH = isVideo ? media.videoHeight : media.naturalHeight;
+        const scale = Math.max(0.1, (tileScale || 100) / 100);
+        const tileW = Math.max(1, Math.round(mediaW * scale));
+        const tileH = Math.max(1, Math.round(mediaH * scale));
+
+        mCtx.globalCompositeOperation = 'source-in';
+
+        if (tile) {
+          // Tile the video across the entire canvas then clip
+          try {
+            const pat = mCtx.createPattern(media, 'repeat');
+            if (pat) {
+              const m = new DOMMatrix();
+              m.a = scale; m.d = scale;
+              pat.setTransform(m);
+              mCtx.fillStyle = pat;
+              mCtx.fillRect(0, 0, width, height);
+            }
+          } catch (e) {
+            // Fallback: manual tiling
+            for (let tx = 0; tx < width; tx += tileW) {
+              for (let ty = 0; ty < height; ty += tileH) {
+                try { mCtx.drawImage(media, tx, ty, tileW, tileH); } catch (_) {}
+              }
+            }
+          }
+        } else {
+          // Stretch the video across the bounding box of the stroke
+          if (type === 'marquee' && rect) {
+            try { mCtx.drawImage(media, rect.x, rect.y, rect.width, rect.height); } catch (_) {}
+          } else if (points.length > 0) {
+            const xs = points.map(p => p.x);
+            const ys = points.map(p => p.y);
+            const bx = Math.min(...xs) - strokeWidth / 2;
+            const by = Math.min(...ys) - strokeWidth / 2;
+            const bw = Math.max(...xs) - Math.min(...xs) + strokeWidth;
+            const bh = Math.max(...ys) - Math.min(...ys) + strokeWidth;
+            try { mCtx.drawImage(media, bx, by, bw, bh); } catch (_) {}
+          }
+        }
+
+        // Composite the masked result onto the main canvas
         ctx.save();
-        ctx.globalAlpha = Math.max(0.05, Math.min(1, opacity));
-        
-        // Map blend modes to canvas globalCompositeOperation
+        ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
         if (blendMode === 'screen') ctx.globalCompositeOperation = 'screen';
         else if (blendMode === 'lighter') ctx.globalCompositeOperation = 'lighter';
         else if (blendMode === 'overlay') ctx.globalCompositeOperation = 'overlay';
         else ctx.globalCompositeOperation = 'source-over';
 
-        // 1. Create the Reverse Mask Clipping Region
-        ctx.beginPath();
-        if (type === 'marquee' && rect) {
-          ctx.rect(rect.x, rect.y, rect.width, rect.height);
-        } else if (points.length === 1) {
-          ctx.arc(points[0].x, points[0].y, strokeWidth / 2, 0, Math.PI * 2);
-        } else if (points.length > 1) {
-          // Draw smooth continuous stroke path
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length - 1; i++) {
-            const cpx = (points[i].x + points[i + 1].x) / 2;
-            const cpy = (points[i].y + points[i + 1].y) / 2;
-            ctx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
-          }
-          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-          ctx.lineWidth = strokeWidth;
+        ctx.drawImage(offMask, 0, 0);
+
+        // Live drawing: dashed border outline
+        if (isLive) {
+          ctx.globalAlpha = 0.7;
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = '#caa055';
+          ctx.lineWidth = 2;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-        }
-
-        // Apply clipping boundary
-        if (type === 'marquee' || points.length === 1) {
-          ctx.clip();
-        } else if (points.length > 1) {
-          // In 2D canvas, to clip a thick stroke:
-          // We can use ctx.stroke() with a pattern, or clip using stroke path
-          // Let's create pattern fill for optimal performance!
-        }
-
-        // 2. Draw Animated Video / Repeating Tile inside the Mask
-        if (media) {
-          let mediaWidth = 300;
-          let mediaHeight = 300;
-          let isMediaReady = false;
-
-          if (media instanceof HTMLVideoElement) {
-            if (media.readyState >= 2) {
-              mediaWidth = media.videoWidth || 300;
-              mediaHeight = media.videoHeight || 300;
-              isMediaReady = true;
-            }
-          } else if (media instanceof HTMLImageElement) {
-            if (media.complete && media.naturalWidth > 0) {
-              mediaWidth = media.naturalWidth;
-              mediaHeight = media.naturalHeight;
-              isMediaReady = true;
-            }
-          }
-
-          if (isMediaReady) {
-            const scale = (tileScale || 100) / 100;
-            const patW = Math.max(16, Math.floor(mediaWidth * scale));
-            const patH = Math.max(16, Math.floor(mediaHeight * scale));
-
-            if (tile) {
-              // Seamless Repeating Video / Image Pattern Tiling
-              try {
-                const pattern = ctx.createPattern(media, 'repeat');
-                if (pattern) {
-                  if (type === 'marquee' || points.length === 1) {
-                    ctx.fillStyle = pattern;
-                    ctx.fillRect(0, 0, width, height);
-                  } else {
-                    ctx.strokeStyle = pattern;
-                    ctx.lineWidth = strokeWidth;
-                    ctx.lineCap = 'round';
-                    ctx.lineJoin = 'round';
-                    ctx.stroke();
-                  }
-                }
-              } catch (patternErr) {
-                // Fallback direct draw
-                if (type === 'marquee' && rect) {
-                  ctx.drawImage(media, rect.x, rect.y, rect.width, rect.height);
-                }
-              }
-            } else {
-              // Stretch video across the mask boundary
-              if (type === 'marquee' && rect) {
-                ctx.drawImage(media, rect.x, rect.y, rect.width, rect.height);
-              } else if (points.length > 0) {
-                const xs = points.map(p => p.x);
-                const ys = points.map(p => p.y);
-                const minX = Math.min(...xs) - strokeWidth / 2;
-                const minY = Math.min(...ys) - strokeWidth / 2;
-                const bW = Math.max(...xs) - minX + strokeWidth;
-                const bH = Math.max(...ys) - minY + strokeWidth;
-                
-                try {
-                  const pattern = ctx.createPattern(media, 'no-repeat');
-                  ctx.strokeStyle = pattern || '#caa055';
-                  ctx.lineWidth = strokeWidth;
-                  ctx.lineCap = 'round';
-                  ctx.lineJoin = 'round';
-                  ctx.stroke();
-                } catch (e) {
-                  ctx.strokeStyle = '#caa055';
-                  ctx.stroke();
-                }
-              }
-            }
-          } else {
-            // Media loading glow placeholder
-            ctx.strokeStyle = '#caa055';
-            ctx.fillStyle = '#caa055';
-            if (type === 'marquee' && rect) {
-              ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-            } else {
-              ctx.lineWidth = strokeWidth;
-              ctx.stroke();
-            }
-          }
-        }
-
-        // Live drawing dashed selection outline
-        if (isLive) {
-          ctx.strokeStyle = 'rgba(202, 160, 85, 0.75)';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([8, 6]);
+          ctx.setLineDash([6, 5]);
           if (type === 'marquee' && rect) {
             ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+          } else if (points.length >= 2) {
+            ctx.lineWidth = strokeWidth + 4;
+            ctx.globalAlpha = 0.25;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+            ctx.stroke();
           }
+          ctx.setLineDash([]);
         }
 
         ctx.restore();
-      });
+      }); // end pathsToRender.forEach
 
       rafRef.current = requestAnimationFrame(render);
     };
