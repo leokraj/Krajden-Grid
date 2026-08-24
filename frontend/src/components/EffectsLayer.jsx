@@ -549,12 +549,35 @@ function getLocalUserName() {
  * EffectsDrawingOverlay
  * Renders dynamic reverse masks revealing underlying animated video or repeating textures.
  */
-export function EffectsDrawingOverlay({ canvasSize }) {
+export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const {
     settings,
     updateSettings,
     addEffectPath,
   } = useGrid();
+
+  // ── Self-measured canvas size ─────────────────────────────────────────────
+  const containerRef = useRef(null);
+  const [measuredSize, setMeasuredSize] = useState({ width: 1920, height: 1080 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) setMeasuredSize({ width, height });
+      }
+    });
+    ro.observe(el);
+    // Initial measure
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0) setMeasuredSize({ width: rect.width, height: rect.height });
+    return () => ro.disconnect();
+  }, []);
+
+  // Use prop if provided, otherwise use measured size
+  const canvasSize = canvasSizeProp || measuredSize;
 
   // ── State ────────────────────────────────────────────────────────────────
   const [isDrawing, setIsDrawing]         = useState(false);
@@ -944,6 +967,7 @@ export function EffectsDrawingOverlay({ canvasSize }) {
 
   return (
     <div
+      ref={containerRef}
       className="absolute inset-0"
       style={{ zIndex: 15, pointerEvents: effectsEnabled ? 'all' : 'none' }}
     >
