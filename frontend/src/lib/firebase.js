@@ -159,10 +159,17 @@ export async function saveTokenToFirebase(token) {
   const docId = String(token.id || `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'tokens', docId);
 
-  // Compress image if it is an oversized data URL
   let imageUrl = token.imageUrl || token.url || '';
-  if (imageUrl.startsWith('data:image/')) {
+  const isVideo = imageUrl.startsWith('data:video/');
+  const isGif = imageUrl.startsWith('data:image/gif');
+  if (!isVideo && !isGif && imageUrl.startsWith('data:image/')) {
     imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.82);
+  }
+
+  // Size check
+  const approxSizeBytes = new Blob([imageUrl]).size;
+  if (approxSizeBytes > 900_000) {
+    throw new Error(`Token file too large (${(approxSizeBytes/1024/1024).toFixed(1)}MB). Max ~900KB. Use a smaller image.`);
   }
 
   const data = {
@@ -174,20 +181,7 @@ export async function saveTokenToFirebase(token) {
     updated_at: new Date().toISOString()
   };
 
-  try {
-    await setDoc(docRef, data, { merge: true });
-  } catch (err) {
-    // If still oversized (e.g. huge animated GIF > 1MB), aggressively scale down
-    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
-      console.warn('[Firebase] Token oversized, applying aggressive compression...');
-      const fallbackUrl = await optimizeBase64ForFirestore(imageUrl, 512, 0.65);
-      data.imageUrl = fallbackUrl;
-      data.url = fallbackUrl;
-      await setDoc(docRef, data, { merge: true });
-    } else {
-      throw err;
-    }
-  }
+  await setDoc(docRef, data, { merge: true });
   return data;
 }
 
@@ -333,10 +327,19 @@ export async function saveEffectToFirebase(effectItem) {
   const docId = String(effectItem.id || `effect_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'effects', docId);
 
-  // Compress effect image if it is an oversized data URL
   let imageUrl = effectItem.imageUrl || effectItem.url || '';
-  if (imageUrl.startsWith('data:image/')) {
+
+  // Only compress static images — never try to compress video or GIF data URLs
+  const isVideo = imageUrl.startsWith('data:video/');
+  const isGif = imageUrl.startsWith('data:image/gif');
+  if (!isVideo && !isGif && imageUrl.startsWith('data:image/')) {
     imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.80);
+  }
+
+  // Check size before attempting write — Firestore limit ~1MB
+  const approxSizeBytes = new Blob([imageUrl]).size;
+  if (approxSizeBytes > 900_000) {
+    throw new Error(`File too large for Firestore (${(approxSizeBytes/1024/1024).toFixed(1)}MB). Max ~900KB.`);
   }
 
   const data = {
@@ -348,19 +351,7 @@ export async function saveEffectToFirebase(effectItem) {
     updated_at: new Date().toISOString()
   };
 
-  try {
-    await setDoc(docRef, data, { merge: true });
-  } catch (err) {
-    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
-      console.warn('[Firebase] Effect oversized, applying secondary compression...');
-      const fallbackUrl = await optimizeBase64ForFirestore(imageUrl, 512, 0.65);
-      data.imageUrl = fallbackUrl;
-      data.url = fallbackUrl;
-      await setDoc(docRef, data, { merge: true });
-    } else {
-      throw err;
-    }
-  }
+  await setDoc(docRef, data, { merge: true });
   return data;
 }
 
