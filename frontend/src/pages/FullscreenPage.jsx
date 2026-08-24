@@ -273,7 +273,9 @@ export function FullscreenContent() {
       />
 
       {/* Effects drawing layer — video/GIF effects along drawn paths */}
-      <EffectsDrawingOverlay />
+      <EffectsDrawingOverlay
+        canvasSize={{ width: window.screen.width || 1920, height: window.screen.height || 1080 }}
+      />
 
       {/* Floating UI Overlays */}
       {showControls && (
