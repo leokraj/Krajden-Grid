@@ -32,231 +32,490 @@ import {
 
 // ── Built-in High Performance Animated Shader/SVG Vector Presets ─────────────
 
+// ── Effect Categories ─────────────────────────────────────────────────────
+// FLOW effects follow a drawn path (rivers, streams, lava flows)
+// AREA effects fill a painted region (fire, fog, poison, splatter)
+export const FLOW_EFFECTS = new Set([
+  'river', 'lava_river', 'mud_river', 'blood_stream', 'acid_stream', 'water_stream',
+  'shader_lava_river', 'shader_mud_river',
+]);
+export const AREA_EFFECTS = new Set([
+  'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke',
+  'blood_splatter', 'acid_splatter', 'arcane',
+  'shader_fire', 'shader_ice', 'shader_lightning', 'shader_poison',
+  'shader_fog', 'shader_firefly', 'shader_wind', 'shader_smoke',
+  'shader_blood_splatter', 'shader_acid_splatter', 'shader_arcane',
+]);
+
+export function getEffectMode(effect) {
+  if (!effect) return 'area';
+  const id = effect.id || '';
+  const cat = (effect.category || '').toLowerCase();
+  if (FLOW_EFFECTS.has(id) || cat === 'flow' || cat === 'river' || cat === 'stream') return 'flow';
+  return 'area';
+}
+
+// ── WebGL Shader System ────────────────────────────────────────────────────
+const SHADER_VERT = `
+  attribute vec2 a_pos;
+  varying vec2 v_uv;
+  void main() { v_uv = (a_pos + 1.0) * 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
+`;
+
+// Each shader is distinct — different palettes, timing, and visual character
+const SHADER_FRAGS = {
+
+  // FIRE — chaotic high-frequency domain warp, ember-like sparks, orange-white core
+  fire: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.6;for(int i=0;i<6;i++){v+=a*n(p);p*=2.3;a*=0.45;}return v;}
+    float warp(vec2 p,float t){
+      vec2 q=vec2(fbm(p+vec2(0,t*3.1)),fbm(p+vec2(5.2,1.3)+vec2(t*1.1,0)));
+      vec2 r=vec2(fbm(p+4.*q+vec2(1.7,9.2)-vec2(0,t*3.0)),fbm(p+4.*q+vec2(8.3,2.8)-vec2(0,t*5.5)));
+      return fbm(p+4.*r);
+    }
+    void main(){
+      vec2 p=v_uv*u_res/180.;
+      float w=warp(p,u_time);
+      // Sparks: fast small noise
+      float spark=n(v_uv*22.+vec2(u_time*8.,-u_time*12.))*0.18;
+      w+=spark;
+      float i=smoothstep(0.52,1.0,w);
+      // Hot white core, deep crimson edges
+      vec3 c=i<0.2?mix(vec3(0.35,0.0,0.0),vec3(1.0,0.2,0.0),i*5.)
+              :i<0.5?mix(vec3(1.0,0.2,0.0),vec3(1.0,0.6,0.05),(i-0.2)/0.3)
+              :i<0.8?mix(vec3(1.0,0.6,0.05),vec3(1.0,0.95,0.4),(i-0.5)/0.3)
+              :mix(vec3(1.0,0.95,0.4),vec3(1.0,1.0,0.95),(i-0.8)/0.2);
+      float a=step(0.52,w);
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // ICE — crystalline facet pattern + slow warp, deep navy to bright cyan-white
+  ice: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<5;i++){v+=a*n(p);p*=2.1;a*=0.5;}return v;}
+    // Voronoi for crystal facets
+    float voronoi(vec2 p){
+      vec2 g=floor(p);float m=9.;
+      for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){
+        vec2 c=g+vec2(i,j);vec2 jt=vec2(h(c),h(c+33.1));
+        m=min(m,length(p-c-jt));
+      }return m;
+    }
+    void main(){
+      vec2 p=v_uv*u_res/200.;float t=u_time*0.18;
+      vec2 q=vec2(fbm(p+vec2(0,t*0.5)),fbm(p+vec2(3.1,0)+vec2(t*0.4,0)));
+      float base=fbm(p+2.*q-vec2(0,t));
+      float crystal=voronoi(v_uv*12.+vec2(t*0.3,0));
+      float n=base*0.7+crystal*0.3;
+      float shimmer=n(v_uv*20.+vec2(t*2.,0))*0.06;
+      float i=smoothstep(0.28,0.85,n+shimmer);
+      vec3 c=i<0.35?mix(vec3(0.02,0.05,0.22),vec3(0.1,0.4,0.8),i/0.35)
+              :i<0.7?mix(vec3(0.1,0.4,0.8),vec3(0.5,0.85,1.0),(i-0.35)/0.35)
+              :mix(vec3(0.5,0.85,1.0),vec3(0.92,0.97,1.0),(i-0.7)/0.3);
+      float a=step(0.28,n);
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // POISON — acid yellow-green bubbles rising through murky fluid
+  poison: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.1;a*=0.5;}return v;}
+    float bubble(vec2 uv,vec2 c,float r){return smoothstep(r,r*0.7,length(uv-c));}
+    void main(){
+      vec2 p=v_uv*u_res/200.;float t=u_time*0.9;
+      // Murky fluid base
+      float base=fbm(p*2.+vec2(t*0.3,-t*0.2));
+      float swirl=fbm(p*3.+vec2(-t*0.5,t*0.4))*0.5;
+      float fluid=base*0.6+swirl*0.4;
+      // Rising bubbles
+      float bubb=0.;
+      for(float bi=0.;bi<8.;bi++){
+        float bx=h(vec2(bi,0.))*0.8+0.1;
+        float by=mod(h(vec2(bi,1.))+t*mix(0.12,0.28,h(vec2(bi,2.))),1.0);
+        float br=0.03+h(vec2(bi,3.))*0.04;
+        bubb+=bubble(v_uv,vec2(bx,by),br)*0.6;
+      }
+      float total=clamp(fluid+bubb,0.,1.);
+      float i=smoothstep(0.25,0.75,total);
+      // Yellow-green acid palette
+      vec3 c=i<0.3?mix(vec3(0.03,0.12,0.02),vec3(0.3,0.65,0.05),i/0.3)
+              :i<0.7?mix(vec3(0.3,0.65,0.05),vec3(0.7,0.95,0.1),(i-0.3)/0.4)
+              :mix(vec3(0.7,0.95,0.1),vec3(0.95,1.0,0.5),(i-0.7)/0.3);
+      float a=smoothstep(0.22,0.45,total);
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // LIGHTNING — branching bolts, purple-white with afterglow
+  lightning: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h1(float n){return fract(sin(n)*93758.5453);}
+    float h2(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float seg(vec2 p,vec2 a,vec2 b){vec2 pa=p-a,ba=b-a;float t=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*t);}
+    float bolt(vec2 uv,float id,float phase){
+      vec2 o=vec2(h1(id*1.7),h1(id*2.3));
+      float ang=h1(id*3.9)*6.2831;float lf=0.08+h1(id*4.1)*0.45;
+      float md=1.;vec2 cur=o;
+      // Main bolt
+      for(int i=0;i<12;i++){
+        float sp=float(i+1)/12.;
+        float dev=(h1(id*11.+float(i))-0.5)*2.8;
+        float sl=lf/12.*(0.6+h1(id*22.+float(i))*0.8);
+        vec2 dir=normalize(vec2(cos(ang+dev),sin(ang+dev)));
+        dir.x*=max(u_res.x,u_res.y)/max(u_res.x,1.);
+        dir.y*=max(u_res.x,u_res.y)/max(u_res.y,1.);
+        vec2 nxt=cur+dir*sl;
+        if(sp<=phase){md=min(md,seg(uv,cur,nxt));}
+        // Branch every 3 segments
+        if(mod(float(i),3.)==0. && sp<=phase*0.7){
+          vec2 bc=mix(cur,nxt,0.5);
+          float bang=ang+1.2*(h1(id*33.+float(i))-0.5);
+          vec2 bend=bc+vec2(cos(bang),sin(bang))*sl*0.5;
+          md=min(md,seg(uv,bc,bend));
+        }
+        cur=nxt;
+      }
+      return md;
+    }
+    void main(){
+      float t=u_time;vec3 col=vec3(0.);float alpha=0.;
+      for(int b=0;b<10;b++){
+        float id=float(b)*13.17;
+        float cycle=2.5+h1(id+5.)*2.5;
+        float phase=mod(t*0.8+h1(id+7.)*cycle,cycle)/cycle;
+        if(phase>0.85) continue;
+        float grow=min(phase*3.,1.);
+        float fade=1.-smoothstep(0.5,0.85,phase);
+        float d=bolt(v_uv,id,grow);
+        float glow=exp(-d*80.)*0.7*fade;
+        float core=exp(-d*300.)*fade;
+        // Purple-white palette (distinct from original blue-white)
+        vec3 c=mix(vec3(0.6,0.3,1.0),vec3(1.0,0.95,1.0),core);
+        col+=c*glow;alpha=max(alpha,glow);
+      }
+      gl_FragColor=vec4(col,clamp(alpha,0.,1.));
+    }`,
+
+  // FOG — warm amber-grey fog with slow billowing, distinct from cold fog
+  fog: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<5;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+    void main(){
+      float t=u_time*0.5;
+      vec2 uv=v_uv;uv.x*=u_res.x/max(u_res.y,1.);
+      // Three overlapping fog layers at different speeds
+      vec2 b1=uv*2.8;b1.x-=t*0.9;
+      vec2 b2=uv*3.5+vec2(7.3,2.1);b2.x-=t*0.6;
+      vec2 b3=uv*1.8+vec2(13.7,8.4);b3.x+=t*0.4;
+      float layer1=fbm(b1+vec2(t*0.1,t*0.07));
+      float layer2=fbm(b2+vec2(-t*0.08,t*0.05));
+      float layer3=fbm(b3+vec2(t*0.06,-t*0.09));
+      float cloud=layer1*0.5+layer2*0.35+layer3*0.15;
+      float pulse=sin(fbm(uv*2.+vec2(t*0.4))*6.+t*0.8)*0.5+0.5;
+      cloud*=(0.7+pulse*0.5);
+      float a=smoothstep(0.32,0.56,cloud)*0.82;
+      // Warm amber-grey (tavern smoke, dungeon haze)
+      vec3 c=mix(vec3(0.55,0.5,0.44),vec3(0.82,0.77,0.68),smoothstep(0.32,0.7,cloud));
+      gl_FragColor=vec4(c,a);
+    }`,
+
+  // FIREFLIES — multicolor orbs (gold/blue/green mix), slower fade
+  firefly: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(float n){return fract(sin(n)*43758.5453123);}
+    vec2 h2(float n){return vec2(h(n),h(n+17.37));}
+    vec2 orbit(float s,float t){
+      float sa=mix(0.2,0.7,h(s+10.));float sb=mix(0.15,0.5,h(s+20.));
+      float aa=t*sa+h(s+30.)*6.283;float ab=t*sb+h(s+40.)*6.283;
+      return vec2(cos(aa),sin(aa))*0.6+vec2(cos(ab*0.73),sin(ab*1.21))*0.4;
+    }
+    void main(){
+      vec2 uv=v_uv;vec3 col=vec3(0.);float alpha=0.;
+      vec2 asp=u_res.x>u_res.y?vec2(u_res.x/u_res.y,1.):vec2(1.,u_res.y/u_res.x);
+      for(float i=0.;i<40.;i++){
+        float s=i*19.713;
+        vec2 pos=h2(s)+orbit(s,u_time*mix(0.3,0.7,h(s+9.)))*0.08;
+        if(pos.x<0.||pos.x>1.||pos.y<0.||pos.y>1.) continue;
+        float sz=0.005*mix(0.5,1.5,h(s+5.5));
+        float d=distance(uv*asp,pos*asp);
+        float fade=sin(u_time*mix(0.2,0.6,h(s+44.))+h(s+55.)*6.283)*0.5+0.5;
+        float glow=smoothstep(sz*5.,0.,d)*fade;
+        float core=smoothstep(sz,0.,d)*fade;
+        // Color varies per firefly: gold, blue, green
+        float ci=h(s+77.);
+        vec3 fc=ci<0.33?mix(vec3(1.,0.85,0.2),vec3(1.,1.,0.6),core)
+                :ci<0.66?mix(vec3(0.2,0.5,1.),vec3(0.6,0.8,1.),core)
+                :mix(vec3(0.2,0.9,0.3),vec3(0.7,1.,0.5),core);
+        col+=fc*glow;alpha=max(alpha,glow*0.9);
+      }
+      gl_FragColor=vec4(col,clamp(alpha,0.,1.));
+    }`,
+
+  // WIND — rain streaks mixed with wind lines, blue-grey tint
+  wind: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<3;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+    void main(){
+      float t=u_time*1.8;
+      vec2 uv=v_uv;uv.x*=u_res.x/max(u_res.y,1.);
+      // Wind streaks (diagonal)
+      float row=uv.y*28.-uv.x*0.3;
+      float rid=floor(row);float rf=fract(row);
+      float rh=h(vec2(rid,0.));
+      float xs=uv.x*2.+uv.y*0.4-t*(1.+rh*0.7)-rh*8.;
+      float sid=floor(xs);float sf=fract(xs);
+      float sh=h(vec2(rid,sid));
+      float line=step(0.8,sh);
+      float sl=0.7+h(vec2(rid,sid+7.))*0.9;
+      float tx=smoothstep(0.,sl*0.4,sf)*smoothstep(1.,1.-sl*0.4,sf);
+      float thick=0.08+h(vec2(rid,sid+23.))*0.1;
+      float ty=smoothstep(0.5-thick,0.5,rf)*smoothstep(0.5+thick,0.5,rf);
+      float fade=sin(t*mix(0.6,1.4,h(vec2(rid,sid+41.)))+h(vec2(rid,sid+31.))*6.28)*0.5+0.5;
+      float la=line*tx*ty*fade*0.45;
+      // Rain drops (short vertical streaks)
+      float rx=(uv.x+uv.y*0.1)*40.;
+      float ry=(uv.y-u_time*0.9)*60.;
+      float rdrop=step(0.92,h(vec2(floor(rx),floor(ry))))*smoothstep(0.,0.3,fract(ry))*smoothstep(1.,0.7,fract(ry))*0.35;
+      float total=clamp(la+rdrop,0.,1.);
+      gl_FragColor=vec4(0.75,0.82,0.95,total);
+    }`,
+
+  // SMOKE — dark grey rolling clouds, slower than fog, more opaque
+  smoke: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.55;for(int i=0;i<5;i++){v+=a*n(p);p*=2.1;a*=0.48;}return v;}
+    void main(){
+      float t=u_time*0.3;
+      vec2 uv=v_uv;uv.x*=u_res.x/max(u_res.y,1.);
+      vec2 q=vec2(fbm(uv*2.5+vec2(t*0.4,0.)),fbm(uv*2.5+vec2(0.,t*0.3)));
+      float cloud=fbm(uv*2.+3.*q-vec2(t*0.5,0.));
+      float billow=fbm(uv*4.+vec2(t*0.2,-t*0.15))*0.4;
+      float total=cloud*0.65+billow*0.35;
+      float a=smoothstep(0.38,0.62,total)*0.9;
+      vec3 c=mix(vec3(0.12,0.12,0.13),vec3(0.42,0.40,0.41),smoothstep(0.38,0.75,total));
+      gl_FragColor=vec4(c,a);
+    }`,
+
+  // BLOOD SPLATTER — dark red splatter pattern with drip edges
+  blood_splatter: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.6;for(int i=0;i<4;i++){v+=a*n(p);p*=2.5;a*=0.4;}return v;}
+    float splat(vec2 uv,vec2 c,float r,float seed){
+      float d=length((uv-c)*vec2(1.+h(vec2(seed,1.))*0.6,1.+h(vec2(seed,2.))*0.4));
+      float edge=fbm(normalize(uv-c)*4.+vec2(seed))*0.3;
+      return smoothstep(r+edge,r*0.5,d);
+    }
+    void main(){
+      vec2 uv=v_uv;float total=0.;
+      // Static splatter pattern (no time animation — blood stays)
+      for(float i=0.;i<12.;i++){
+        vec2 c=vec2(h(vec2(i,0.)),h(vec2(i,1.)));
+        float r=0.04+h(vec2(i,2.))*0.12;
+        total+=splat(uv,c,r,i)*mix(0.6,1.,h(vec2(i,3.)));
+      }
+      // Drip streaks
+      for(float i=0.;i<6.;i++){
+        float dx=h(vec2(i,10.));float dy=h(vec2(i,11.));
+        float dlen=0.05+h(vec2(i,12.))*0.2;
+        float dw=0.008+h(vec2(i,13.))*0.012;
+        float d=length(vec2((uv.x-dx)/dw,max(0.,(uv.y-dy)/dlen-1.)));
+        total+=smoothstep(1.,0.6,d)*0.7;
+      }
+      total=clamp(total,0.,1.);
+      vec3 c=mix(vec3(0.5,0.,0.),vec3(0.85,0.02,0.02),total);
+      gl_FragColor=vec4(c*total,total*0.95);
+    }`,
+
+  // ACID SPLATTER — neon yellow-green corrosive puddles with bubbling edge
+  acid_splatter: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.55;for(int i=0;i<4;i++){v+=a*n(p);p*=2.3;a*=0.45;}return v;}
+    void main(){
+      float t=u_time;vec2 uv=v_uv;float total=0.;
+      // Puddle blobs
+      for(float i=0.;i<10.;i++){
+        vec2 c=vec2(h(vec2(i,0.)),h(vec2(i,1.)));
+        float r=0.05+h(vec2(i,2.))*0.15;
+        // Bubbling animated edge
+        float edge=fbm(normalize(uv-c)*5.+vec2(t*0.8+i))*0.25;
+        float d=length((uv-c)*vec2(1.+h(vec2(i,3.))*0.5,1.));
+        total+=smoothstep(r+edge,r*0.4,d)*mix(0.5,1.,h(vec2(i,4.)));
+      }
+      // Corrosive bubbles on surface
+      for(float i=0.;i<8.;i++){
+        float bx=h(vec2(i,20.));float by=h(vec2(i,21.));
+        float r=0.012+h(vec2(i,22.))*0.025;
+        float pulse=sin(t*mix(1.5,3.,h(vec2(i,23.)))+h(vec2(i,24.))*6.283)*0.5+0.5;
+        total+=smoothstep(r,r*0.3,length(uv-vec2(bx,by)))*pulse*0.5;
+      }
+      total=clamp(total,0.,1.);
+      float i=smoothstep(0.1,0.8,total);
+      vec3 c=i<0.4?mix(vec3(0.1,0.35,0.0),vec3(0.55,0.9,0.0),i/0.4)
+              :mix(vec3(0.55,0.9,0.0),vec3(0.9,1.0,0.3),(i-0.4)/0.6);
+      gl_FragColor=vec4(c*total,total*0.92);
+    }`,
+
+  // LAVA RIVER — for flow mode: scrolling molten channels
+  lava_river: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.55;for(int i=0;i<5;i++){v+=a*n(p);p*=2.1;a*=0.48;}return v;}
+    void main(){
+      // Flow direction: along X (path handles the curve)
+      vec2 uv=v_uv;float t=u_time;
+      vec2 p=uv*vec2(u_res.x/max(u_res.y,1.),1.)*3.;
+      p.x-=t*0.8;
+      float base=fbm(p);
+      float vein=fbm(p*vec2(1.,3.)+vec2(t*0.4,0.));
+      float n=base*0.6+vein*0.4;
+      // Crust dark edges, glowing center channels
+      float crush=abs(uv.y-0.5)*2.;// edge darkness
+      n*=(1.-crush*0.5);
+      float i=smoothstep(0.3,0.85,n);
+      vec3 c=i<0.2?vec3(0.12,0.02,0.0)
+              :i<0.5?mix(vec3(0.7,0.1,0.0),vec3(1.0,0.4,0.0),(i-0.2)/0.3)
+              :i<0.8?mix(vec3(1.0,0.4,0.0),vec3(1.0,0.85,0.1),(i-0.5)/0.3)
+              :mix(vec3(1.0,0.85,0.1),vec3(1.0,1.0,0.7),(i-0.8)/0.2);
+      float a=step(0.3,n);
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // MUD RIVER — for flow mode: dark brown turbid flow
+  mud_river: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.1;a*=0.5;}return v;}
+    void main(){
+      vec2 uv=v_uv;float t=u_time*0.5;
+      vec2 p=uv*vec2(u_res.x/max(u_res.y,1.),1.)*2.5;
+      p.x-=t*0.6;
+      vec2 q=vec2(fbm(p+vec2(0.,t*0.2)),fbm(p+vec2(3.1,0.)));
+      float base=fbm(p+1.5*q);
+      float ripple=n(uv*vec2(8.,3.)+vec2(-t*2.,0.))*0.15;
+      float total=base+ripple;
+      float i=smoothstep(0.25,0.75,total);
+      vec3 c=i<0.4?mix(vec3(0.12,0.07,0.02),vec3(0.28,0.18,0.06),i/0.4)
+              :i<0.8?mix(vec3(0.28,0.18,0.06),vec3(0.4,0.28,0.12),(i-0.4)/0.4)
+              :mix(vec3(0.4,0.28,0.12),vec3(0.5,0.38,0.18),(i-0.8)/0.2);
+      float a=smoothstep(0.22,0.45,total)*0.92;
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // ARCANE — swirling purple-cyan portal energy
+  arcane: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<5;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+    void main(){
+      vec2 uv=v_uv-0.5;float t=u_time*0.7;
+      float ang=atan(uv.y,uv.x)+t*0.4;
+      float r=length(uv)*2.;
+      // Spiral warp
+      vec2 sp=vec2(ang/6.2831,r)+vec2(t*0.1,0.);
+      float swirl=fbm(sp*3.+vec2(t*0.3));
+      // Radial pulse
+      float pulse=sin(r*8.-t*3.)*0.5+0.5;
+      float total=swirl*0.7+pulse*0.3;
+      total*=smoothstep(1.0,0.1,r);// fade edges
+      float i=smoothstep(0.2,0.8,total);
+      vec3 c=i<0.3?mix(vec3(0.1,0.0,0.3),vec3(0.5,0.1,0.9),i/0.3)
+              :i<0.7?mix(vec3(0.5,0.1,0.9),vec3(0.0,0.8,0.9),(i-0.3)/0.4)
+              :mix(vec3(0.0,0.8,0.9),vec3(0.9,0.95,1.0),(i-0.7)/0.3);
+      float a=smoothstep(0.15,0.4,total);
+      gl_FragColor=vec4(c*a,a);
+    }`,
+};
+
+// Compiled shader cache
+const _glCache = {};
+
+function getWebGLRenderer(shaderName) {
+  if (_glCache[shaderName]) return _glCache[shaderName];
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 512;
+  const gl = canvas.getContext('webgl', { premultipliedAlpha: false });
+  if (!gl) return null;
+  const compile = (type, src) => {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn('Shader error', shaderName, gl.getShaderInfoLog(s)); return null; }
+    return s;
+  };
+  const vert = compile(gl.VERTEX_SHADER, SHADER_VERT);
+  const frag = compile(gl.FRAGMENT_SHADER, SHADER_FRAGS[shaderName] || SHADER_FRAGS.fire);
+  if (!vert || !frag) return null;
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vert); gl.attachShader(prog, frag); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res') };
+  _glCache[shaderName] = { gl, canvas, prog, buf, loc, t0: Date.now() };
+  return _glCache[shaderName];
+}
+
+export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blendMode) {
+  const r = getWebGLRenderer(shaderName);
+  if (!r) return;
+  const { gl, canvas, prog, buf, loc, t0 } = r;
+  gl.viewport(0, 0, 512, 512);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(loc.pos);
+  gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform1f(loc.time, (Date.now()-t0)/1000);
+  gl.uniform2f(loc.res, w, h);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+  if (blendMode === 'screen') ctx.globalCompositeOperation = 'screen';
+  else if (blendMode === 'lighter') ctx.globalCompositeOperation = 'lighter';
+  else ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(canvas, x, y, w, h);
+  ctx.restore();
+}
+
+// ── Built-in GPU Shader Presets ────────────────────────────────────────────
 export const BUILTIN_EFFECT_PRESETS = [
-  {
-    id: 'preset_fx_lava_magma',
-    name: 'Molten Magma Lava',
-    category: 'fire',
-    tags: ['lava', 'fire', 'magma', 'volcano', 'heat'],
-    theme: 'Lava',
-    description: 'Flowing molten magma with pulsating volcanic heat',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <radialGradient id="lavaGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#fffb00" />
-            <stop offset="35%" stop-color="#ff5500" />
-            <stop offset="75%" stop-color="#b30000" />
-            <stop offset="100%" stop-color="#2a0505" />
-          </radialGradient>
-          <filter id="lavaTurb">
-            <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="4" seed="5">
-              <animate attributeName="baseFrequency" values="0.03;0.045;0.03" dur="4s" repeatCount="indefinite"/>
-            </feTurbulence>
-            <feDisplacementMap in="SourceGraphic" scale="35" />
-          </filter>
-        </defs>
-        <rect width="300" height="300" fill="#150202"/>
-        <g filter="url(#lavaTurb)">
-          <rect width="300" height="300" fill="url(#lavaGrad)"/>
-          <circle cx="90" cy="90" r="70" fill="#ffaa00" opacity="0.85">
-            <animate attributeName="r" values="50;85;50" dur="3s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="210" cy="190" r="80" fill="#ff2200" opacity="0.9">
-            <animate attributeName="r" values="60;95;60" dur="3.5s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="150" cy="150" r="45" fill="#ffff55" opacity="0.95">
-            <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
-          </circle>
-        </g>
-      </svg>
-    `)
-  },
-  {
-    id: 'preset_fx_river_water',
-    name: 'Rushing River Water',
-    category: 'water',
-    tags: ['water', 'river', 'stream', 'ocean', 'waves'],
-    theme: 'Water',
-    description: 'Animated shimmering river currents & fluid ripples',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <linearGradient id="waterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#0284c7" />
-            <stop offset="50%" stop-color="#0369a1" />
-            <stop offset="100%" stop-color="#082f49" />
-          </linearGradient>
-          <filter id="waterTurb">
-            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="12">
-              <animate attributeName="baseFrequency" values="0.04;0.055;0.04" dur="3s" repeatCount="indefinite"/>
-            </feTurbulence>
-            <feDisplacementMap in="SourceGraphic" scale="25" />
-          </filter>
-        </defs>
-        <rect width="300" height="300" fill="url(#waterGrad)"/>
-        <g filter="url(#waterTurb)" opacity="0.7">
-          <path d="M 0 50 Q 150 20 300 50 T 600 50" stroke="#bae6fd" stroke-width="24" fill="none" opacity="0.6">
-            <animateTransform attributeName="transform" type="translate" from="0,0" to="-300,0" dur="2.5s" repeatCount="indefinite"/>
-          </path>
-          <path d="M 0 150 Q 150 120 300 150 T 600 150" stroke="#7dd3fc" stroke-width="35" fill="none" opacity="0.7">
-            <animateTransform attributeName="transform" type="translate" from="0,0" to="-300,0" dur="2s" repeatCount="indefinite"/>
-          </path>
-          <path d="M 0 250 Q 150 220 300 250 T 600 250" stroke="#38bdf8" stroke-width="28" fill="none" opacity="0.5">
-            <animateTransform attributeName="transform" type="translate" from="0,0" to="-300,0" dur="3s" repeatCount="indefinite"/>
-          </path>
-        </g>
-      </svg>
-    `)
-  },
-  {
-    id: 'preset_fx_arcane_portal',
-    name: 'Arcane Cosmic Vortex',
-    category: 'magic',
-    tags: ['portal', 'arcane', 'magic', 'vortex', 'cosmic'],
-    theme: 'Arcane',
-    description: 'Swirling purple & cyan hyperspace gateway',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <radialGradient id="portalGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#f472b6" />
-            <stop offset="40%" stop-color="#a855f7" />
-            <stop offset="80%" stop-color="#3b82f6" />
-            <stop offset="100%" stop-color="#090514" />
-          </radialGradient>
-        </defs>
-        <rect width="300" height="300" fill="#090514"/>
-        <g transform="translate(150,150)">
-          <circle cx="0" cy="0" r="130" fill="url(#portalGrad)" opacity="0.9"/>
-          <g>
-            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="4s" repeatCount="indefinite"/>
-            <path d="M-90,-90 Q0,0 90,-90 Q0,0 90,90 Q0,0 -90,90 Q0,0 -90,-90" fill="#ec4899" opacity="0.6"/>
-            <circle cx="0" cy="0" r="60" fill="none" stroke="#67e8f9" stroke-width="8" stroke-dasharray="20,10"/>
-          </g>
-          <g>
-            <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="2.5s" repeatCount="indefinite"/>
-            <circle cx="0" cy="0" r="35" fill="#fbcfe8" opacity="0.85"/>
-            <path d="M 0 -80 L 15 0 L 0 80 L -15 0 Z" fill="#38bdf8" opacity="0.7"/>
-          </g>
-        </g>
-      </svg>
-    `)
-  },
-  {
-    id: 'preset_fx_toxic_acid',
-    name: 'Toxic Acid & Poison Mist',
-    category: 'poison',
-    tags: ['poison', 'acid', 'toxic', 'swamp', 'green'],
-    theme: 'Swamp',
-    description: 'Corrosive bubbling emerald acid pool',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <radialGradient id="acidGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#a3e635" />
-            <stop offset="45%" stop-color="#22c55e" />
-            <stop offset="85%" stop-color="#14532d" />
-            <stop offset="100%" stop-color="#052e16" />
-          </radialGradient>
-          <filter id="acidNoise">
-            <feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="3" seed="8">
-              <animate attributeName="baseFrequency" values="0.05;0.07;0.05" dur="3s" repeatCount="indefinite"/>
-            </feTurbulence>
-            <feDisplacementMap in="SourceGraphic" scale="30" />
-          </filter>
-        </defs>
-        <rect width="300" height="300" fill="url(#acidGrad)"/>
-        <g filter="url(#acidNoise)" opacity="0.75">
-          <circle cx="80" cy="80" r="45" fill="#d9f99d">
-            <animate attributeName="r" values="30;60;30" dur="2s" repeatCount="indefinite"/>
-            <animate attributeName="opacity" values="0.4;0.9;0.4" dur="2s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="220" cy="180" r="55" fill="#4ade80">
-            <animate attributeName="r" values="40;75;40" dur="2.8s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="150" cy="220" r="35" fill="#86efac">
-            <animate attributeName="r" values="20;50;20" dur="1.7s" repeatCount="indefinite"/>
-          </circle>
-        </g>
-      </svg>
-    `)
-  },
-  {
-    id: 'preset_fx_blizzard_frost',
-    name: 'Glacial Blizzard Snow',
-    category: 'weather',
-    tags: ['snow', 'blizzard', 'ice', 'frost', 'cold'],
-    theme: 'Snow',
-    description: 'Swirling sub-zero blizzard crystals',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <linearGradient id="snowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#e0f2fe" />
-            <stop offset="60%" stop-color="#7dd3fc" />
-            <stop offset="100%" stop-color="#0369a1" />
-          </linearGradient>
-        </defs>
-        <rect width="300" height="300" fill="#0c4a6e"/>
-        <g opacity="0.8">
-          <circle cx="50" cy="50" r="8" fill="#ffffff">
-            <animate attributeName="cx" values="0;300" dur="2s" repeatCount="indefinite"/>
-            <animate attributeName="cy" values="0;300" dur="2s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="180" cy="30" r="14" fill="#ffffff" opacity="0.7">
-            <animate attributeName="cx" values="50;350" dur="1.5s" repeatCount="indefinite"/>
-            <animate attributeName="cy" values="0;300" dur="1.5s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="90" cy="140" r="6" fill="#bae6fd">
-            <animate attributeName="cx" values="0;300" dur="2.5s" repeatCount="indefinite"/>
-            <animate attributeName="cy" values="50;350" dur="2.5s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="240" cy="180" r="12" fill="#ffffff" opacity="0.6">
-            <animate attributeName="cx" values="0;300" dur="1.8s" repeatCount="indefinite"/>
-            <animate attributeName="cy" values="100;400" dur="1.8s" repeatCount="indefinite"/>
-          </circle>
-        </g>
-      </svg>
-    `)
-  },
-  {
-    id: 'preset_fx_shadow_void',
-    name: 'Shadow Fog & Cosmic Void',
-    category: 'magic',
-    tags: ['fog', 'void', 'darkness', 'shadow', 'smoke'],
-    theme: 'Dungeon',
-    description: 'Swirling eldritch shadow smoke',
-    isPreset: true,
-    url: 'data:image/svg+xml;base64,' + btoa(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-        <defs>
-          <radialGradient id="voidGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#18181b" />
-            <stop offset="60%" stop-color="#27272a" />
-            <stop offset="100%" stop-color="#09090b" />
-          </radialGradient>
-          <filter id="voidTurb">
-            <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="4" seed="2">
-              <animate attributeName="baseFrequency" values="0.03;0.05;0.03" dur="5s" repeatCount="indefinite"/>
-            </feTurbulence>
-            <feDisplacementMap in="SourceGraphic" scale="40" />
-          </filter>
-        </defs>
-        <rect width="300" height="300" fill="url(#voidGrad)"/>
-        <g filter="url(#voidTurb)" opacity="0.75">
-          <circle cx="100" cy="100" r="90" fill="#3f3f46" opacity="0.6"/>
-          <circle cx="200" cy="200" r="100" fill="#52525b" opacity="0.5"/>
-        </g>
-      </svg>
-    `)
-  }
+  // AREA effects — fill a painted region
+  { id:'shader_fire',           name:'Fire',           shaderName:'fire',           category:'area',  tags:['fire','flame','heat'],            description:'Chaotic noise fire with ember sparks',         isShader:true,isPreset:true,previewColor:'#ff4400',emoji:'🔥' },
+  { id:'shader_ice',            name:'Ice',            shaderName:'ice',            category:'area',  tags:['ice','frost','cold'],             description:'Crystalline frost with facet patterns',        isShader:true,isPreset:true,previewColor:'#7dd3fc',emoji:'❄️' },
+  { id:'shader_lightning',      name:'Lightning',      shaderName:'lightning',      category:'area',  tags:['lightning','storm','electric'],   description:'Branching purple-white bolts',                 isShader:true,isPreset:true,previewColor:'#a070ff',emoji:'⚡' },
+  { id:'shader_poison',         name:'Poison',         shaderName:'poison',         category:'area',  tags:['poison','toxic','acid'],          description:'Acid yellow-green bubbling fluid',            isShader:true,isPreset:true,previewColor:'#84cc16',emoji:'☠️' },
+  { id:'shader_fog',            name:'Fog',            shaderName:'fog',            category:'area',  tags:['fog','mist','smoke'],             description:'Warm amber-grey dungeon haze',                 isShader:true,isPreset:true,previewColor:'#c8b89a',emoji:'🌫️' },
+  { id:'shader_firefly',        name:'Fireflies',      shaderName:'firefly',        category:'area',  tags:['firefly','magic','fey','arcane'], description:'Multicolor glowing orbs — gold, blue, green', isShader:true,isPreset:true,previewColor:'#fbbf24',emoji:'✨' },
+  { id:'shader_wind',           name:'Wind & Rain',    shaderName:'wind',           category:'area',  tags:['wind','rain','storm'],            description:'Diagonal rain streaks with wind lines',        isShader:true,isPreset:true,previewColor:'#bfdbfe',emoji:'💨' },
+  { id:'shader_smoke',          name:'Smoke',          shaderName:'smoke',          category:'area',  tags:['smoke','cloud','dark'],           description:'Dense dark rolling smoke',                    isShader:true,isPreset:true,previewColor:'#6b7280',emoji:'💨' },
+  { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:'blood_splatter', category:'area',  tags:['blood','combat','splatter'],      description:'Dark red static splatter with drip edges',    isShader:true,isPreset:true,previewColor:'#dc2626',emoji:'🩸' },
+  { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:'acid_splatter',  category:'area',  tags:['acid','toxic','splatter'],        description:'Neon green corrosive bubbling puddles',        isShader:true,isPreset:true,previewColor:'#84cc16',emoji:'🟢' },
+  { id:'shader_arcane',         name:'Arcane Portal',  shaderName:'arcane',         category:'area',  tags:['arcane','magic','portal'],        description:'Swirling purple-cyan portal energy',          isShader:true,isPreset:true,previewColor:'#8b5cf6',emoji:'🔮' },
+  // FLOW effects — drawn along a path
+  { id:'shader_lava_river',     name:'Lava River',     shaderName:'lava_river',     category:'flow',  tags:['lava','fire','flow','river'],     description:'Scrolling molten lava channels',              isShader:true,isPreset:true,previewColor:'#f97316',emoji:'🌋' },
+  { id:'shader_mud_river',      name:'Mud River',      shaderName:'mud_river',      category:'flow',  tags:['mud','earth','flow','river'],     description:'Dark brown turbid flowing mud',               isShader:true,isPreset:true,previewColor:'#92400e',emoji:'🟤' },
 ];
+
+
 
 function isVideoUrl(url) {
   if (!url) return false;
@@ -312,8 +571,23 @@ export function EffectsDrawingOverlay({ canvasSize }) {
 
   const effectPaths = settings.effectPaths || [];
   const effectsEnabled = !!settings.effectsEnabled;
-  const activeEffectUrl = settings.activeEffectUrl || (BUILTIN_EFFECT_PRESETS[0]?.url);
-  const effectTool = settings.effectTool || 'brush'; // 'brush' | 'marquee' | 'bezier' | 'eraser'
+  const activeEffectUrl = settings.activeEffectUrl || null;
+  const activeEffectShader = settings.activeEffectShader || null;
+  const effectBrushSize = settings.effectBrushSize || 60;
+  const effectOpacity = settings.effectOpacity ?? 0.9;
+  const effectTile = settings.effectTile !== false;
+  const effectTileScale = settings.effectTileScale || 100;
+  const effectBlendMode = settings.effectBlendMode || 'normal';
+
+  // Auto-detect mode from selected effect category
+  const activeEffectId = settings.activeEffectId || '';
+  const activePreset = BUILTIN_EFFECT_PRESETS.find(p => p.id === activeEffectId);
+  const effectMode = activePreset ? getEffectMode(activePreset) : 'area'; // 'flow' | 'area'
+  const effectTool = effectMode === 'flow' ? 'bezier' : (settings.effectTool || 'brush');
+
+  // Flow mode: click to place points, double-click to finish
+  const [flowPoints, setFlowPoints] = useState([]);
+  const [isPlacingFlow, setIsPlacingFlow] = useState(false); // 'brush' | 'marquee' | 'bezier' | 'eraser'
   const effectBrushSize = settings.effectBrushSize || 60;
   const effectTile = settings.effectTile !== false;
   const effectTileScale = settings.effectTileScale || 100;
@@ -440,7 +714,66 @@ export function EffectsDrawingOverlay({ canvasSize }) {
           return;
         }
 
-        // ── OFFSCREEN MASK TECHNIQUE ──────────────────────────────────────────
+        // ── SHADER EFFECT (GPU WebGL) ────────────────────────────────────────────
+        if (effect.isShader && effect.shaderName) {
+          // For shader effects: render shader into a bounding box along the path
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+
+          // Build clip path from the stroke shape first
+          ctx.beginPath();
+          if (type === 'marquee' && rect) {
+            ctx.rect(rect.x, rect.y, rect.width, rect.height);
+          } else if (points.length === 1) {
+            ctx.arc(points[0].x, points[0].y, strokeWidth / 2, 0, Math.PI * 2);
+          } else if (points.length >= 2) {
+            ctx.moveTo(points[0].x, points[0].y);
+            if (type === 'bezier' && points.length >= 3) {
+              for (let i = 1; i < points.length - 1; i++) {
+                const cpx = (points[i].x + points[i + 1].x) / 2;
+                const cpy = (points[i].y + points[i + 1].y) / 2;
+                ctx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
+              }
+              ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+            } else {
+              for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.lineWidth = strokeWidth;
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          }
+
+          // Clip and render the WebGL shader into the clipped region
+          const xs = type === 'marquee' ? [rect.x, rect.x + rect.width] : points.map(p => p.x);
+          const ys = type === 'marquee' ? [rect.y, rect.y + rect.height] : points.map(p => p.y);
+          const bx = Math.min(...xs) - strokeWidth / 2;
+          const by = Math.min(...ys) - strokeWidth / 2;
+          const bw = Math.max(...xs) - Math.min(...xs) + strokeWidth;
+          const bh = Math.max(...ys) - Math.min(...ys) + strokeWidth;
+
+          if (points.length >= 2 && type !== 'marquee') {
+            ctx.save();
+            ctx.lineWidth = strokeWidth; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.clip();
+          } else {
+            ctx.clip();
+          }
+
+          renderShaderToCanvas(ctx, effect.shaderName, bx, by, bw, bh, 1.0, blendMode);
+          ctx.restore();
+
+          // Live outline
+          if (isLive) {
+            ctx.save();
+            ctx.strokeStyle = '#caa055'; ctx.lineWidth = 2;
+            ctx.setLineDash([6, 5]);
+            if (type === 'marquee' && rect) ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+            ctx.setLineDash([]);
+            ctx.restore();
+          }
+          return; // done with this shader effect
+        }
+
+        // ── OFFSCREEN MASK TECHNIQUE (video/image effects) ────────────────────
         // Step 1: Draw the shape (stroke or rect) in white on an offscreen canvas
         // Step 2: Tile/draw the video onto a second offscreen canvas
         // Step 3: Use destination-in to clip the video to the shape
@@ -607,31 +940,55 @@ export function EffectsDrawingOverlay({ canvasSize }) {
     e.preventDefault();
     const pt = getCanvasCoords(e);
 
+    if (effectMode === 'flow') {
+      // FLOW mode: single click adds a control point, double-click finalizes
+      if (e.detail === 2 && flowPoints.length >= 2) {
+        // Double-click — finalize the path
+        const hasEffect = activeEffectUrl || activeEffectShader;
+        if (hasEffect) {
+          addEffectPath({
+            type: 'bezier',
+            points: flowPoints,
+            effectUrl: activeEffectUrl,
+            effectId: activeEffectId,
+            isShader: !!activeEffectShader,
+            shaderName: activeEffectShader || null,
+            width: effectBrushSize,
+            opacity: effectOpacity,
+            tile: effectTile,
+            tileScale: effectTileScale,
+            blendMode: effectBlendMode,
+            speed: settings.effectSpeed || 1,
+          });
+        }
+        setFlowPoints([]);
+        setIsPlacingFlow(false);
+        return;
+      }
+      // Single click — add a point
+      setFlowPoints(prev => [...prev, pt]);
+      setIsPlacingFlow(true);
+      return;
+    }
+
+    // AREA mode: hold and drag to paint
     setIsDrawing(true);
 
     if (effectTool === 'marquee') {
       setMarqueeStart(pt);
       setMarqueeCurrent(pt);
     } else if (effectTool === 'eraser') {
-      // Find and remove any effect stroke within eraser radius
       const eraserRadius = effectBrushSize / 2;
       const remaining = effectPaths.filter((ep) => {
-        if (ep.rect) {
-          return !(pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height);
-        }
-        if (ep.points) {
-          return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= eraserRadius + (ep.width || 60) / 2);
-        }
+        if (ep.rect) return !(pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height);
+        if (ep.points) return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= eraserRadius + (ep.width || 60) / 2);
         return true;
       });
-      if (remaining.length !== effectPaths.length) {
-        updateSettings({ effectPaths: remaining });
-      }
+      if (remaining.length !== effectPaths.length) updateSettings({ effectPaths: remaining });
     } else {
-      // Brush or Bezier
       setCurrentStroke([pt]);
     }
-  }, [effectsEnabled, effectTool, effectBrushSize, effectPaths, getCanvasCoords, updateSettings]);
+  }, [effectsEnabled, effectMode, effectTool, effectBrushSize, effectPaths, flowPoints, activeEffectUrl, activeEffectShader, activeEffectId, effectOpacity, effectTile, effectTileScale, effectBlendMode, settings.effectSpeed, getCanvasCoords, updateSettings, addEffectPath]);
 
   const handleMouseMove = useCallback((e) => {
     if (!isDrawing) return;
@@ -686,6 +1043,8 @@ export function EffectsDrawingOverlay({ canvasSize }) {
           rect: { x, y, width: w, height: h },
           effectUrl: activeEffectUrl,
           effectId: settings.activeEffectId,
+          isShader: !!activeEffectShader,
+          shaderName: activeEffectShader || null,
           opacity: effectOpacity,
           tile: effectTile,
           tileScale: effectTileScale,
@@ -699,6 +1058,8 @@ export function EffectsDrawingOverlay({ canvasSize }) {
         points: currentStroke,
         effectUrl: activeEffectUrl,
         effectId: settings.activeEffectId,
+        isShader: !!activeEffectShader,
+        shaderName: activeEffectShader || null,
         width: effectBrushSize,
         opacity: effectOpacity,
         tile: effectTile,
@@ -745,14 +1106,15 @@ export function EffectsDrawingOverlay({ canvasSize }) {
 
   if (!effectPaths.length && !effectsEnabled) return null;
 
+  const cursor = !effectsEnabled ? 'default'
+    : effectMode === 'flow' ? 'crosshair'
+    : effectTool === 'eraser' ? 'cell'
+    : 'crosshair';
+
   return (
     <div
       className="absolute inset-0 pointer-events-none"
-      style={{
-        zIndex: 15,
-        pointerEvents: effectsEnabled ? 'auto' : 'none',
-        touchAction: effectsEnabled ? 'none' : 'auto',
-      }}
+      style={{ zIndex: 15, pointerEvents: effectsEnabled ? 'auto' : 'none', touchAction: effectsEnabled ? 'none' : 'auto' }}
       data-testid="effects-drawing-overlay"
     >
       <canvas
@@ -760,10 +1122,7 @@ export function EffectsDrawingOverlay({ canvasSize }) {
         width={cWidth}
         height={cHeight}
         className="w-full h-full absolute inset-0 block"
-        style={{
-          cursor: effectsEnabled ? (effectTool === 'eraser' ? 'crosshair' : 'crosshair') : 'default',
-          pointerEvents: effectsEnabled ? 'auto' : 'none',
-        }}
+        style={{ cursor, pointerEvents: effectsEnabled ? 'auto' : 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -771,6 +1130,48 @@ export function EffectsDrawingOverlay({ canvasSize }) {
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
       />
+      {/* Flow mode: render control points and path preview as SVG overlay */}
+      {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 16 }}>
+          {/* Path line through placed points */}
+          {flowPoints.length >= 2 && (
+            <polyline
+              points={flowPoints.map(p => `${p.x * cWidth / (canvasSize?.width || cWidth)},${p.y * cHeight / (canvasSize?.height || cHeight)}`).join(' ')}
+              fill="none" stroke="#caa055" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.7"
+            />
+          )}
+          {/* Control point dots */}
+          {flowPoints.map((pt, idx) => (
+            <g key={idx}>
+              <circle
+                cx={pt.x * cWidth / (canvasSize?.width || cWidth)}
+                cy={pt.y * cHeight / (canvasSize?.height || cHeight)}
+                r={idx === 0 ? 7 : 5}
+                fill={idx === 0 ? '#caa055' : '#fff'}
+                stroke="#caa055" strokeWidth="2" opacity="0.9"
+              />
+              {idx === 0 && (
+                <text x={pt.x * cWidth / (canvasSize?.width || cWidth) + 10} y={pt.y * cHeight / (canvasSize?.height || cHeight) - 8}
+                  fill="#caa055" fontSize="10" fontFamily="monospace">START</text>
+              )}
+            </g>
+          ))}
+          {/* Instruction */}
+          <text x="12" y="20" fill="#caa055" fontSize="11" fontFamily="monospace" opacity="0.8">
+            Click to place points · Double-click to finish · {flowPoints.length} point{flowPoints.length !== 1 ? 's' : ''} placed
+          </text>
+        </svg>
+      )}
+      {/* Cancel flow button */}
+      {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
+        <button
+          onClick={() => { setFlowPoints([]); setIsPlacingFlow(false); }}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded bg-black/80 border border-red-500/40 text-red-400 text-xs font-mono hover:bg-red-900/30 transition-all"
+          style={{ zIndex: 20 }}
+        >
+          Cancel path (Esc)
+        </button>
+      )}
     </div>
   );
 }
@@ -788,7 +1189,7 @@ export function EffectsControlPanel({ onClose }) {
     clearEffectPaths
   } = useGrid();
 
-  const [activeTab, setActiveTab] = useState('vault'); // 'vault' | 'community' | 'mine'
+  const [activeTab, setActiveTab] = useState('builtin'); // 'builtin' | 'vault' | 'community' | 'mine'
   const [firebaseEffects, setFirebaseEffects] = useState([]);
   const [communityEffects, setCommunityEffects] = useState([]);
   const [myEffects, setMyEffects] = useState([]);
@@ -848,7 +1249,12 @@ export function EffectsControlPanel({ onClose }) {
   const allEffects = useMemo(() => {
     const map = new Map();
 
-    // 1. Built-in Animated Shader Presets
+    // 0. GPU Shader Built-ins (always available, no upload)
+    BUILTIN_EFFECT_PRESETS.forEach(p => {
+      map.set(p.id, { ...p, source: 'builtin' });
+    });
+
+    // 1. Cloud Firestore Effects (vault)
     BUILTIN_EFFECT_PRESETS.forEach(p => {
       map.set(p.id, { ...p, source: 'vault' });
     });
@@ -872,7 +1278,8 @@ export function EffectsControlPanel({ onClose }) {
   const filteredEffects = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allEffects.filter(e => {
-      if (activeTab === 'vault' && e.source !== 'vault') return false;
+      if (activeTab === 'builtin' && !e.isShader) return false;
+      if (activeTab === 'vault' && (e.source !== 'vault' || e.isShader)) return false;
       if (activeTab === 'community' && e.source !== 'community') return false;
       if (activeTab === 'mine' && e.source !== 'mine') return false;
 
@@ -894,10 +1301,11 @@ export function EffectsControlPanel({ onClose }) {
   const selectEffect = (eff) => {
     updateSettings({
       activeEffectId: eff.id,
-      activeEffectUrl: eff.url || eff.imageUrl,
+      activeEffectUrl: eff.isShader ? null : (eff.url || eff.imageUrl),
+      activeEffectShader: eff.isShader ? eff.shaderName : null,
       effectsEnabled: true
     });
-    toast.success(`Active effect: "${eff.name}" — Draw reverse mask on map!`);
+    toast.success(`Active: "${eff.name}" — Draw on map!`);
   };
 
   // Upload Custom Video / Animated Effect File
@@ -1129,9 +1537,10 @@ export function EffectsControlPanel({ onClose }) {
         {/* Category Tabs */}
         <div className="flex rounded-lg overflow-hidden border border-white/10 bg-black/40 text-[9px]">
           {[
-            { id: 'vault', label: '⭐ Vault Presets' },
+            { id: 'builtin', label: '⚡ Built-in' },
+            { id: 'vault', label: '⭐ Vault' },
             { id: 'community', label: '🌐 Cloud' },
-            { id: 'mine', label: '👤 My Uploads' }
+            { id: 'mine', label: '👤 Mine' }
           ].map((t) => (
             <button
               key={t.id}
@@ -1150,8 +1559,8 @@ export function EffectsControlPanel({ onClose }) {
         {/* Effect Grid */}
         <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
           {filteredEffects.map((eff) => {
-            const isSelected = activeEffectUrl === (eff.url || eff.imageUrl);
-            const isVideo = isVideoUrl(eff.url || eff.imageUrl);
+            const isSelected = settings.activeEffectId === eff.id;
+            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl);
 
             return (
               <div
@@ -1165,13 +1574,26 @@ export function EffectsControlPanel({ onClose }) {
               >
                 {/* Media Preview Box */}
                 <div className="w-full h-16 bg-black relative overflow-hidden flex items-center justify-center">
-                  {isVideo ? (
+                  {eff.isShader ? (
+                    // Shader effect: show colored gradient preview with name
+                    <div className="w-full h-full flex items-center justify-center"
+                      style={{
+                        background: `radial-gradient(ellipse at center, ${eff.previewColor || '#caa055'}55 0%, ${eff.previewColor || '#caa055'}22 50%, transparent 100%)`,
+                      }}>
+                      <span className="text-2xl">
+                        {eff.shaderName === 'fire' ? '🔥' :
+                         eff.shaderName === 'ice' ? '❄️' :
+                         eff.shaderName === 'lightning' ? '⚡' :
+                         eff.shaderName === 'poison' ? '☠️' :
+                         eff.shaderName === 'fog' ? '🌫️' :
+                         eff.shaderName === 'firefly' ? '✨' :
+                         eff.shaderName === 'wind' ? '💨' : '🌟'}
+                      </span>
+                    </div>
+                  ) : isVideo ? (
                     <video
                       src={eff.url || eff.imageUrl}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
+                      autoPlay loop muted playsInline
                       className="w-full h-full object-cover pointer-events-none"
                     />
                   ) : (
@@ -1186,6 +1608,11 @@ export function EffectsControlPanel({ onClose }) {
                   {isSelected && (
                     <div className="absolute top-1 right-1 bg-[#caa055] text-black text-[7px] font-black px-1.5 py-0.5 rounded shadow">
                       ACTIVE
+                    </div>
+                  )}
+                  {eff.isShader && (
+                    <div className="absolute bottom-1 left-1 bg-black/60 text-[#a0b4ff] text-[7px] font-bold px-1 py-0.5 rounded">
+                      GPU
                     </div>
                   )}
                 </div>
