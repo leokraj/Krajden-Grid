@@ -554,629 +554,462 @@ export function EffectsDrawingOverlay({ canvasSize }) {
     settings,
     updateSettings,
     addEffectPath,
-    updateEffectPath,
-    removeEffectPath,
-    undoLastEffectPath,
-    clearEffectPaths
   } = useGrid();
 
-  const [isDrawing, setIsDrawing] = useState(false);
+  // ── State ────────────────────────────────────────────────────────────────
+  const [isDrawing, setIsDrawing]         = useState(false);
   const [currentStroke, setCurrentStroke] = useState([]);
-  const [marqueeStart, setMarqueeStart] = useState(null);
+  const [marqueeStart, setMarqueeStart]   = useState(null);
   const [marqueeCurrent, setMarqueeCurrent] = useState(null);
+  const [flowPoints, setFlowPoints]       = useState([]);
+  const [mousePos, setMousePos]           = useState(null); // for cursor preview
 
-  const canvasRef = useRef(null);
-  const mediaElementsRef = useRef(new Map()); // url -> HTMLVideoElement | HTMLImageElement
-  const rafRef = useRef(null);
+  const canvasRef       = useRef(null);
+  const mediaRef        = useRef(new Map()); // url → HTMLVideoElement | HTMLImageElement
+  const rafRef          = useRef(null);
 
-  const effectPaths = settings.effectPaths || [];
-  const effectsEnabled = !!settings.effectsEnabled;
+  // ── Derive settings ───────────────────────────────────────────────────────
+  const effectPaths     = settings.effectPaths    || [];
+  const effectsEnabled  = !!settings.effectsEnabled;
   const activeEffectUrl = settings.activeEffectUrl || null;
-  const activeEffectShader = settings.activeEffectShader || null;
-  const effectBrushSize = settings.effectBrushSize || 60;
-  const effectOpacity = settings.effectOpacity ?? 0.9;
-  const effectTile = settings.effectTile !== false;
-  const effectTileScale = settings.effectTileScale || 100;
-  const effectBlendMode = settings.effectBlendMode || 'normal';
+  const activeShader    = settings.activeEffectShader || null;
+  const activeEffectId  = settings.activeEffectId || '';
+  const brushSize       = settings.effectBrushSize  || 60;
+  const opacity         = settings.effectOpacity    ?? 0.9;
+  const tile            = settings.effectTile       !== false;
+  const tileScale       = settings.effectTileScale  || 100;
+  const blendMode       = settings.effectBlendMode  || 'normal';
+  const effectTool      = settings.effectTool       || 'brush'; // 'brush'|'marquee'|'eraser'
 
-  // Auto-detect mode from selected effect category
-  const activeEffectId = settings.activeEffectId || '';
+  // Auto-detect flow vs area based on selected effect
   const activePreset = BUILTIN_EFFECT_PRESETS.find(p => p.id === activeEffectId);
-  const effectMode = activePreset ? getEffectMode(activePreset) : 'area'; // 'flow' | 'area'
-  const effectTool = effectMode === 'flow' ? 'bezier' : (settings.effectTool || 'brush');
+  const effectMode   = activePreset ? getEffectMode(activePreset) : 'area';
 
-  // Flow mode: click to place points, double-click to finish
-  const [flowPoints, setFlowPoints] = useState([]);
-  const [isPlacingFlow, setIsPlacingFlow] = useState(false); // 'brush' | 'marquee' | 'bezier' | 'eraser'
-  const effectBrushSize = settings.effectBrushSize || 60;
-  const effectTile = settings.effectTile !== false;
-  const effectTileScale = settings.effectTileScale || 100;
-  const effectOpacity = settings.effectOpacity ?? 0.9;
-  const effectBlendMode = settings.effectBlendMode || 'normal';
+  const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
-  // Manage media elements (video loop / image)
+  // ── Canvas size ───────────────────────────────────────────────────────────
+  const cW = canvasSize?.width  || (typeof window !== 'undefined' ? window.innerWidth  : 1920);
+  const cH = canvasSize?.height || (typeof window !== 'undefined' ? window.innerHeight : 1080);
+
+  // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    const urls = new Set();
-    effectPaths.forEach(ep => { if (ep.effectUrl) urls.add(ep.effectUrl); });
-    if (activeEffectUrl) urls.add(activeEffectUrl);
+    const needed = new Set(effectPaths.map(ep => ep.effectUrl).filter(Boolean));
+    if (activeEffectUrl) needed.add(activeEffectUrl);
 
-    urls.forEach(url => {
-      if (!mediaElementsRef.current.has(url)) {
-        if (isVideoUrl(url)) {
-          const video = document.createElement('video');
-          video.src = url;
-          video.crossOrigin = 'anonymous';
-          video.loop = true;
-          video.muted = true;
-          video.autoplay = true;
-          video.playsInline = true;
-          video.playbackRate = settings.effectSpeed || 1;
-          video.play().catch(() => {});
-          mediaElementsRef.current.set(url, video);
-        } else {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = url;
-          mediaElementsRef.current.set(url, img);
-        }
+    needed.forEach(url => {
+      if (mediaRef.current.has(url)) return;
+      const isVid = url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url);
+      if (isVid) {
+        const v = document.createElement('video');
+        v.src = url; v.loop = true; v.muted = true; v.playsInline = true;
+        v.play().catch(() => {});
+        mediaRef.current.set(url, v);
+      } else {
+        const img = new Image();
+        img.src = url;
+        mediaRef.current.set(url, img);
       }
     });
 
-    // Clean up unused media elements
-    mediaElementsRef.current.forEach((el, url) => {
-      if (!urls.has(url)) {
-        if (el instanceof HTMLVideoElement) {
-          el.pause();
-          el.src = '';
-        }
-        mediaElementsRef.current.delete(url);
-      }
+    // Prune unused
+    mediaRef.current.forEach((_, url) => {
+      if (!needed.has(url)) mediaRef.current.delete(url);
     });
-  }, [effectPaths, activeEffectUrl, settings.effectSpeed]);
+  }, [effectPaths, activeEffectUrl]);
 
-  // Main Canvas Render Loop with Dynamic Clipping Reverse Masks & Tiling
+  // ── Render loop ───────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let alive = true;
 
-    let isMounted = true;
+    const drawPath = (pts, type, w) => {
+      if (!pts || pts.length < 1) return;
+      ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      if (type === 'bezier' && pts.length >= 3) {
+        for (let i = 1; i < pts.length - 1; i++) {
+          const mx = (pts[i].x + pts[i+1].x) / 2;
+          const my = (pts[i].y + pts[i+1].y) / 2;
+          ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+        }
+        ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+      } else {
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      }
+    };
+
+    const renderEffect = (effect) => {
+      const {
+        type = 'brush', points = [], rect,
+        effectUrl, isShader, shaderName,
+        width: w = brushSize, opacity: op = 0.9,
+        tile: doTile = true, tileScale: ts = 100,
+        blendMode: bm = 'normal',
+      } = effect;
+
+      // ── Shader effect ─────────────────────────────────────────────────────
+      if (isShader && shaderName) {
+        ctx.save();
+        ctx.globalAlpha = op;
+
+        // Build clip path
+        if (type === 'marquee' && rect) {
+          ctx.beginPath();
+          ctx.rect(rect.x, rect.y, rect.width, rect.height);
+          ctx.clip();
+          renderShaderToCanvas(ctx, shaderName, rect.x, rect.y, rect.width, rect.height, 1, bm);
+        } else if (points.length >= 2) {
+          // Expand bounding box by brush radius
+          const xs = points.map(p => p.x), ys = points.map(p => p.y);
+          const bx = Math.min(...xs) - w/2, by = Math.min(...ys) - w/2;
+          const bw = Math.max(...xs) - Math.min(...xs) + w;
+          const bh = Math.max(...ys) - Math.min(...ys) + w;
+          ctx.beginPath();
+          drawPath(points, type, w);
+          ctx.save(); ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.clip();
+          renderShaderToCanvas(ctx, shaderName, bx, by, bw, bh, 1, bm);
+          ctx.restore();
+        }
+        ctx.restore();
+        return;
+      }
+
+      // ── Video/image effect via offscreen mask ─────────────────────────────
+      if (!effectUrl) return;
+      const media = mediaRef.current.get(effectUrl);
+      if (!media) return;
+      const isVid = media instanceof HTMLVideoElement;
+      const ready = isVid
+        ? media.readyState >= 2 && media.videoWidth > 0
+        : media.complete && media.naturalWidth > 0;
+
+      if (!ready) {
+        // Gold placeholder while loading
+        ctx.save(); ctx.globalAlpha = 0.3; ctx.strokeStyle = '#caa055';
+        ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        if (points.length >= 2) { drawPath(points, type, w); ctx.stroke(); }
+        ctx.restore(); return;
+      }
+
+      // Offscreen mask canvas
+      const off = document.createElement('canvas');
+      off.width = cW; off.height = cH;
+      const oc = off.getContext('2d');
+      oc.lineCap = 'round'; oc.lineJoin = 'round'; oc.lineWidth = w;
+      oc.fillStyle = '#fff'; oc.strokeStyle = '#fff';
+
+      if (type === 'marquee' && rect) {
+        oc.fillRect(rect.x, rect.y, rect.width, rect.height);
+      } else if (points.length === 1) {
+        oc.beginPath(); oc.arc(points[0].x, points[0].y, w/2, 0, Math.PI*2); oc.fill();
+      } else if (points.length >= 2) {
+        drawPath(points, type, w);
+        oc.stroke();
+      }
+
+      // Clip video/image to the white shape
+      const mW = isVid ? media.videoWidth  : media.naturalWidth;
+      const mH = isVid ? media.videoHeight : media.naturalHeight;
+      const sc  = Math.max(0.1, ts / 100);
+      const tW  = Math.max(1, Math.round(mW * sc));
+      const tH  = Math.max(1, Math.round(mH * sc));
+
+      oc.globalCompositeOperation = 'source-in';
+      if (doTile) {
+        try {
+          const pat = oc.createPattern(media, 'repeat');
+          if (pat) {
+            const dm = new DOMMatrix(); dm.a = sc; dm.d = sc;
+            pat.setTransform(dm);
+            oc.fillStyle = pat; oc.fillRect(0, 0, cW, cH);
+          }
+        } catch (_) {
+          for (let tx = 0; tx < cW; tx += tW)
+            for (let ty = 0; ty < cH; ty += tH)
+              try { oc.drawImage(media, tx, ty, tW, tH); } catch (__) {}
+        }
+      } else {
+        const xs = points.map(p => p.x), ys = points.map(p => p.y);
+        const bx = type === 'marquee' ? rect.x : Math.min(...xs) - w/2;
+        const by = type === 'marquee' ? rect.y : Math.min(...ys) - w/2;
+        const bw = type === 'marquee' ? rect.width  : Math.max(...xs) - Math.min(...xs) + w;
+        const bh = type === 'marquee' ? rect.height : Math.max(...ys) - Math.min(...ys) + w;
+        try { oc.drawImage(media, bx, by, bw, bh); } catch (_) {}
+      }
+
+      ctx.save();
+      ctx.globalAlpha = op;
+      if (bm === 'screen')   ctx.globalCompositeOperation = 'screen';
+      else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+      else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+      ctx.drawImage(off, 0, 0);
+      ctx.restore();
+    };
 
     const render = () => {
-      if (!isMounted) return;
+      if (!alive) return;
+      ctx.clearRect(0, 0, cW, cH);
 
-      const width = canvas.width;
-      const height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
+      // Committed paths
+      effectPaths.forEach(renderEffect);
 
-      // Build the full list of paths to render (committed + live preview)
-      const pathsToRender = [...effectPaths];
+      // Live preview while drawing
+      if (isDrawing && hasActiveEffect) {
+        const liveEffect = {
+          type: effectMode === 'flow' ? 'bezier' : effectTool,
+          points: currentStroke,
+          rect: marqueeStart && marqueeCurrent ? {
+            x: Math.min(marqueeStart.x, marqueeCurrent.x),
+            y: Math.min(marqueeStart.y, marqueeCurrent.y),
+            width:  Math.abs(marqueeCurrent.x - marqueeStart.x),
+            height: Math.abs(marqueeCurrent.y - marqueeStart.y),
+          } : null,
+          effectUrl: activeEffectUrl,
+          isShader:  !!activeShader,
+          shaderName: activeShader,
+          width: brushSize, opacity: opacity * 0.7, // slightly transparent while drawing
+          tile, tileScale, blendMode,
+        };
 
-      if (isDrawing && activeEffectUrl) {
-        if ((effectTool === 'brush' || effectTool === 'bezier') && currentStroke.length > 0) {
-          pathsToRender.push({
-            id: 'live_stroke', type: effectTool,
-            points: currentStroke, effectUrl: activeEffectUrl,
-            width: effectBrushSize, opacity: effectOpacity,
-            tile: effectTile, tileScale: effectTileScale,
-            blendMode: effectBlendMode, isLive: true,
-          });
-        } else if (effectTool === 'marquee' && marqueeStart && marqueeCurrent) {
-          const x = Math.min(marqueeStart.x, marqueeCurrent.x);
-          const y = Math.min(marqueeStart.y, marqueeCurrent.y);
-          const w = Math.abs(marqueeCurrent.x - marqueeStart.x);
-          const h = Math.abs(marqueeCurrent.y - marqueeStart.y);
-          pathsToRender.push({
-            id: 'live_marquee', type: 'marquee',
-            rect: { x, y, width: w, height: h },
-            effectUrl: activeEffectUrl,
-            opacity: effectOpacity, tile: effectTile,
-            tileScale: effectTileScale, blendMode: effectBlendMode, isLive: true,
-          });
+        if (effectTool === 'marquee' && liveEffect.rect && liveEffect.rect.width > 2) {
+          renderEffect(liveEffect);
+          // Dashed border
+          ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = 1.5;
+          ctx.setLineDash([6,4]);
+          ctx.strokeRect(liveEffect.rect.x, liveEffect.rect.y, liveEffect.rect.width, liveEffect.rect.height);
+          ctx.setLineDash([]); ctx.restore();
+        } else if (currentStroke.length >= 2) {
+          renderEffect(liveEffect);
         }
       }
 
-      pathsToRender.forEach((effect) => {
-        const {
-          type = 'brush', points = [], rect,
-          effectUrl, width: strokeWidth = 60,
-          opacity = 0.9, tile = true, tileScale = 100,
-          blendMode = 'normal', isLive = false,
-        } = effect;
-
-        if (!effectUrl) return;
-        const media = mediaElementsRef.current.get(effectUrl);
-        if (!media) return;
-
-        // Check media is ready to draw
-        const isVideo = media instanceof HTMLVideoElement;
-        const isImage = media instanceof HTMLImageElement;
-        const ready = isVideo
-          ? media.readyState >= 2 && media.videoWidth > 0
-          : isImage && media.complete && media.naturalWidth > 0;
-
-        if (!ready) {
-          // Draw a gold placeholder glow while loading
-          ctx.save();
-          ctx.globalAlpha = 0.3;
-          ctx.strokeStyle = '#caa055';
-          ctx.lineWidth = strokeWidth;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          if (points.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-            ctx.stroke();
-          }
-          ctx.restore();
-          return;
-        }
-
-        // ── SHADER EFFECT (GPU WebGL) ────────────────────────────────────────────
-        if (effect.isShader && effect.shaderName) {
-          // For shader effects: render shader into a bounding box along the path
-          ctx.save();
-          ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
-
-          // Build clip path from the stroke shape first
-          ctx.beginPath();
-          if (type === 'marquee' && rect) {
-            ctx.rect(rect.x, rect.y, rect.width, rect.height);
-          } else if (points.length === 1) {
-            ctx.arc(points[0].x, points[0].y, strokeWidth / 2, 0, Math.PI * 2);
-          } else if (points.length >= 2) {
-            ctx.moveTo(points[0].x, points[0].y);
-            if (type === 'bezier' && points.length >= 3) {
-              for (let i = 1; i < points.length - 1; i++) {
-                const cpx = (points[i].x + points[i + 1].x) / 2;
-                const cpy = (points[i].y + points[i + 1].y) / 2;
-                ctx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
-              }
-              ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-            } else {
-              for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-            }
-            ctx.lineWidth = strokeWidth;
-            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          }
-
-          // Clip and render the WebGL shader into the clipped region
-          const xs = type === 'marquee' ? [rect.x, rect.x + rect.width] : points.map(p => p.x);
-          const ys = type === 'marquee' ? [rect.y, rect.y + rect.height] : points.map(p => p.y);
-          const bx = Math.min(...xs) - strokeWidth / 2;
-          const by = Math.min(...ys) - strokeWidth / 2;
-          const bw = Math.max(...xs) - Math.min(...xs) + strokeWidth;
-          const bh = Math.max(...ys) - Math.min(...ys) + strokeWidth;
-
-          if (points.length >= 2 && type !== 'marquee') {
-            ctx.save();
-            ctx.lineWidth = strokeWidth; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            ctx.clip();
-          } else {
-            ctx.clip();
-          }
-
-          renderShaderToCanvas(ctx, effect.shaderName, bx, by, bw, bh, 1.0, blendMode);
-          ctx.restore();
-
-          // Live outline
-          if (isLive) {
-            ctx.save();
-            ctx.strokeStyle = '#caa055'; ctx.lineWidth = 2;
-            ctx.setLineDash([6, 5]);
-            if (type === 'marquee' && rect) ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-            ctx.setLineDash([]);
-            ctx.restore();
-          }
-          return; // done with this shader effect
-        }
-
-        // ── OFFSCREEN MASK TECHNIQUE (video/image effects) ────────────────────
-        // Step 1: Draw the shape (stroke or rect) in white on an offscreen canvas
-        // Step 2: Tile/draw the video onto a second offscreen canvas
-        // Step 3: Use destination-in to clip the video to the shape
-        // Step 4: Composite the result onto the main canvas
-        // This is the only reliable way to clip thick strokes with video textures.
-
-        const offMask = document.createElement('canvas');
-        offMask.width = width;
-        offMask.height = height;
-        const mCtx = offMask.getContext('2d');
-
-        // Draw the mask shape in white
-        mCtx.fillStyle = '#fff';
-        mCtx.strokeStyle = '#fff';
-        mCtx.lineCap = 'round';
-        mCtx.lineJoin = 'round';
-        mCtx.lineWidth = strokeWidth;
-
-        if (type === 'marquee' && rect) {
-          mCtx.fillRect(rect.x, rect.y, rect.width, rect.height);
-        } else if (points.length === 1) {
-          mCtx.beginPath();
-          mCtx.arc(points[0].x, points[0].y, strokeWidth / 2, 0, Math.PI * 2);
-          mCtx.fill();
-        } else if (points.length >= 2) {
-          mCtx.beginPath();
-          mCtx.moveTo(points[0].x, points[0].y);
-          if (type === 'bezier' && points.length >= 3) {
-            // Smooth bezier through all points
-            for (let i = 1; i < points.length - 1; i++) {
-              const cpx = (points[i].x + points[i + 1].x) / 2;
-              const cpy = (points[i].y + points[i + 1].y) / 2;
-              mCtx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
-            }
-            mCtx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-          } else {
-            for (let i = 1; i < points.length; i++) {
-              mCtx.lineTo(points[i].x, points[i].y);
-            }
-          }
-          mCtx.stroke();
-        }
-
-        // Draw the video/image texture onto the mask canvas using destination-in
-        // This clips the texture to exactly the white shape we drew above
-        const mediaW = isVideo ? media.videoWidth : media.naturalWidth;
-        const mediaH = isVideo ? media.videoHeight : media.naturalHeight;
-        const scale = Math.max(0.1, (tileScale || 100) / 100);
-        const tileW = Math.max(1, Math.round(mediaW * scale));
-        const tileH = Math.max(1, Math.round(mediaH * scale));
-
-        mCtx.globalCompositeOperation = 'source-in';
-
-        if (tile) {
-          // Tile the video across the entire canvas then clip
-          try {
-            const pat = mCtx.createPattern(media, 'repeat');
-            if (pat) {
-              const m = new DOMMatrix();
-              m.a = scale; m.d = scale;
-              pat.setTransform(m);
-              mCtx.fillStyle = pat;
-              mCtx.fillRect(0, 0, width, height);
-            }
-          } catch (e) {
-            // Fallback: manual tiling
-            for (let tx = 0; tx < width; tx += tileW) {
-              for (let ty = 0; ty < height; ty += tileH) {
-                try { mCtx.drawImage(media, tx, ty, tileW, tileH); } catch (_) {}
-              }
-            }
-          }
-        } else {
-          // Stretch the video across the bounding box of the stroke
-          if (type === 'marquee' && rect) {
-            try { mCtx.drawImage(media, rect.x, rect.y, rect.width, rect.height); } catch (_) {}
-          } else if (points.length > 0) {
-            const xs = points.map(p => p.x);
-            const ys = points.map(p => p.y);
-            const bx = Math.min(...xs) - strokeWidth / 2;
-            const by = Math.min(...ys) - strokeWidth / 2;
-            const bw = Math.max(...xs) - Math.min(...xs) + strokeWidth;
-            const bh = Math.max(...ys) - Math.min(...ys) + strokeWidth;
-            try { mCtx.drawImage(media, bx, by, bw, bh); } catch (_) {}
-          }
-        }
-
-        // Composite the masked result onto the main canvas
+      // Cursor size ring preview
+      if (effectsEnabled && mousePos && effectMode === 'area' && effectTool !== 'marquee') {
         ctx.save();
-        ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
-        if (blendMode === 'screen') ctx.globalCompositeOperation = 'screen';
-        else if (blendMode === 'lighter') ctx.globalCompositeOperation = 'lighter';
-        else if (blendMode === 'overlay') ctx.globalCompositeOperation = 'overlay';
-        else ctx.globalCompositeOperation = 'source-over';
-
-        ctx.drawImage(offMask, 0, 0);
-
-        // Live drawing: dashed border outline
-        if (isLive) {
-          ctx.globalAlpha = 0.7;
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.strokeStyle = '#caa055';
-          ctx.lineWidth = 2;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.setLineDash([6, 5]);
-          if (type === 'marquee' && rect) {
-            ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-          } else if (points.length >= 2) {
-            ctx.lineWidth = strokeWidth + 4;
-            ctx.globalAlpha = 0.25;
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-            ctx.stroke();
-          }
-          ctx.setLineDash([]);
-        }
-
-        ctx.restore();
-      }); // end pathsToRender.forEach
+        ctx.beginPath();
+        ctx.arc(mousePos.x, mousePos.y, brushSize / 2, 0, Math.PI * 2);
+        ctx.strokeStyle = '#caa055'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+        ctx.globalAlpha = 0.6; ctx.stroke();
+        ctx.setLineDash([]); ctx.restore();
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
 
     rafRef.current = requestAnimationFrame(render);
+    return () => { alive = false; cancelAnimationFrame(rafRef.current); };
+  }, [effectPaths, isDrawing, currentStroke, marqueeStart, marqueeCurrent,
+      activeEffectUrl, activeShader, effectMode, effectTool, brushSize,
+      opacity, tile, tileScale, blendMode, hasActiveEffect, effectsEnabled,
+      mousePos, cW, cH]);
 
-    return () => {
-      isMounted = false;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [
-    effectPaths,
-    isDrawing,
-    currentStroke,
-    marqueeStart,
-    marqueeCurrent,
-    activeEffectUrl,
-    effectTool,
-    effectBrushSize,
-    effectTile,
-    effectTileScale,
-    effectOpacity,
-    effectBlendMode
-  ]);
-
-  // Coordinate conversion from viewport to canvas
-  const getCanvasCoords = useCallback((e) => {
+  // ── Coordinate mapping ────────────────────────────────────────────────────
+  const getCoords = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY,
-    };
-  }, []);
+    const scaleX = cW / rect.width;
+    const scaleY = cH / rect.height;
+    const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+    const clientY = e.touches?.[0]?.clientY ?? e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }, [cW, cH]);
 
-  const handleMouseDown = useCallback((e) => {
-    if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
-    e.preventDefault();
-    const pt = getCanvasCoords(e);
-
-    if (effectMode === 'flow') {
-      // FLOW mode: single click adds a control point, double-click finalizes
-      if (e.detail === 2 && flowPoints.length >= 2) {
-        // Double-click — finalize the path
-        const hasEffect = activeEffectUrl || activeEffectShader;
-        if (hasEffect) {
-          addEffectPath({
-            type: 'bezier',
-            points: flowPoints,
-            effectUrl: activeEffectUrl,
-            effectId: activeEffectId,
-            isShader: !!activeEffectShader,
-            shaderName: activeEffectShader || null,
-            width: effectBrushSize,
-            opacity: effectOpacity,
-            tile: effectTile,
-            tileScale: effectTileScale,
-            blendMode: effectBlendMode,
-            speed: settings.effectSpeed || 1,
-          });
-        }
-        setFlowPoints([]);
-        setIsPlacingFlow(false);
-        return;
-      }
-      // Single click — add a point
-      setFlowPoints(prev => [...prev, pt]);
-      setIsPlacingFlow(true);
-      return;
-    }
-
-    // AREA mode: hold and drag to paint
-    setIsDrawing(true);
+  // ── Mouse handlers ────────────────────────────────────────────────────────
+  const handleMouseMove = useCallback((e) => {
+    const pt = getCoords(e);
+    setMousePos(pt);
+    if (!isDrawing) return;
 
     if (effectTool === 'marquee') {
-      setMarqueeStart(pt);
       setMarqueeCurrent(pt);
     } else if (effectTool === 'eraser') {
-      const eraserRadius = effectBrushSize / 2;
-      const remaining = effectPaths.filter((ep) => {
+      const r = brushSize / 2;
+      const remaining = effectPaths.filter(ep => {
         if (ep.rect) return !(pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height);
-        if (ep.points) return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= eraserRadius + (ep.width || 60) / 2);
+        if (ep.points) return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= r + (ep.width || 60) / 2);
         return true;
       });
       if (remaining.length !== effectPaths.length) updateSettings({ effectPaths: remaining });
     } else {
-      setCurrentStroke([pt]);
-    }
-  }, [effectsEnabled, effectMode, effectTool, effectBrushSize, effectPaths, flowPoints, activeEffectUrl, activeEffectShader, activeEffectId, effectOpacity, effectTile, effectTileScale, effectBlendMode, settings.effectSpeed, getCanvasCoords, updateSettings, addEffectPath]);
-
-  const handleMouseMove = useCallback((e) => {
-    if (!isDrawing) return;
-    const pt = getCanvasCoords(e);
-
-    if (effectTool === 'marquee') {
-      setMarqueeCurrent(pt);
-    } else if (effectTool === 'eraser') {
-      const eraserRadius = effectBrushSize / 2;
-      const remaining = effectPaths.filter((ep) => {
-        if (ep.rect) {
-          return !(pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height);
-        }
-        if (ep.points) {
-          return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= eraserRadius + (ep.width || 60) / 2);
-        }
-        return true;
-      });
-      if (remaining.length !== effectPaths.length) {
-        updateSettings({ effectPaths: remaining });
-      }
-    } else {
-      setCurrentStroke((prev) => {
+      setCurrentStroke(prev => {
         if (prev.length > 0) {
           const last = prev[prev.length - 1];
-          if (Math.hypot(pt.x - last.x, pt.y - last.y) < 5) return prev;
+          if (Math.hypot(pt.x - last.x, pt.y - last.y) < 4) return prev;
         }
         return [...prev, pt];
       });
     }
-  }, [isDrawing, effectTool, effectBrushSize, effectPaths, getCanvasCoords, updateSettings]);
+  }, [isDrawing, effectTool, brushSize, effectPaths, getCoords, updateSettings]);
+
+  const handleMouseDown = useCallback((e) => {
+    if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
+    e.preventDefault();
+    const pt = getCoords(e);
+
+    // FLOW MODE: click to add points, double-click to commit
+    if (effectMode === 'flow') {
+      if (e.detail === 2 && flowPoints.length >= 2) {
+        if (hasActiveEffect) {
+          addEffectPath({
+            type: 'bezier',
+            points: [...flowPoints],
+            effectUrl: activeEffectUrl,
+            effectId: activeEffectId,
+            isShader: !!activeShader,
+            shaderName: activeShader || null,
+            width: brushSize, opacity, tile, tileScale, blendMode,
+          });
+        }
+        setFlowPoints([]);
+        return;
+      }
+      setFlowPoints(prev => [...prev, pt]);
+      return;
+    }
+
+    // AREA MODE: drag to paint
+    setIsDrawing(true);
+    if (effectTool === 'marquee') {
+      setMarqueeStart(pt); setMarqueeCurrent(pt);
+    } else if (effectTool === 'eraser') {
+      // handled in mousemove
+    } else {
+      setCurrentStroke([pt]);
+    }
+  }, [effectsEnabled, effectMode, effectTool, flowPoints, hasActiveEffect,
+      activeEffectUrl, activeEffectId, activeShader, brushSize, opacity,
+      tile, tileScale, blendMode, getCoords, addEffectPath]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing) return;
     setIsDrawing(false);
-
-    if (!activeEffectUrl) {
-      setCurrentStroke([]);
-      setMarqueeStart(null);
-      setMarqueeCurrent(null);
-      return;
-    }
 
     if (effectTool === 'marquee' && marqueeStart && marqueeCurrent) {
       const x = Math.min(marqueeStart.x, marqueeCurrent.x);
       const y = Math.min(marqueeStart.y, marqueeCurrent.y);
       const w = Math.abs(marqueeCurrent.x - marqueeStart.x);
       const h = Math.abs(marqueeCurrent.y - marqueeStart.y);
-      if (w > 10 && h > 10) {
+      if (w > 10 && h > 10 && hasActiveEffect) {
         addEffectPath({
-          type: 'marquee',
-          rect: { x, y, width: w, height: h },
-          effectUrl: activeEffectUrl,
-          effectId: settings.activeEffectId,
-          isShader: !!activeEffectShader,
-          shaderName: activeEffectShader || null,
-          opacity: effectOpacity,
-          tile: effectTile,
-          tileScale: effectTileScale,
-          blendMode: effectBlendMode,
-          speed: settings.effectSpeed || 1,
+          type: 'marquee', rect: { x, y, width: w, height: h },
+          effectUrl: activeEffectUrl, effectId: activeEffectId,
+          isShader: !!activeShader, shaderName: activeShader || null,
+          opacity, tile, tileScale, blendMode,
         });
       }
-    } else if ((effectTool === 'brush' || effectTool === 'bezier') && currentStroke.length > 0) {
+      setMarqueeStart(null); setMarqueeCurrent(null);
+    } else if (currentStroke.length >= 2 && hasActiveEffect) {
       addEffectPath({
-        type: effectTool,
-        points: currentStroke,
-        effectUrl: activeEffectUrl,
-        effectId: settings.activeEffectId,
-        isShader: !!activeEffectShader,
-        shaderName: activeEffectShader || null,
-        width: effectBrushSize,
-        opacity: effectOpacity,
-        tile: effectTile,
-        tileScale: effectTileScale,
-        blendMode: effectBlendMode,
-        speed: settings.effectSpeed || 1,
+        type: effectTool === 'bezier' ? 'bezier' : 'brush',
+        points: [...currentStroke],
+        effectUrl: activeEffectUrl, effectId: activeEffectId,
+        isShader: !!activeShader, shaderName: activeShader || null,
+        width: brushSize, opacity, tile, tileScale, blendMode,
       });
     }
-
     setCurrentStroke([]);
-    setMarqueeStart(null);
-    setMarqueeCurrent(null);
-  }, [
-    isDrawing,
-    activeEffectUrl,
-    effectTool,
-    marqueeStart,
-    marqueeCurrent,
-    currentStroke,
-    effectBrushSize,
-    effectOpacity,
-    effectTile,
-    effectTileScale,
-    effectBlendMode,
-    settings.activeEffectId,
-    settings.effectSpeed,
-    addEffectPath
-  ]);
+  }, [isDrawing, effectTool, marqueeStart, marqueeCurrent, currentStroke,
+      hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
+      brushSize, opacity, tile, tileScale, blendMode, addEffectPath]);
 
-  // Global window mouseup listener
+  // Release on window mouseup (handles dragging off canvas)
   useEffect(() => {
     if (!isDrawing) return;
-    const onWindowUp = () => handleMouseUp();
-    window.addEventListener('mouseup', onWindowUp);
-    window.addEventListener('touchend', onWindowUp);
-    return () => {
-      window.removeEventListener('mouseup', onWindowUp);
-      window.removeEventListener('touchend', onWindowUp);
-    };
+    const up = () => handleMouseUp();
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
   }, [isDrawing, handleMouseUp]);
 
-  const cWidth = canvasSize?.width || (typeof window !== 'undefined' ? window.innerWidth : 1920);
-  const cHeight = canvasSize?.height || (typeof window !== 'undefined' ? window.innerHeight : 1080);
+  // Escape cancels flow path
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') { setFlowPoints([]); setIsDrawing(false); setCurrentStroke([]); } };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   if (!effectPaths.length && !effectsEnabled) return null;
 
-  const cursor = !effectsEnabled ? 'default'
-    : effectMode === 'flow' ? 'crosshair'
-    : effectTool === 'eraser' ? 'cell'
-    : 'crosshair';
+  // ── Cursor ────────────────────────────────────────────────────────────────
+  const cursorStyle = !effectsEnabled    ? 'default'
+    : !hasActiveEffect                    ? 'not-allowed'
+    : effectMode === 'flow'               ? 'crosshair'
+    : effectTool === 'eraser'             ? 'cell'
+    : effectTool === 'marquee'            ? 'crosshair'
+    : 'none'; // brush uses the canvas ring preview as cursor
 
   return (
     <div
-      className="absolute inset-0 pointer-events-none"
-      style={{ zIndex: 15, pointerEvents: effectsEnabled ? 'auto' : 'none', touchAction: effectsEnabled ? 'none' : 'auto' }}
-      data-testid="effects-drawing-overlay"
+      className="absolute inset-0"
+      style={{ zIndex: 15, pointerEvents: effectsEnabled ? 'all' : 'none' }}
     >
       <canvas
         ref={canvasRef}
-        width={cWidth}
-        height={cHeight}
-        className="w-full h-full absolute inset-0 block"
-        style={{ cursor, pointerEvents: effectsEnabled ? 'auto' : 'none' }}
+        width={cW}
+        height={cH}
+        className="absolute inset-0 w-full h-full block"
+        style={{ cursor: cursorStyle, touchAction: 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onMouseLeave={() => setMousePos(null)}
         onTouchStart={handleMouseDown}
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
       />
-      {/* Flow mode: render control points and path preview as SVG overlay */}
+
+      {/* Flow mode: SVG point overlay */}
       {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 16 }}>
-          {/* Path line through placed points */}
           {flowPoints.length >= 2 && (
             <polyline
-              points={flowPoints.map(p => `${p.x * cWidth / (canvasSize?.width || cWidth)},${p.y * cHeight / (canvasSize?.height || cHeight)}`).join(' ')}
-              fill="none" stroke="#caa055" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.7"
+              points={flowPoints.map(p => `${p.x * cW / cW},${p.y * cH / cH}`).join(' ')}
+              fill="none" stroke="#caa055" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.8"
             />
           )}
-          {/* Control point dots */}
           {flowPoints.map((pt, idx) => (
             <g key={idx}>
-              <circle
-                cx={pt.x * cWidth / (canvasSize?.width || cWidth)}
-                cy={pt.y * cHeight / (canvasSize?.height || cHeight)}
-                r={idx === 0 ? 7 : 5}
+              <circle cx={pt.x} cy={pt.y} r={idx === 0 ? 8 : 5}
                 fill={idx === 0 ? '#caa055' : '#fff'}
-                stroke="#caa055" strokeWidth="2" opacity="0.9"
-              />
+                stroke="#caa055" strokeWidth="2" opacity="0.95" />
               {idx === 0 && (
-                <text x={pt.x * cWidth / (canvasSize?.width || cWidth) + 10} y={pt.y * cHeight / (canvasSize?.height || cHeight) - 8}
-                  fill="#caa055" fontSize="10" fontFamily="monospace">START</text>
+                <text x={pt.x + 12} y={pt.y - 8} fill="#caa055"
+                  fontSize="11" fontFamily="monospace" opacity="0.9">START</text>
               )}
             </g>
           ))}
-          {/* Instruction */}
-          <text x="12" y="20" fill="#caa055" fontSize="11" fontFamily="monospace" opacity="0.8">
-            Click to place points · Double-click to finish · {flowPoints.length} point{flowPoints.length !== 1 ? 's' : ''} placed
+          <rect x="8" y="8" width="340" height="20" rx="4" fill="rgba(0,0,0,0.6)" />
+          <text x="14" y="22" fill="#caa055" fontSize="11" fontFamily="monospace">
+            {`Click to place · Double-click to finish · ${flowPoints.length} point${flowPoints.length !== 1 ? 's' : ''}`}
           </text>
         </svg>
       )}
-      {/* Cancel flow button */}
+
+      {/* Flow cancel button */}
       {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
         <button
-          onClick={() => { setFlowPoints([]); setIsPlacingFlow(false); }}
+          onClick={() => setFlowPoints([])}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded bg-black/80 border border-red-500/40 text-red-400 text-xs font-mono hover:bg-red-900/30 transition-all"
           style={{ zIndex: 20 }}
         >
-          Cancel path (Esc)
+          Cancel (Esc)
         </button>
+      )}
+
+      {/* No effect selected warning */}
+      {effectsEnabled && !hasActiveEffect && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-xs font-mono pointer-events-none" style={{ zIndex: 20 }}>
+          Select an effect from the panel first
+        </div>
       )}
     </div>
   );
 }
 
-// ── EFFECTS CONTROL PANEL ───────────────────────────────────────────────────
 
 export function EffectsControlPanel({ onClose }) {
   const {
@@ -1313,31 +1146,65 @@ export function EffectsControlPanel({ onClose }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Size check upfront — Firestore limit is 1MB per document
+    const MAX_SIZE_MB = 0.9;
+    const fileSizeMB = file.size / (1024 * 1024);
+
+    const isVideo = file.type.startsWith('video/');
+    const isGif = file.type === 'image/gif';
+
+    // Videos can't be compressed — hard reject if too large
+    if (isVideo && fileSizeMB > MAX_SIZE_MB) {
+      toast.error(`Video too large (${fileSizeMB.toFixed(1)}MB). Max ~900KB for vault storage. Use a short looping clip or convert to GIF/WebP.`);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (event) => {
-      if (event.target?.result) {
-        const url = event.target.result;
-        const name = file.name.replace(/\.[^/.]+$/, '');
-        const newEff = {
-          id: `custom_fx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: name,
-          theme: 'Custom',
-          url: url,
-          imageUrl: url,
-          category: 'other',
-          tags: ['custom', 'video', 'effect'],
-          authorId: userId,
-          authorName: getLocalUserName(),
-          created_at: new Date().toISOString()
-        };
+      if (!event.target?.result) return;
+      let url = event.target.result;
+      const name = file.name.replace(/\.[^/.]+$/, '');
 
-        // Save to Firebase
-        saveEffectToFirebase(newEff).catch(() => {});
+      // Compress images (including GIF if possible — browser converts to static PNG but that's OK for previews)
+      // For GIF: warn if large, still attempt to save
+      if (isGif && fileSizeMB > MAX_SIZE_MB) {
+        toast.warning(`GIF is ${fileSizeMB.toFixed(1)}MB — may fail to save. Try keeping GIFs under 900KB.`);
+      }
 
-        // Add to local state
+      // Compress static images
+      if (!isVideo && !isGif && url.startsWith('data:image/')) {
+        url = await optimizeBase64ForFirestore(url, 1024, 0.82);
+      }
+
+      const newEff = {
+        id: `custom_fx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name,
+        theme: 'Custom',
+        url,
+        imageUrl: url,
+        category: isVideo ? 'video' : isGif ? 'animated' : 'image',
+        tags: ['custom', isVideo ? 'video' : isGif ? 'gif' : 'image', 'effect'],
+        authorId: userId,
+        authorName: getLocalUserName(),
+        source: 'mine',
+        created_at: new Date().toISOString(),
+      };
+
+      // Save to Firebase — show loading toast
+      const toastId = toast.loading(`Saving "${name}" to vault...`);
+      try {
+        await saveEffectToFirebase(newEff);
+        toast.success(`"${name}" added to vault!`, { id: toastId });
         setMyEffects(prev => [newEff, ...prev]);
         setCommunityEffects(prev => [newEff, ...prev]);
         selectEffect(newEff);
+      } catch (err) {
+        const msg = err?.message || '';
+        if (msg.includes('exceeds the maximum allowed size') || msg.includes('RESOURCE_EXHAUSTED')) {
+          toast.error(`File too large for vault (${fileSizeMB.toFixed(1)}MB). Firestore max is 1MB. Use a smaller file.`, { id: toastId });
+        } else {
+          toast.error(`Failed to save: ${msg}`, { id: toastId });
+        }
       }
     };
     reader.readAsDataURL(file);
