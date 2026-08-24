@@ -1303,6 +1303,9 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   const handleMouseDown = useCallback((e) => {
     if (!interactive) return;
 
+    // When effects painting mode is active, let the EffectsDrawingOverlay handle all clicks
+    if (settings.effectsEnabled) return;
+
     // Track activity for session
     if (resetInactivityTimer) {
       resetInactivityTimer();
@@ -1563,7 +1566,14 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
 
   const handleMouseMove = useCallback((e) => {
     const coords = getCanvasCoords(e);
-    
+
+    // When effects painting mode is active, pass mouse events to EffectsDrawingOverlay
+    if (settings.effectsEnabled) {
+      // Still track cursor for the brush size indicator
+      setCursorPos({ x: coords.x, y: coords.y });
+      return;
+    }
+
     // Track cursor position for tool size circle indicator
     setCursorPos({ x: coords.x, y: coords.y });
 
@@ -1675,6 +1685,9 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   }, [sessionCode, broadcastPing, getCanvasCoords]);
 
   const handleMouseUp = useCallback(() => {
+    // When effects painting mode is active, let EffectsDrawingOverlay handle mouse up
+    if (settings.effectsEnabled) return;
+
     // Process Marquee Box Selection
     if (marqueeState.active) {
       if (marqueeState.start && marqueeState.current) {
