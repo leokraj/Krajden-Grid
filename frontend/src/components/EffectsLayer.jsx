@@ -1060,9 +1060,10 @@ export function EffectsControlPanel({ onClose }) {
   const loadEffectsData = async () => {
     try {
       const res = await fetch('/api/library/effects');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.effects)) {
+      const ct = res.headers?.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json().catch(() => null);
+        if (Array.isArray(data?.effects)) {
           setCommunityEffects(data.effects);
           setMyEffects(data.effects.filter(e => e.authorId === userId));
         }
@@ -1087,20 +1088,22 @@ export function EffectsControlPanel({ onClose }) {
       map.set(p.id, { ...p, source: 'builtin' });
     });
 
-    // 1. Cloud Firestore Effects (vault)
+    // 0. GPU Shader Built-ins (always available, no upload)
     BUILTIN_EFFECT_PRESETS.forEach(p => {
+      map.set(p.id, { ...p, source: 'builtin' });
+    });
+
+    // 1. Cloud Firestore Effects (admin vault — uploaded via admin panel)
+    firebaseEffects.forEach(p => {
+      if (!p || !p.id) return;
       map.set(p.id, { ...p, source: 'vault' });
     });
 
-    // 2. Cloud Firestore Effects
-    firebaseEffects.forEach(p => {
-      if (!p || !p.id) return;
-      map.set(p.id, { ...p, source: 'community' });
-    });
-
-    // 3. Community / Local Effects
+    // 2. Community / user-uploaded effects
     communityEffects.forEach(p => {
       if (!p || !p.id) return;
+      // Don't overwrite vault effects with community duplicates
+      if (map.has(p.id)) return;
       map.set(p.id, { ...p, source: p.authorId === userId ? 'mine' : 'community' });
     });
 
@@ -1442,32 +1445,33 @@ export function EffectsControlPanel({ onClose }) {
                 {/* Media Preview Box */}
                 <div className="w-full h-16 bg-black relative overflow-hidden flex items-center justify-center">
                   {eff.isShader ? (
-                    // Shader effect: show colored gradient preview with name
-                    <div className="w-full h-full flex items-center justify-center"
-                      style={{
-                        background: `radial-gradient(ellipse at center, ${eff.previewColor || '#caa055'}55 0%, ${eff.previewColor || '#caa055'}22 50%, transparent 100%)`,
-                      }}>
-                      <span className="text-2xl">
-                        {eff.shaderName === 'fire' ? '🔥' :
-                         eff.shaderName === 'ice' ? '❄️' :
-                         eff.shaderName === 'lightning' ? '⚡' :
-                         eff.shaderName === 'poison' ? '☠️' :
-                         eff.shaderName === 'fog' ? '🌫️' :
-                         eff.shaderName === 'firefly' ? '✨' :
-                         eff.shaderName === 'wind' ? '💨' : '🌟'}
-                      </span>
+                    // GPU shader: colored gradient + emoji preview
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1"
+                      style={{ background: `radial-gradient(ellipse at center, ${eff.previewColor || '#caa055'}55 0%, ${eff.previewColor || '#caa055'}11 70%, transparent 100%)` }}>
+                      <span className="text-2xl leading-none">{eff.emoji || '✨'}</span>
+                      <span className="text-[7px] text-white/40 font-mono uppercase tracking-wider">GPU</span>
                     </div>
                   ) : isVideo ? (
                     <video
                       src={eff.url || eff.imageUrl}
                       autoPlay loop muted playsInline
                       className="w-full h-full object-cover pointer-events-none"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     />
                   ) : (
                     <img
                       src={eff.url || eff.imageUrl}
                       alt={eff.name}
                       className="w-full h-full object-cover pointer-events-none"
+                      onError={(e) => {
+                        // Broken image — show placeholder
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement.style.background = '#1a1a1a';
+                        const ph = document.createElement('div');
+                        ph.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px';
+                        ph.innerHTML = '<span style="font-size:20px">🎬</span><span style="font-size:8px;color:rgba(255,255,255,0.3);font-family:monospace">No preview</span>';
+                        e.currentTarget.parentElement.appendChild(ph);
+                      }}
                     />
                   )}
 
