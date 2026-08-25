@@ -11,8 +11,17 @@ import {
   onSnapshot, 
   query, 
   orderBy,
+  limit,
   writeBatch
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  uploadString,
+  getDownloadURL,
+  deleteObject,
+} from 'firebase/storage';
 
 export const firebaseConfig = {
   projectId: "gen-lang-client-0652230217",
@@ -29,16 +38,43 @@ export const firebaseConfig = {
 
 let app;
 let db;
+let storage;
 
 try {
   app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-  // Initialize Firestore with the specific provisioned database ID
   db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+  storage = getStorage(app);
 } catch (error) {
   console.error('[Firebase Init] Failed to initialize Firebase client:', error);
 }
 
-export { app, db };
+export { app, db, storage };
+
+// ── Firebase Storage Upload Utility ──────────────────────────────────────────
+export async function uploadToStorage(dataUrl, path) {
+  if (!storage) throw new Error('Firebase Storage not initialized');
+  if (!dataUrl || !path) throw new Error('Missing dataUrl or path');
+
+  // If it's already a remote URL (not base64), return as-is
+  if (!dataUrl.startsWith('data:')) return dataUrl;
+
+  const ref = storageRef(storage, path);
+  const [header, base64Data] = dataUrl.split(',');
+  const mimeType = header.match(/data:([^;]+)/)?.[1] || 'application/octet-stream';
+
+  const byteString = atob(base64Data);
+  const bytes = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+
+  const blob = new Blob([bytes], { type: mimeType });
+  await uploadBytes(ref, blob, { contentType: mimeType });
+  return await getDownloadURL(ref);
+}
+
+export async function deleteFromStorage(path) {
+  if (!storage || !path) return;
+  try { await deleteObject(storageRef(storage, path)); } catch(_) {}
+}
 
 // Connection verification test
 export async function testConnection() {
@@ -160,29 +196,62 @@ export async function saveTokenToFirebase(token) {
   const docRef = doc(db, 'tokens', docId);
 
   let imageUrl = token.imageUrl || token.url || '';
-  const isVideo = imageUrl.startsWith('data:video/');
-  const isGif = imageUrl.startsWith('data:image/gif');
-  if (!isVideo && !isGif && imageUrl.startsWith('data:image/')) {
-    imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.82);
-  }
 
-  // Size check
-  const approxSizeBytes = new Blob([imageUrl]).size;
-  if (approxSizeBytes > 900_000) {
-    throw new Error(`Token file too large (${(approxSizeBytes/1024/1024).toFixed(1)}MB). Max ~900KB. Use a smaller image.`);
+  // Upload to Firebase Storage if it's a base64 data URL
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:image/gif') ? 'gif'
+              : imageUrl.startsWith('data:video/mp4') ? 'mp4'
+              : imageUrl.startsWith('data:video/webm') ? 'webm'
+              : imageUrl.startsWith('data:image/png') ? 'png'
+              : imageUrl.startsWith('data:image/webp') ? 'webp'
+              : 'jpg';
+    const storagePath = `tokens/${docId}.${ext}`;
+    try {
+      imageUrl = await uploadToStorage(imageUrl, storagePath);
+    } catch(e) {
+      console.warn('[Firebase Storage] Token upload failed, falling back to Firestore base64:', e.message);
+      // Fall back to compressed base64 if Storage fails
+      if (!imageUrl.startsWith('data:video/') && !imageUrl.startsWith('data:image/gif')) {
+        imageUrl = await optimizeBase64ForFirestore(imageUrl, 512, 0.75);
+      }
+    }
   }
 
   const data = {
     ...token,
     id: docId,
-    imageUrl: imageUrl,
+    imageUrl,
     url: imageUrl,
     name: token.name || 'Unnamed Token',
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   };
 
   await setDoc(docRef, data, { merge: true });
   return data;
+}
+
+export async function saveTokensBatchToFirebase(tokens = []) {
+  if (!db || !tokens || tokens.length === 0) return;
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < tokens.length; i += CHUNK_SIZE) {
+    const chunk = tokens.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const t of chunk) {
+      const docId = String(t.id || `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+      const ref = doc(db, 'tokens', docId);
+      const url = t.imageUrl || t.url || '';
+      batch.set(ref, {
+        ...t,
+        id: docId,
+        imageUrl: url,
+        url: url,
+        isVault: true,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+    }
+    await batch.commit();
+    await new Promise((r) => setTimeout(r, 40));
+  }
 }
 
 export async function deleteTokenFromFirebase(id, url) {
@@ -243,34 +312,59 @@ export async function saveBattlemapToFirebase(mapItem) {
   const docId = String(mapItem.id || `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   const docRef = doc(db, 'battlemaps', docId);
 
-  // Compress battle map if it is an oversized data URL
-  let mapUrl = mapItem.url || mapItem.imageUrl || '';
-  if (mapUrl.startsWith('data:image/')) {
-    mapUrl = await optimizeBase64ForFirestore(mapUrl, 1920, 0.78);
+  let url = mapItem.url || mapItem.imageUrl || '';
+
+  // Upload to Firebase Storage if it's a base64 data URL
+  if (url.startsWith('data:')) {
+    const ext = url.startsWith('data:video/mp4') ? 'mp4'
+              : url.startsWith('data:video/webm') ? 'webm'
+              : url.startsWith('data:image/gif') ? 'gif'
+              : url.startsWith('data:image/png') ? 'png'
+              : url.startsWith('data:image/webp') ? 'webp'
+              : 'jpg';
+    const storagePath = `battlemaps/${docId}.${ext}`;
+    try {
+      url = await uploadToStorage(url, storagePath);
+    } catch(e) {
+      console.warn('[Firebase Storage] Battlemap upload failed:', e.message);
+      throw new Error(`Storage upload failed: ${e.message}`);
+    }
   }
 
   const data = {
     ...mapItem,
     id: docId,
-    url: mapUrl,
+    url,
+    imageUrl: url,
     name: mapItem.name || 'Battle Map',
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   };
 
-  try {
-    await setDoc(docRef, data, { merge: true });
-  } catch (err) {
-    // If still oversized (e.g. 4MB+ raw bitmap), apply aggressive downscaling
-    if (err.message && err.message.includes('exceeds the maximum allowed size')) {
-      console.warn('[Firebase] Battlemap oversized, applying secondary compression...');
-      const fallbackUrl = await optimizeBase64ForFirestore(mapUrl, 1280, 0.65);
-      data.url = fallbackUrl;
-      await setDoc(docRef, data, { merge: true });
-    } else {
-      throw err;
-    }
-  }
+  await setDoc(docRef, data, { merge: true });
   return data;
+}
+
+export async function saveBattlemapsBatchToFirebase(maps = []) {
+  if (!db || !maps || maps.length === 0) return;
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < maps.length; i += CHUNK_SIZE) {
+    const chunk = maps.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const m of chunk) {
+      const docId = String(m.id || `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+      const ref = doc(db, 'battlemaps', docId);
+      const url = m.url || m.imageUrl || '';
+      batch.set(ref, {
+        ...m,
+        id: docId,
+        url: url,
+        isVault: true,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+    }
+    await batch.commit();
+    await new Promise((r) => setTimeout(r, 40));
+  }
 }
 
 export async function deleteBattlemapFromFirebase(id, url) {
@@ -329,30 +423,58 @@ export async function saveEffectToFirebase(effectItem) {
 
   let imageUrl = effectItem.imageUrl || effectItem.url || '';
 
-  // Only compress static images — never try to compress video or GIF data URLs
-  const isVideo = imageUrl.startsWith('data:video/');
-  const isGif = imageUrl.startsWith('data:image/gif');
-  if (!isVideo && !isGif && imageUrl.startsWith('data:image/')) {
-    imageUrl = await optimizeBase64ForFirestore(imageUrl, 1024, 0.80);
-  }
-
-  // Check size before attempting write — Firestore limit ~1MB
-  const approxSizeBytes = new Blob([imageUrl]).size;
-  if (approxSizeBytes > 900_000) {
-    throw new Error(`File too large for Firestore (${(approxSizeBytes/1024/1024).toFixed(1)}MB). Max ~900KB.`);
+  // Upload to Firebase Storage if it's a base64 data URL
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:video/mp4') ? 'mp4'
+              : imageUrl.startsWith('data:video/webm') ? 'webm'
+              : imageUrl.startsWith('data:image/gif') ? 'gif'
+              : imageUrl.startsWith('data:image/png') ? 'png'
+              : imageUrl.startsWith('data:image/webp') ? 'webp'
+              : 'jpg';
+    const storagePath = `effects/${docId}.${ext}`;
+    try {
+      imageUrl = await uploadToStorage(imageUrl, storagePath);
+    } catch(e) {
+      console.warn('[Firebase Storage] Effect upload failed:', e.message);
+      throw new Error(`Storage upload failed: ${e.message}`);
+    }
   }
 
   const data = {
     ...effectItem,
     id: docId,
-    imageUrl: imageUrl,
+    imageUrl,
     url: imageUrl,
     name: effectItem.name || 'Visual Effect',
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   };
 
   await setDoc(docRef, data, { merge: true });
   return data;
+}
+
+export async function saveEffectsBatchToFirebase(effects = []) {
+  if (!db || !effects || effects.length === 0) return;
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < effects.length; i += CHUNK_SIZE) {
+    const chunk = effects.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const eff of chunk) {
+      const docId = String(eff.id || `effect_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+      const ref = doc(db, 'effects', docId);
+      const url = eff.imageUrl || eff.url || '';
+      batch.set(ref, {
+        ...eff,
+        id: docId,
+        imageUrl: url,
+        url: url,
+        isVault: true,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+    }
+    await batch.commit();
+    await new Promise((r) => setTimeout(r, 40));
+  }
 }
 
 export async function deleteEffectFromFirebase(id, url) {
@@ -383,9 +505,14 @@ export async function deleteEffectFromFirebase(id, url) {
 
 export async function seedInitialVaultToFirebase(defaultTokens = [], defaultMaps = [], defaultEffects = []) {
   if (!db) return;
+  const SEED_CACHE_KEY = 'krajden_firebase_vault_seeded_v3';
   try {
-    // Seed Tokens if empty
-    const tokensSnap = await getDocs(collection(db, 'tokens'));
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(SEED_CACHE_KEY)) {
+      return;
+    }
+
+    // Seed Tokens if empty (using limit(1) to avoid consuming excessive read quota)
+    const tokensSnap = await getDocs(query(collection(db, 'tokens'), limit(1)));
     if (tokensSnap.empty && defaultTokens.length > 0) {
       console.log(`[Firebase Seeding] Seeding ${defaultTokens.length} default tokens to Firestore...`);
       const batch = writeBatch(db);
@@ -403,8 +530,8 @@ export async function seedInitialVaultToFirebase(defaultTokens = [], defaultMaps
       console.log('[Firebase Seeding] Tokens seeded successfully.');
     }
 
-    // Seed Maps if empty
-    const mapsSnap = await getDocs(collection(db, 'battlemaps'));
+    // Seed Maps if empty (using limit(1))
+    const mapsSnap = await getDocs(query(collection(db, 'battlemaps'), limit(1)));
     if (mapsSnap.empty && defaultMaps.length > 0) {
       console.log(`[Firebase Seeding] Seeding ${defaultMaps.length} default battlemaps to Firestore...`);
       const batch = writeBatch(db);
@@ -422,9 +549,9 @@ export async function seedInitialVaultToFirebase(defaultTokens = [], defaultMaps
       console.log('[Firebase Seeding] Battlemaps seeded successfully.');
     }
 
-    // Seed Effects if empty
+    // Seed Effects if empty (using limit(1))
     if (defaultEffects.length > 0) {
-      const effectsSnap = await getDocs(collection(db, 'effects'));
+      const effectsSnap = await getDocs(query(collection(db, 'effects'), limit(1)));
       if (effectsSnap.empty) {
         console.log(`[Firebase Seeding] Seeding ${defaultEffects.length} default effects to Firestore...`);
         const batch = writeBatch(db);
@@ -442,7 +569,21 @@ export async function seedInitialVaultToFirebase(defaultTokens = [], defaultMaps
         console.log('[Firebase Seeding] Effects seeded successfully.');
       }
     }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SEED_CACHE_KEY, 'true');
+    }
   } catch (e) {
-    console.error('[Firebase Seeding] Error during initial seed:', e);
+    const msg = e?.message || String(e);
+    if (msg.includes('Quota limit exceeded') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('[Firebase Seeding] Firestore daily read quota reached; using built-in vault defaults.');
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(SEED_CACHE_KEY, 'true');
+        }
+      } catch {}
+    } else {
+      console.warn('[Firebase Seeding] Note during initial seed check:', msg);
+    }
   }
 }
