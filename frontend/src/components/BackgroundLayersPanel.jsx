@@ -75,7 +75,17 @@ export function BackgroundLayersPanel({ onUndock }) {
   const [localCustomMaps, setLocalCustomMaps] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('krajden_local_custom_maps') || '[]');
-      return Array.isArray(stored) ? stored : [];
+      if (!Array.isArray(stored)) return [];
+      // Resolve asset URLs stored separately
+      return stored.map(m => {
+        if (!m.url || !m.imageUrl) {
+          const assetUrl = localStorage.getItem(`map_asset_${m.id}`)
+                        || sessionStorage.getItem(`map_asset_${m.id}`)
+                        || '';
+          return { ...m, url: assetUrl, imageUrl: assetUrl };
+        }
+        return m;
+      }).filter(m => m.url); // only include maps with actual data
     } catch {
       return [];
     }
@@ -117,9 +127,10 @@ export function BackgroundLayersPanel({ onUndock }) {
         setDeletedVaultIds(storedDeleted);
       }
       const res = await fetch('/api/library/battlemaps');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.battlemaps)) {
+      const ct = res.headers?.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json().catch(() => null);
+        if (Array.isArray(data?.battlemaps)) {
           setGlobalBattleMaps(data.battlemaps);
         }
       }
@@ -198,13 +209,13 @@ export function BackgroundLayersPanel({ onUndock }) {
       });
     });
 
-    // 3. Cloud Firestore Battlemaps
+    // 3. Cloud Firestore Battlemaps (admin-uploaded = vault)
     firebaseMaps.forEach(m => {
       if (!m || !m.id) return;
       mapMap.set(m.id, {
         ...m,
-        source: 'community',
-        theme: m.theme || 'Community',
+        source: m.authorId ? 'community' : 'vault', // has author = user upload, no author = admin vault
+        theme: m.theme || 'Vault',
       });
     });
 
@@ -264,45 +275,55 @@ export function BackgroundLayersPanel({ onUndock }) {
     });
   }, [allVttMaps, activeTab, selectedTheme, searchQuery]);
 
-  // Handle uploading custom battle map
+  // Handle uploading custom battle map — Firebase Storage handles any size
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const toastId = toast.loading(`Uploading "${file.name.replace(/\.[^/.]+$/, '')}"...`);
     const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        const url = event.target.result;
-        const mapName = file.name.replace(/\.[^/.]+$/, '');
-        const newMap = {
-          id: `custom_map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: mapName,
-          theme: 'Custom',
-          url: url,
-          description: 'Uploaded Battle Map',
-          created_at: new Date().toISOString(),
-          source: 'mine'
-        };
+    reader.onload = async (event) => {
+      if (!event.target?.result) return;
+      const url = event.target.result;
+      const mapName = file.name.replace(/\.[^/.]+$/, '');
 
-        // Add directly to active layers
-        addBackgroundLayer(url, mapName);
+      // Add to active layers immediately with local base64
+      addBackgroundLayer(url, mapName);
 
-        // Save to local custom maps storage
-        setLocalCustomMaps(prev => {
-          const updated = [newMap, ...prev];
-          try {
-            localStorage.setItem('krajden_local_custom_maps', JSON.stringify(updated));
-          } catch (storageErr) {
-            console.warn('[LocalStorage] Custom map storage limit:', storageErr);
-          }
-          return updated;
-        });
+      const newMap = {
+        id: `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: mapName,
+        theme: 'Custom',
+        url,
+        imageUrl: url,
+        description: 'Uploaded Battle Map',
+        created_at: new Date().toISOString(),
+        source: 'mine',
+      };
 
-        // Persist to Cloud Firestore for sharing
-        saveBattlemapToFirebase(newMap).catch(err => console.warn('[Firebase] Map save note:', err));
-        toast.success(`Loaded "${mapName}" into background layers and Map Library!`);
+      // Save locally
+      try {
+        const meta = { ...newMap, url: undefined, imageUrl: undefined };
+        const existing = JSON.parse(localStorage.getItem('krajden_local_custom_maps') || '[]');
+        localStorage.setItem('krajden_local_custom_maps', JSON.stringify([meta, ...existing]));
+        localStorage.setItem(`map_asset_${newMap.id}`, url);
+      } catch(_) {}
+
+      setLocalCustomMaps(prev => [newMap, ...prev]);
+
+      // Upload to Firebase Storage — no size limit
+      try {
+        const saved = await saveBattlemapToFirebase(newMap);
+        toast.success(`"${mapName}" uploaded to vault!`, { id: toastId });
+        // Update active layer with permanent Storage URL
+        if (saved?.url && saved.url !== url) {
+          setLocalCustomMaps(prev => prev.map(m => m.id === newMap.id ? { ...m, url: saved.url, imageUrl: saved.url } : m));
+        }
+      } catch(err) {
+        toast.warning(`"${mapName}" loaded locally. Vault sync failed: ${err.message}`, { id: toastId });
       }
     };
+    reader.onerror = () => toast.error('Failed to read file', { id: toastId });
     reader.readAsDataURL(file);
     e.target.value = '';
   };
