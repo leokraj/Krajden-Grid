@@ -29,7 +29,7 @@ export const firebaseConfig = {
   apiKey: "AIzaSyAcFNalZUXT1_MlfkhH34XkmoqWzsqESOg",
   authDomain: "gen-lang-client-0652230217.firebaseapp.com",
   firestoreDatabaseId: "ai-studio-krajdengrid-29722090-d9f6-40a4-9c98-c4e76e51e4ff",
-  storageBucket: "gen-lang-client-0652230217.firebasestorage.app",
+  storageBucket: "gen-lang-client-0602460923.firebasestorage.app",
   messagingSenderId: "277883395164",
   measurementId: "",
   oAuthClientId: "277883395164-u3v9dj7rjg5gbctkq6n124b21usqkse9.apps.googleusercontent.com",
