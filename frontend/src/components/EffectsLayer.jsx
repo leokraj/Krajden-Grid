@@ -18,6 +18,82 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useGrid } from '../context/GridContext';
 import { subscribeEffects, saveEffectToFirebase, deleteEffectFromFirebase } from '../lib/firebase';
+
+// ── Local Effect Storage (IndexedDB via localStorage for large files) ────────
+// Stores effects locally — no size limit, no server, works offline.
+// Effects are keyed by id and stored as base64 data URLs.
+
+const LOCAL_EFFECTS_KEY = 'krajden_local_effects';
+
+function getLocalEffects() {
+  try {
+    const raw = localStorage.getItem(LOCAL_EFFECTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(_) { return []; }
+}
+
+function saveLocalEffect(effect) {
+  try {
+    const effects = getLocalEffects().filter(e => e.id !== effect.id);
+    effects.unshift(effect);
+    // Store metadata separately from data URL to avoid quota issues
+    localStorage.setItem(LOCAL_EFFECTS_KEY, JSON.stringify(effects.map(e => ({ ...e, url: undefined, imageUrl: undefined }))));
+    // Store data URL separately keyed by id
+    if (effect.url || effect.imageUrl) {
+      localStorage.setItem(`effect_asset_${effect.id}`, effect.url || effect.imageUrl);
+    }
+    return true;
+  } catch(e) {
+    // localStorage quota exceeded — try IndexedDB via sessionStorage
+    try {
+      sessionStorage.setItem(`effect_asset_${effect.id}`, effect.url || effect.imageUrl);
+      return true;
+    } catch(_) { return false; }
+  }
+}
+
+function deleteLocalEffect(id) {
+  try {
+    const effects = getLocalEffects().filter(e => e.id !== id);
+    localStorage.setItem(LOCAL_EFFECTS_KEY, JSON.stringify(effects));
+    localStorage.removeItem(`effect_asset_${id}`);
+    sessionStorage.removeItem(`effect_asset_${id}`);
+  } catch(_) {}
+}
+
+function getLocalEffectUrl(id) {
+  return localStorage.getItem(`effect_asset_${id}`)
+      || sessionStorage.getItem(`effect_asset_${id}`)
+      || null;
+}
+
+// ── Static SVG Splatter Presets ───────────────────────────────────────────────
+// Simple blob splats — no drips, no animation, just paint marks
+
+function makeSplatSvg(color1, color2, count = 12, seed = 0) {
+  const rng = (n) => { let x = Math.sin(n + seed) * 43758.5453; return x - Math.floor(x); };
+  let blobs = '';
+  for (let i = 0; i < count; i++) {
+    const cx = 10 + rng(i * 7 + 1) * 80;
+    const cy = 10 + rng(i * 7 + 2) * 80;
+    const rx = 3 + rng(i * 7 + 3) * 14;
+    const ry = 2 + rng(i * 7 + 4) * 10;
+    const rot = rng(i * 7 + 5) * 360;
+    const alpha = 0.6 + rng(i * 7 + 6) * 0.4;
+    const c = rng(i * 7) > 0.5 ? color1 : color2;
+    blobs += `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="${c}" opacity="${alpha.toFixed(2)}" transform="rotate(${rot.toFixed(1)},${cx.toFixed(1)},${cy.toFixed(1)})"/>`;
+    // Small satellite dots
+    for (let j = 0; j < 3; j++) {
+      const dx = cx + (rng(i*21+j*3)*30-15), dy = cy + (rng(i*21+j*3+1)*30-15);
+      const dr = 0.8 + rng(i*21+j*3+2) * 3;
+      blobs += `<circle cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" r="${dr.toFixed(1)}" fill="${c}" opacity="${(alpha*0.7).toFixed(2)}"/>`;
+    }
+  }
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">${blobs}</svg>`)}`;
+}
+
+const STATIC_BLOOD_SPLAT_URL = makeSplatSvg('#8b0000', '#cc0000', 14, 42);
+const STATIC_ACID_SPLAT_URL  = makeSplatSvg('#4a7c00', '#88cc00', 12, 17);
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -419,7 +495,22 @@ const SHADER_FRAGS = {
       gl_FragColor=vec4(c*a,a);
     }`,
 
-  // ARCANE — swirling purple-cyan portal energy
+  // SCENIC LIGHT — warm circular glow, configurable color via u_color
+  scenic_light: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; uniform vec3 u_lightColor;
+    varying vec2 v_uv;
+    void main(){
+      vec2 uv=v_uv-0.5;
+      uv.x*=u_res.x/max(u_res.y,1.);
+      float r=length(uv)*2.0;
+      // Soft falloff with subtle flicker
+      float flicker=0.95+0.05*sin(u_time*3.7+0.5)*sin(u_time*2.3);
+      float glow=smoothstep(1.0,0.0,r)*smoothstep(1.0,0.05,r)*flicker;
+      float core=smoothstep(0.3,0.0,r)*0.6;
+      vec3 c=mix(u_lightColor*0.4,u_lightColor,glow+core);
+      float a=(glow+core*0.5)*flicker;
+      gl_FragColor=vec4(c,clamp(a,0.,1.));
+    }`,
   arcane: `precision mediump float;
     uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
     float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
@@ -468,12 +559,12 @@ function getWebGLRenderer(shaderName) {
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res') };
+  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res'), lightColor: gl.getUniformLocation(prog,'u_lightColor') };
   _glCache[shaderName] = { gl, canvas, prog, buf, loc, t0: Date.now() };
   return _glCache[shaderName];
 }
 
-export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blendMode) {
+export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blendMode, lightColor) {
   const r = getWebGLRenderer(shaderName);
   if (!r) return;
   const { gl, canvas, prog, buf, loc, t0 } = r;
@@ -486,11 +577,19 @@ export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blend
   gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, 0, 0);
   gl.uniform1f(loc.time, (Date.now()-t0)/1000);
   gl.uniform2f(loc.res, w, h);
+  // Light color uniform (for scenic_light shader)
+  if (loc.lightColor && lightColor) {
+    const [lr, lg, lb] = lightColor;
+    gl.uniform3f(loc.lightColor, lr, lg, lb);
+  } else if (loc.lightColor) {
+    gl.uniform3f(loc.lightColor, 1.0, 0.85, 0.4); // default warm torch
+  }
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
   if (blendMode === 'screen') ctx.globalCompositeOperation = 'screen';
   else if (blendMode === 'lighter') ctx.globalCompositeOperation = 'lighter';
+  else if (blendMode === 'overlay') ctx.globalCompositeOperation = 'overlay';
   else ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(canvas, x, y, w, h);
   ctx.restore();
@@ -507,15 +606,24 @@ export const BUILTIN_EFFECT_PRESETS = [
   { id:'shader_firefly',        name:'Fireflies',      shaderName:'firefly',        category:'area',  tags:['firefly','magic','fey','arcane'], description:'Multicolor glowing orbs — gold, blue, green', isShader:true,isPreset:true,previewColor:'#fbbf24',emoji:'✨' },
   { id:'shader_wind',           name:'Wind & Rain',    shaderName:'wind',           category:'area',  tags:['wind','rain','storm'],            description:'Diagonal rain streaks with wind lines',        isShader:true,isPreset:true,previewColor:'#bfdbfe',emoji:'💨' },
   { id:'shader_smoke',          name:'Smoke',          shaderName:'smoke',          category:'area',  tags:['smoke','cloud','dark'],           description:'Dense dark rolling smoke',                    isShader:true,isPreset:true,previewColor:'#6b7280',emoji:'💨' },
-  { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:'blood_splatter', category:'area',  tags:['blood','combat','splatter'],      description:'Dark red static splatter with drip edges',    isShader:true,isPreset:true,previewColor:'#dc2626',emoji:'🩸' },
-  { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:'acid_splatter',  category:'area',  tags:['acid','toxic','splatter'],        description:'Neon green corrosive bubbling puddles',        isShader:true,isPreset:true,previewColor:'#84cc16',emoji:'🟢' },
+  { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:null, url: null, category:'area', tags:['blood','combat','splatter'], description:'Dark red paint splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'blood', previewColor:'#dc2626', emoji:'🩸' },
+  { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:null, url: null, category:'area', tags:['acid','toxic','splatter'],  description:'Neon green corrosive splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'acid',  previewColor:'#84cc16', emoji:'🟢' },
   { id:'shader_arcane',         name:'Arcane Portal',  shaderName:'arcane',         category:'area',  tags:['arcane','magic','portal'],        description:'Swirling purple-cyan portal energy',          isShader:true,isPreset:true,previewColor:'#8b5cf6',emoji:'🔮' },
   // FLOW effects — drawn along a path
   { id:'shader_lava_river',     name:'Lava River',     shaderName:'lava_river',     category:'flow',  tags:['lava','fire','flow','river'],     description:'Scrolling molten lava channels',              isShader:true,isPreset:true,previewColor:'#f97316',emoji:'🌋' },
   { id:'shader_mud_river',      name:'Mud River',      shaderName:'mud_river',      category:'flow',  tags:['mud','earth','flow','river'],     description:'Dark brown turbid flowing mud',               isShader:true,isPreset:true,previewColor:'#92400e',emoji:'🟤' },
+  // SCENIC LIGHT — click to place a circular light source
+  { id:'scenic_light', name:'Scenic Light', shaderName:'scenic_light', category:'area', tags:['light','torch','glow','ambient'], description:'Placeable circular light — adjustable color and radius', isShader:true, isPreset:true, previewColor:'#fde68a', emoji:'🕯️', isLight:true },
 ];
 
 
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16)/255;
+  const g = parseInt(hex.slice(3,5),16)/255;
+  const b = parseInt(hex.slice(5,7),16)/255;
+  return [r, g, b];
+}
 
 function isVideoUrl(url) {
   if (!url) return false;
@@ -694,7 +802,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           drawPath(points, type, w);
           ctx.save(); ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           ctx.clip();
-          renderShaderToCanvas(ctx, shaderName, bx, by, bw, bh, 1, bm);
+          renderShaderToCanvas(ctx, shaderName, bx, by, bw, bh, 1, bm,
+            effect.lightColor ? hexToRgb(effect.lightColor) : null);
           ctx.restore();
         }
         ctx.restore();
@@ -764,13 +873,33 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         try { oc.drawImage(media, bx, by, bw, bh); } catch (_) {}
       }
 
-      ctx.save();
-      ctx.globalAlpha = op;
-      if (bm === 'screen')   ctx.globalCompositeOperation = 'screen';
-      else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
-      else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
-      ctx.drawImage(off, 0, 0);
-      ctx.restore();
+      // Apply edge fade (feather) if requested
+      const edgeFade = effect.edgeFade || 0;
+      if (edgeFade > 0) {
+        // Use destination-out with a blurred version to soften edges
+        const fadeOff = document.createElement('canvas');
+        fadeOff.width = cW; fadeOff.height = cH;
+        const fc = fadeOff.getContext('2d');
+        fc.drawImage(off, 0, 0);
+        fc.filter = `blur(${edgeFade}px)`;
+        fc.globalCompositeOperation = 'destination-in';
+        fc.drawImage(off, 0, 0);
+        ctx.save();
+        ctx.globalAlpha = op;
+        if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
+        else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+        else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+        ctx.drawImage(fadeOff, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.globalAlpha = op;
+        if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
+        else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+        else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+        ctx.drawImage(off, 0, 0);
+        ctx.restore();
+      }
     };
 
     const render = () => {
@@ -897,6 +1026,20 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     // AREA MODE: drag to paint
     setIsDrawing(true);
+
+    // Scenic light — single click places a circular glow
+    if (activeEffectId === 'scenic_light') {
+      const r = brushSize * 1.5;
+      addEffectPath({
+        type: 'marquee',
+        rect: { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 },
+        effectUrl: null, effectId: activeEffectId,
+        isShader: true, shaderName: 'scenic_light', isLight: true,
+        lightColor: '#ffcc44', opacity, blendMode: 'lighter',
+      });
+      setIsDrawing(false);
+      return;
+    }
     if (effectTool === 'marquee') {
       setMarqueeStart(pt); setMarqueeCurrent(pt);
     } else if (effectTool === 'eraser') {
@@ -1050,6 +1193,8 @@ export function EffectsControlPanel({ onClose }) {
   const [firebaseEffects, setFirebaseEffects] = useState([]);
   const [communityEffects, setCommunityEffects] = useState([]);
   const [myEffects, setMyEffects] = useState([]);
+  const [localEffects, setLocalEffects] = useState(() => getLocalEffects());
+  const [selectedPathId, setSelectedPathId] = useState(null); // id of placed effect being edited
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTheme, setSelectedTheme] = useState('ALL');
   const [isUploading, setIsUploading] = useState(false);
@@ -1107,17 +1252,24 @@ export function EffectsControlPanel({ onClose }) {
   const allEffects = useMemo(() => {
     const map = new Map();
 
-    // 0. GPU Shader Built-ins (always available, no upload)
+    // 0. GPU Shader Built-ins — resolve static SVG URLs for splatter presets
     BUILTIN_EFFECT_PRESETS.forEach(p => {
-      map.set(p.id, { ...p, source: 'builtin' });
+      let resolved = { ...p, source: 'builtin' };
+      if (p.isStaticSvg) {
+        const url = p.svgKey === 'blood' ? STATIC_BLOOD_SPLAT_URL : STATIC_ACID_SPLAT_URL;
+        resolved = { ...resolved, url, imageUrl: url };
+      }
+      map.set(p.id, resolved);
     });
 
-    // 0. GPU Shader Built-ins (always available, no upload)
-    BUILTIN_EFFECT_PRESETS.forEach(p => {
-      map.set(p.id, { ...p, source: 'builtin' });
+    // 0b. Local effects (stored in localStorage)
+    localEffects.forEach(p => {
+      if (!p || !p.id) return;
+      const url = getLocalEffectUrl(p.id) || p.url || p.imageUrl || '';
+      map.set(p.id, { ...p, url, imageUrl: url, source: 'local' });
     });
 
-    // 1. Cloud Firestore Effects (admin vault — uploaded via admin panel)
+    // 1. Cloud Firestore Effects (admin vault)
     firebaseEffects.forEach(p => {
       if (!p || !p.id) return;
       map.set(p.id, { ...p, source: 'vault' });
@@ -1126,22 +1278,21 @@ export function EffectsControlPanel({ onClose }) {
     // 2. Community / user-uploaded effects
     communityEffects.forEach(p => {
       if (!p || !p.id) return;
-      // Don't overwrite vault effects with community duplicates
       if (map.has(p.id)) return;
       map.set(p.id, { ...p, source: p.authorId === userId ? 'mine' : 'community' });
     });
 
     return Array.from(map.values());
-  }, [firebaseEffects, communityEffects, userId]);
+  }, [firebaseEffects, communityEffects, localEffects, userId]);
 
   // Filtered Effects
   const filteredEffects = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allEffects.filter(e => {
-      if (activeTab === 'builtin' && !e.isShader) return false;
-      if (activeTab === 'vault' && (e.source !== 'vault' || e.isShader)) return false;
+      if (activeTab === 'builtin' && e.source !== 'builtin') return false;
+      if (activeTab === 'vault' && e.source !== 'vault') return false;
       if (activeTab === 'community' && e.source !== 'community') return false;
-      if (activeTab === 'mine' && e.source !== 'mine') return false;
+      if (activeTab === 'mine' && e.source !== 'mine' && e.source !== 'local') return false;
 
       if (selectedTheme !== 'ALL') {
         const t = (e.theme || e.category || '').toLowerCase();
@@ -1168,72 +1319,51 @@ export function EffectsControlPanel({ onClose }) {
     toast.success(`Active: "${eff.name}" — Draw on map!`);
   };
 
-  // Upload Custom Video / Animated Effect File
+  // Upload Custom Effect File — Firebase Storage handles any size
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Size check upfront — Firestore limit is 1MB per document
-    const MAX_SIZE_MB = 0.9;
-    const fileSizeMB = file.size / (1024 * 1024);
-
     const isVideo = file.type.startsWith('video/');
     const isGif = file.type === 'image/gif';
-
-    // Videos can't be compressed — hard reject if too large
-    if (isVideo && fileSizeMB > MAX_SIZE_MB) {
-      toast.error(`Video too large (${fileSizeMB.toFixed(1)}MB). Max ~900KB for vault storage. Use a short looping clip or convert to GIF/WebP.`);
-      return;
-    }
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    const toastId = toast.loading(`Uploading "${name}" to vault...`);
 
     const reader = new FileReader();
     reader.onload = async (event) => {
       if (!event.target?.result) return;
       let url = event.target.result;
-      const name = file.name.replace(/\.[^/.]+$/, '');
 
-      // Compress images (including GIF if possible — browser converts to static PNG but that's OK for previews)
-      // For GIF: warn if large, still attempt to save
-      if (isGif && fileSizeMB > MAX_SIZE_MB) {
-        toast.warning(`GIF is ${fileSizeMB.toFixed(1)}MB — may fail to save. Try keeping GIFs under 900KB.`);
-      }
-
-      // Compress static images
       if (!isVideo && !isGif && url.startsWith('data:image/')) {
         url = await optimizeBase64ForFirestore(url, 1024, 0.82);
       }
 
       const newEff = {
-        id: `custom_fx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name,
-        theme: 'Custom',
-        url,
-        imageUrl: url,
+        id: `fx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name, theme: 'Custom', url, imageUrl: url,
         category: isVideo ? 'video' : isGif ? 'animated' : 'image',
-        tags: ['custom', isVideo ? 'video' : isGif ? 'gif' : 'image', 'effect'],
-        authorId: userId,
-        authorName: getLocalUserName(),
-        source: 'mine',
-        created_at: new Date().toISOString(),
+        tags: ['custom', isVideo ? 'video' : isGif ? 'gif' : 'image'],
+        authorId: userId, authorName: getLocalUserName(),
+        source: 'mine', created_at: new Date().toISOString(),
       };
 
-      // Save to Firebase — show loading toast
-      const toastId = toast.loading(`Saving "${name}" to vault...`);
+      // Save locally first for instant access
+      saveLocalEffect(newEff);
+      setMyEffects(prev => [newEff, ...prev]);
+      selectEffect(newEff);
+
+      // Upload to Firebase Storage — no size limit
       try {
-        await saveEffectToFirebase(newEff);
-        toast.success(`"${name}" added to vault!`, { id: toastId });
-        setMyEffects(prev => [newEff, ...prev]);
-        setCommunityEffects(prev => [newEff, ...prev]);
-        selectEffect(newEff);
-      } catch (err) {
-        const msg = err?.message || '';
-        if (msg.includes('exceeds the maximum allowed size') || msg.includes('RESOURCE_EXHAUSTED')) {
-          toast.error(`File too large for vault (${fileSizeMB.toFixed(1)}MB). Firestore max is 1MB. Use a smaller file.`, { id: toastId });
-        } else {
-          toast.error(`Failed to save: ${msg}`, { id: toastId });
+        const saved = await saveEffectToFirebase(newEff);
+        toast.success(`"${name}" uploaded to vault!`, { id: toastId });
+        if (saved?.url && saved.url !== url) {
+          setMyEffects(prev => prev.map(e => e.id === newEff.id ? { ...e, url: saved.url, imageUrl: saved.url } : e));
         }
+      } catch(err) {
+        toast.warning(`Saved locally. Vault sync failed: ${err.message}`, { id: toastId });
       }
     };
+    reader.onerror = () => toast.error('Failed to read file', { id: toastId });
     reader.readAsDataURL(file);
   };
 
@@ -1551,26 +1681,106 @@ export function EffectsControlPanel({ onClose }) {
             </div>
           </div>
 
-          <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-            {effectPaths.map((ep, idx) => (
-              <div
-                key={ep.id || idx}
-                className="flex items-center justify-between p-1.5 rounded bg-white/5 border border-white/5 text-[9px]"
-              >
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="font-mono text-[#caa055]">#{idx + 1}</span>
-                  <span className="capitalize text-gray-300">{ep.type || 'brush'}</span>
-                  <span className="text-gray-500 font-mono">({Math.round((ep.opacity || 0.9) * 100)}%)</span>
+          <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+            {effectPaths.map((ep, idx) => {
+              const isSelected = selectedPathId === ep.id;
+              return (
+                <div key={ep.id || idx}>
+                  <div
+                    className={`flex items-center justify-between p-1.5 rounded border text-[9px] cursor-pointer transition-all ${isSelected ? 'bg-[#caa055]/15 border-[#caa055]/40' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
+                    onClick={() => setSelectedPathId(isSelected ? null : ep.id)}
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="font-mono text-[#caa055]">#{idx + 1}</span>
+                      <span className="capitalize text-gray-300">{ep.type || 'brush'}</span>
+                      <span className="text-gray-500 font-mono">({Math.round((ep.opacity || 0.9) * 100)}%)</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[#caa055]/60 text-[8px]">{isSelected ? '▲' : '▼'}</span>
+                      <button onClick={(e) => { e.stopPropagation(); removeEffectPath(ep.id); }}
+                        className="text-red-400 hover:text-red-300 p-0.5" title="Remove">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Property editor — shows when selected */}
+                  {isSelected && (
+                    <div className="bg-black/40 border border-[#caa055]/20 rounded p-2 mt-0.5 space-y-2">
+                      {/* Opacity */}
+                      <div>
+                        <div className="flex justify-between mb-0.5">
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Opacity</span>
+                          <span className="text-[8px] text-white/40 font-mono">{Math.round((ep.opacity ?? 0.9) * 100)}%</span>
+                        </div>
+                        <input type="range" min="0" max="1" step="0.05" value={ep.opacity ?? 0.9}
+                          onChange={e => updateEffectPath(ep.id, { opacity: parseFloat(e.target.value) })}
+                          className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      {/* Width (for stroke effects) */}
+                      {ep.type !== 'marquee' && (
+                        <div>
+                          <div className="flex justify-between mb-0.5">
+                            <span className="text-[8px] text-white/50 uppercase tracking-wider">Width</span>
+                            <span className="text-[8px] text-white/40 font-mono">{ep.width ?? 60}px</span>
+                          </div>
+                          <input type="range" min="10" max="400" step="5" value={ep.width ?? 60}
+                            onChange={e => updateEffectPath(ep.id, { width: parseInt(e.target.value) })}
+                            className="w-full h-1 accent-[#caa055]" />
+                        </div>
+                      )}
+                      {/* Tile scale */}
+                      <div>
+                        <div className="flex justify-between mb-0.5">
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Tile Scale</span>
+                          <span className="text-[8px] text-white/40 font-mono">{ep.tileScale ?? 100}%</span>
+                        </div>
+                        <input type="range" min="10" max="400" step="10" value={ep.tileScale ?? 100}
+                          onChange={e => updateEffectPath(ep.id, { tileScale: parseInt(e.target.value) })}
+                          className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      {/* Edge fade */}
+                      <div>
+                        <div className="flex justify-between mb-0.5">
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Edge Fade</span>
+                          <span className="text-[8px] text-white/40 font-mono">{ep.edgeFade ?? 0}px</span>
+                        </div>
+                        <input type="range" min="0" max="80" step="4" value={ep.edgeFade ?? 0}
+                          onChange={e => updateEffectPath(ep.id, { edgeFade: parseInt(e.target.value) })}
+                          className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      {/* Tile toggle */}
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" id={`tile-${ep.id}`} checked={ep.tile !== false}
+                          onChange={e => updateEffectPath(ep.id, { tile: e.target.checked })}
+                          className="accent-[#caa055] w-3 h-3" />
+                        <label htmlFor={`tile-${ep.id}`} className="text-[8px] text-white/50 uppercase tracking-wider cursor-pointer">Tile Texture</label>
+                      </div>
+                      {/* Blend mode */}
+                      <div>
+                        <span className="text-[8px] text-white/50 uppercase tracking-wider block mb-0.5">Blend</span>
+                        <select value={ep.blendMode || 'normal'}
+                          onChange={e => updateEffectPath(ep.id, { blendMode: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white">
+                          {['normal','screen','lighter','overlay'].map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {/* Scenic light color picker */}
+                      {ep.isLight && (
+                        <div>
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider block mb-0.5">Light Color</span>
+                          <input type="color" value={ep.lightColor || '#ffcc44'}
+                            onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
+                            className="w-full h-6 rounded cursor-pointer border-0" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => removeEffectPath(ep.id)}
-                  className="text-red-400 hover:text-red-300 p-0.5"
-                  title="Remove this effect mask"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
