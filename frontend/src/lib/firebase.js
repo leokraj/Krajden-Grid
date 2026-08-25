@@ -24,16 +24,14 @@ import {
 } from 'firebase/storage';
 
 export const firebaseConfig = {
-  projectId: "gen-lang-client-0652230217",
-  appId: "1:277883395164:web:1e3ae885c1a7bfda025a99",
-  apiKey: "AIzaSyAcFNalZUXT1_MlfkhH34XkmoqWzsqESOg",
-  authDomain: "gen-lang-client-0652230217.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-krajdengrid-29722090-d9f6-40a4-9c98-c4e76e51e4ff",
-  storageBucket: "gen-lang-client-0602460923.firebasestorage.app",
-  messagingSenderId: "277883395164",
-  measurementId: "",
-  oAuthClientId: "277883395164-u3v9dj7rjg5gbctkq6n124b21usqkse9.apps.googleusercontent.com",
-  recaptchaSiteKey: ""
+  apiKey: "AIzaSyCMOh5tFvH-8dTgZFb6HquhiHEcfc6w6HA",
+  authDomain: "krajdengrid.firebaseapp.com",
+  projectId: "krajdengrid",
+  storageBucket: "krajdengrid.firebasestorage.app",
+  messagingSenderId: "425478702027",
+  appId: "1:425478702027:web:a33ee843e5edce72806c4e",
+  measurementId: "G-MSH2VWRS6P",
+  firestoreDatabaseId: "(default)",
 };
 
 let app;
