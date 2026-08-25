@@ -121,6 +121,31 @@ export const SessionProvider = ({ children }) => {
       setRemoteDrawings((prev) => [...prev, path]);
     });
 
+    // Effect path sync — players receive effect paths from the DM
+    socket.on('add_effect_path', (effectPath) => {
+      // Cache the asset if it came with inline data
+      if (effectPath.effectUrl && effectPath.effectId) {
+        try {
+          localStorage.setItem(`effect_asset_${effectPath.effectId}`, effectPath.effectUrl);
+        } catch(_) {}
+      }
+      // Add to GridContext via custom event
+      window.dispatchEvent(new CustomEvent('krajden_remote_effect_path', { detail: effectPath }));
+    });
+
+    socket.on('effect_asset', ({ id, dataUrl, name }) => {
+      // Cache received effect asset locally
+      try {
+        localStorage.setItem(`effect_asset_${id}`, dataUrl);
+        if (name) localStorage.setItem(`effect_asset_name_${id}`, name);
+      } catch(_) {}
+      window.dispatchEvent(new CustomEvent('krajden_effect_asset_received', { detail: { id, dataUrl, name } }));
+    });
+
+    socket.on('clear_effect_paths', () => {
+      window.dispatchEvent(new CustomEvent('krajden_clear_effect_paths'));
+    });
+
     socket.on('erase_at', (data) => {
       setLastEraseEvent(data);
     });
@@ -357,6 +382,26 @@ export const SessionProvider = ({ children }) => {
     }
   }, []);
 
+  // Effect path broadcast — sends the path metadata (with effectUrl for base64 or effectId for local)
+  const broadcastEffectPath = useCallback((effectPath) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('add_effect_path', effectPath);
+    }
+  }, []);
+
+  // Effect asset broadcast — sends base64 data once so players can cache it by id
+  const broadcastEffectAsset = useCallback((id, dataUrl, name) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('effect_asset', { id, dataUrl, name });
+    }
+  }, []);
+
+  const broadcastClearEffects = useCallback(() => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('clear_effect_paths', {});
+    }
+  }, []);
+
   const broadcastMeasurement = useCallback((m) => {
     if (socketRef.current?.connected) {
       socketRef.current.emit('add_measurement', m);
@@ -513,6 +558,9 @@ export const SessionProvider = ({ children }) => {
     kickUser,
     getShareableLink,
     broadcastDrawPath,
+    broadcastEffectPath,
+    broadcastEffectAsset,
+    broadcastClearEffects,
     broadcastMeasurement,
     broadcastErase,
     broadcastClearAll,
