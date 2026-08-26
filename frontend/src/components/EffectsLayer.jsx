@@ -724,27 +724,54 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    const needed = new Set(effectPaths.map(ep => ep.effectUrl).filter(Boolean));
-    if (activeEffectUrl) needed.add(activeEffectUrl);
+    const needed = new Set(
+      [...effectPaths.map(ep => ep.effectUrl), activeEffectUrl].filter(Boolean)
+    );
 
     needed.forEach(url => {
       if (mediaRef.current.has(url)) return;
-      const isVid = url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url);
+      const isVid = url.startsWith('data:video/') || /\.(mp4|webm|mov)$/i.test(url);
+      const isGif = url.startsWith('data:image/gif') || /\.gif$/i.test(url);
+
       if (isVid) {
         const v = document.createElement('video');
-        v.src = url; v.loop = true; v.muted = true; v.playsInline = true;
-        v.play().catch(() => {});
+        v.crossOrigin = 'anonymous';
+        v.loop = true;
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = 'auto';
+        v.src = url;
+        // Force play — needed for autoplay policies in Electron
+        const tryPlay = () => v.play().catch(() => {
+          setTimeout(() => v.play().catch(() => {}), 500);
+        });
+        v.addEventListener('loadeddata', tryPlay, { once: true });
+        v.addEventListener('canplay', tryPlay, { once: true });
+        v.load();
         mediaRef.current.set(url, v);
+      } else if (isGif) {
+        // GIFs render fine as images — browser animates them
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+        mediaRef.current.set(url, img);
       } else {
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.src = url;
         mediaRef.current.set(url, img);
       }
     });
 
-    // Prune unused
-    mediaRef.current.forEach((_, url) => {
-      if (!needed.has(url)) mediaRef.current.delete(url);
+    // Prune unused — pause videos before removing
+    mediaRef.current.forEach((el, url) => {
+      if (!needed.has(url)) {
+        if (el instanceof HTMLVideoElement) {
+          el.pause();
+          el.src = '';
+        }
+        mediaRef.current.delete(url);
+      }
     });
   }, [effectPaths, activeEffectUrl]);
 
@@ -816,15 +843,30 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       if (!media) return;
       const isVid = media instanceof HTMLVideoElement;
       const ready = isVid
-        ? media.readyState >= 2 && media.videoWidth > 0
+        ? (media.readyState >= 2 && media.videoWidth > 0) || media.readyState === 4
         : media.complete && media.naturalWidth > 0;
 
       if (!ready) {
-        // Gold placeholder while loading
-        ctx.save(); ctx.globalAlpha = 0.3; ctx.strokeStyle = '#caa055';
-        ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        if (points.length >= 2) { drawPath(points, type, w); ctx.stroke(); }
-        ctx.restore(); return;
+        // Draw gold dashed placeholder while media loads
+        ctx.save();
+        ctx.strokeStyle = '#caa055';
+        ctx.lineWidth = (effect.width || brushSize);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.setLineDash([12, 8]);
+        ctx.globalAlpha = 0.3;
+        if (points.length >= 2) {
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+          ctx.stroke();
+        } else if (rect) {
+          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+        // Force video to try playing again
+        if (isVid && media.paused) media.play().catch(() => {});
+        return;
       }
 
       // Offscreen mask canvas
@@ -1320,51 +1362,71 @@ export function EffectsControlPanel({ onClose }) {
   };
 
   // Upload Custom Effect File — Firebase Storage handles any size
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
     const isVideo = file.type.startsWith('video/');
     const isGif = file.type === 'image/gif';
     const name = file.name.replace(/\.[^/.]+$/, '');
-    const toastId = toast.loading(`Uploading "${name}" to vault...`);
+    const toastId = toast.loading(`Uploading "${name}"...`);
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      if (!event.target?.result) return;
-      let url = event.target.result;
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
+      // Compress static images only — never compress video or GIF
+      let url = dataUrl;
       if (!isVideo && !isGif && url.startsWith('data:image/')) {
         url = await optimizeBase64ForFirestore(url, 1024, 0.82);
       }
 
       const newEff = {
         id: `fx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name, theme: 'Custom', url, imageUrl: url,
+        name,
+        theme: 'Custom',
+        url,
+        imageUrl: url,
         category: isVideo ? 'video' : isGif ? 'animated' : 'image',
         tags: ['custom', isVideo ? 'video' : isGif ? 'gif' : 'image'],
-        authorId: userId, authorName: getLocalUserName(),
-        source: 'mine', created_at: new Date().toISOString(),
+        authorId: userId,
+        authorName: getLocalUserName(),
+        source: 'mine',
+        created_at: new Date().toISOString(),
       };
 
       // Save locally first for instant access
       saveLocalEffect(newEff);
-      setMyEffects(prev => [newEff, ...prev]);
+
+      // Select immediately with local URL so drawing works right away
       selectEffect(newEff);
 
-      // Upload to Firebase Storage — no size limit
+      // Add to local effects state so it appears in Mine tab immediately
+      setLocalEffects(prev => [newEff, ...prev]);
+
+      // Upload to Firebase Storage in background
       try {
         const saved = await saveEffectToFirebase(newEff);
-        toast.success(`"${name}" uploaded to vault!`, { id: toastId });
         if (saved?.url && saved.url !== url) {
-          setMyEffects(prev => prev.map(e => e.id === newEff.id ? { ...e, url: saved.url, imageUrl: saved.url } : e));
+          // Update local effect with permanent Storage URL
+          const updated = { ...newEff, url: saved.url, imageUrl: saved.url };
+          saveLocalEffect(updated);
+          setLocalEffects(prev => prev.map(e => e.id === newEff.id ? updated : e));
+          // Update active effect URL to Storage URL
+          updateSettings({ activeEffectUrl: saved.url });
         }
+        toast.success(`"${name}" uploaded to vault!`, { id: toastId });
       } catch(err) {
-        toast.warning(`Saved locally. Vault sync failed: ${err.message}`, { id: toastId });
+        toast.warning(`"${name}" saved locally. Vault sync failed: ${err.message}`, { id: toastId });
       }
-    };
-    reader.onerror = () => toast.error('Failed to read file', { id: toastId });
-    reader.readAsDataURL(file);
+    } catch(err) {
+      toast.error(`Failed to load file: ${err.message}`, { id: toastId });
+    }
   };
 
   const handleSyncFirebase = async () => {
