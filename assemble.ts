@@ -31,6 +31,13 @@ try {
   const frontendDistDir = path.join(process.cwd(), 'frontend', 'dist');
   const webDistDir = path.join(electronAppDir, 'web_dist');
 
+  // Delete everything in electron-app/web_dist/
+  if (fs.existsSync(webDistDir)) {
+    console.log(`Cleaning existing ${webDistDir}...`);
+    fs.rmSync(webDistDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(webDistDir, { recursive: true });
+
   if (fs.existsSync(frontendDistDir)) {
     console.log(`Copying frontend build from ${frontendDistDir} to ${webDistDir}...`);
     fs.cpSync(frontendDistDir, webDistDir, { recursive: true });
@@ -89,68 +96,26 @@ Start-Process -FilePath "$scriptDir\KrajdenGrid.exe"
     fs.writeFileSync(path.join(unpackedDir, 'Launch-KrajdenGrid.bat'), batLauncherContent);
     fs.writeFileSync(path.join(unpackedDir, 'Launch-KrajdenGrid.ps1'), ps1LauncherContent);
 
+    const windowsZipPath = path.join(downloadsDir, 'KrajdenGrid-Windows.zip');
     if (fs.existsSync(portableZipPath)) {
       fs.unlinkSync(portableZipPath);
+    }
+    if (fs.existsSync(windowsZipPath)) {
+      fs.unlinkSync(windowsZipPath);
     }
     const portableZip = new AdmZip();
     portableZip.addLocalFolder(unpackedDir);
     portableZip.writeZip(portableZipPath);
-    console.log('KrajdenGrid-Portable.zip packaged successfully!');
+    fs.copyFileSync(portableZipPath, windowsZipPath);
+    console.log('KrajdenGrid-Portable.zip and KrajdenGrid-Windows.zip packaged successfully!');
   } else {
     throw new Error('Unpacked directory not found inside electron-app/dist/');
-  }
-
-  // 5. Try to compile the full NSIS Windows installer
-  console.log('Attempting to build Windows Installer (KrajdenGrid-Setup.exe) via electron-builder...');
-  let hasWine = true;
-  if (process.platform === 'linux') {
-    try {
-      execSync('which wine', { stdio: 'ignore' });
-    } catch {
-      hasWine = false;
-    }
-  }
-
-  if (!hasWine) {
-    console.warn('\n================================================================');
-    console.warn('NOTE: Full installer (.exe) packaging skipped on this OS.');
-    console.warn('Reason: Wine is required to build Windows NSIS installers on Linux.');
-    console.warn('The unpacked portable ZIP was successfully created!');
-    console.warn('================================================================\n');
-  } else {
-    try {
-      execSync('npx electron-builder --win --x64 --project electron-app', { stdio: 'inherit' });
-
-      // Look for the built .exe in electron-app/dist/
-      const distFiles = fs.readdirSync(path.join(electronAppDir, 'dist'));
-      const compiledExe = distFiles.find(f => f.endsWith('.exe') && !f.includes('win-unpacked'));
-      if (compiledExe) {
-        const srcExePath = path.join(electronAppDir, 'dist', compiledExe);
-        if (fs.existsSync(finalInstallerPath)) {
-          fs.unlinkSync(finalInstallerPath);
-        }
-        fs.copyFileSync(srcExePath, finalInstallerPath);
-        console.log(`Successfully copied installer to: ${finalInstallerPath}`);
-      } else {
-        console.warn('Warning: No compiled installer (.exe) was found in electron-app/dist/');
-      }
-    } catch (builderError: any) {
-      console.warn('\n================================================================');
-      console.warn('NOTE: Full installer (.exe) packaging skipped on this OS.');
-      console.warn('Reason: Wine is required to build Windows NSIS installers on Linux.');
-      console.warn('The unpacked portable ZIP was successfully created!');
-      console.warn('================================================================\n');
-    }
   }
 
   console.log('\n=============================================');
   console.log('SUCCESS: Package assembling completed!');
   console.log(`- Portable ZIP: ${portableZipPath}`);
-  if (fs.existsSync(finalInstallerPath)) {
-    console.log(`- Setup Installer: ${finalInstallerPath}`);
-  } else {
-    console.log('- Setup Installer: (Skipped, use Wine or Windows to build Setup.exe)');
-  }
+  console.log(`- Windows ZIP: ${path.join(downloadsDir, 'KrajdenGrid-Windows.zip')}`);
   console.log('=============================================');
 
 } catch (err: any) {

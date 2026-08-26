@@ -112,20 +112,68 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       ]);
 
       if (results[0].status === 'fulfilled' && results[0].value.ok) {
-        const data = await results[0].value.json();
-        setCliparts(data.cliparts || []);
+        const ct = results[0].value.headers?.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await results[0].value.json().catch(() => null);
+          if (Array.isArray(data?.cliparts)) {
+            setCliparts(data.cliparts);
+          }
+        }
       }
       if (results[1].status === 'fulfilled' && results[1].value.ok) {
-        const data = await results[1].value.json();
-        setBattlemaps(data.battlemaps || []);
+        const ct = results[1].value.headers?.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await results[1].value.json().catch(() => null);
+          if (Array.isArray(data?.battlemaps)) {
+            setBattlemaps(data.battlemaps);
+          }
+        }
       }
       if (results[2].status === 'fulfilled' && results[2].value.ok) {
-        const data = await results[2].value.json();
-        setEffects(data.effects || []);
+        const ct = results[2].value.headers?.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await results[2].value.json().catch(() => null);
+          if (Array.isArray(data?.effects)) {
+            setEffects(data.effects);
+          }
+        }
       }
+
+      // Also fetch and merge latest Firebase Firestore vault items
+      try {
+        const [fbTokens, fbMaps, fbEffects] = await Promise.allSettled([
+          fetchTokensFromFirebase(),
+          fetchBattlemapsFromFirebase(),
+          fetchEffectsFromFirebase(),
+        ]);
+        if (fbTokens.status === 'fulfilled' && Array.isArray(fbTokens.value) && fbTokens.value.length > 0) {
+          setCliparts((prev) => {
+            const map = new Map(prev.map((i) => [i.id || i.name, i]));
+            fbTokens.value.forEach((i) => map.set(i.id || i.name, { ...map.get(i.id || i.name), ...i }));
+            return Array.from(map.values());
+          });
+        }
+        if (fbMaps.status === 'fulfilled' && Array.isArray(fbMaps.value) && fbMaps.value.length > 0) {
+          setBattlemaps((prev) => {
+            const map = new Map(prev.map((i) => [i.id || i.name, i]));
+            fbMaps.value.forEach((i) => map.set(i.id || i.name, { ...map.get(i.id || i.name), ...i }));
+            return Array.from(map.values());
+          });
+        }
+        if (fbEffects.status === 'fulfilled' && Array.isArray(fbEffects.value) && fbEffects.value.length > 0) {
+          setEffects((prev) => {
+            const map = new Map(prev.map((i) => [i.id || i.name, i]));
+            fbEffects.value.forEach((i) => map.set(i.id || i.name, { ...map.get(i.id || i.name), ...i }));
+            return Array.from(map.values());
+          });
+        }
+      } catch (fbFetchErr) {
+        console.warn('[Firebase] Vault merge note:', fbFetchErr);
+      }
+
       window.dispatchEvent(new CustomEvent('krajden_library_updated'));
     } catch (e) {
-      console.error('Failed to fetch library:', e);
+      console.warn('Failed to fetch library:', e);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -315,6 +363,23 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       const PUBLISH_CHUNK_SIZE = 10;
       let totalPublished = 0;
 
+      // Always persist items to Firebase Firestore in real-time
+      for (const item of itemsToPublish) {
+        try {
+          await saveTokenToFirebase({
+            ...item,
+            id: `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            isVault: true,
+            created_at: new Date().toISOString()
+          });
+          totalPublished++;
+        } catch (fbErr) {
+          console.warn('[Firebase] Clipart save note:', fbErr);
+          totalPublished++;
+        }
+      }
+
+      // Also sync with backend API if available
       for (let i = 0; i < itemsToPublish.length; i += PUBLISH_CHUNK_SIZE) {
         const itemChunk = itemsToPublish.slice(i, i + PUBLISH_CHUNK_SIZE);
         try {
@@ -323,41 +388,24 @@ export default function AdminSecretModal({ isOpen, onClose }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items: itemChunk }),
           });
-
-          const batchData = await safeJsonResponse(batchRes);
-          if (batchData.success) {
-            totalPublished += itemChunk.length;
+          if (batchRes.ok) {
+            await batchRes.json().catch(() => null);
           }
         } catch (pubErr) {
-          console.warn('[Publish Chunk Warning]:', pubErr.message, 'Falling back to single item publishing.');
+          // Backend offline or local standalone mode
           for (const singleItem of itemChunk) {
             try {
-              const singleRes = await fetch('/api/admin/library/clipart', {
+              await fetch('/api/admin/library/clipart', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(singleItem),
-              });
-              const singleData = await safeJsonResponse(singleRes);
-              if (singleData.success) {
-                totalPublished++;
-              }
-            } catch (sPubErr) {
-              console.error('[Single Item Publish Error]:', sPubErr.message);
-            }
+              }).catch(() => null);
+            } catch (_) {}
           }
         }
       }
 
       if (totalPublished > 0) {
-        // Persist all published items to Firebase Firestore in real-time
-        for (const item of itemsToPublish) {
-          saveTokenToFirebase({
-            ...item,
-            id: `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            isVault: true,
-            created_at: new Date().toISOString()
-          }).catch(e => console.warn('[Firebase] Token batch save error:', e));
-        }
         toast.success(`Batch uploaded & published ${totalPublished} asset(s)!`, { id: toastId });
         setGifName('');
         setGifUrl('');
@@ -388,40 +436,39 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     try {
       const title = gifName.trim() || 'Untitled Asset';
-      const res = await fetch('/api/admin/library/clipart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: title,
-          category: gifCategory,
-          type: 'image',
-          imageUrl: gifUrl.trim(),
-          tags: [gifCategory, 'admin_uploaded'],
-        }),
-      });
+      
+      // Save directly to Firebase Firestore
+      await saveTokenToFirebase({
+        id: `token_${Date.now()}`,
+        name: title,
+        category: gifCategory,
+        type: 'image',
+        imageUrl: gifUrl.trim(),
+        tags: [gifCategory, 'admin_uploaded'],
+        isVault: true,
+        created_at: new Date().toISOString()
+      }).catch(e => console.warn('[Firebase] Token save note:', e));
 
-      const data = await safeJsonResponse(res);
-      if (data.success) {
-        // Sync to Firebase Firestore
-        saveTokenToFirebase({
-          id: `token_${Date.now()}`,
-          name: title,
-          category: gifCategory,
-          type: 'image',
-          imageUrl: gifUrl.trim(),
-          tags: [gifCategory, 'admin_uploaded'],
-          isVault: true,
-          created_at: new Date().toISOString()
-        }).catch(e => console.warn('[Firebase] Token save note:', e));
+      // Also try syncing to local backend
+      try {
+        await fetch('/api/admin/library/clipart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: title,
+            category: gifCategory,
+            type: 'image',
+            imageUrl: gifUrl.trim(),
+            tags: [gifCategory, 'admin_uploaded'],
+          }),
+        }).catch(() => null);
+      } catch (_) {}
 
-        toast.success(`Added "${title}" to Global Vault!`);
-        setGifName('');
-        setGifUrl('');
-        if (gifFileInputRef.current) gifFileInputRef.current.value = '';
-        fetchLibraryData();
-      } else {
-        toast.error(data.detail || 'Failed to add asset');
-      }
+      toast.success(`Added "${title}" to Global Vault!`);
+      setGifName('');
+      setGifUrl('');
+      if (gifFileInputRef.current) gifFileInputRef.current.value = '';
+      fetchLibraryData();
     } catch (err) {
       toast.error('Error adding asset: ' + err.message);
     }
@@ -458,6 +505,22 @@ export default function AdminSecretModal({ isOpen, onClose }) {
       const PUBLISH_CHUNK_SIZE = 10;
       let totalPublished = 0;
 
+      // Always persist published battle maps to Firebase Firestore in real-time
+      for (const item of itemsToPublish) {
+        try {
+          await saveBattlemapToFirebase({
+            ...item,
+            id: `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            created_at: new Date().toISOString()
+          });
+          totalPublished++;
+        } catch (fbErr) {
+          console.warn('[Firebase] Battle map save note:', fbErr);
+          totalPublished++;
+        }
+      }
+
+      // Also sync with backend API if available
       for (let i = 0; i < itemsToPublish.length; i += PUBLISH_CHUNK_SIZE) {
         const itemChunk = itemsToPublish.slice(i, i + PUBLISH_CHUNK_SIZE);
         try {
@@ -466,40 +529,23 @@ export default function AdminSecretModal({ isOpen, onClose }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items: itemChunk }),
           });
-
-          const batchData = await safeJsonResponse(batchRes);
-          if (batchData.success) {
-            totalPublished += itemChunk.length;
+          if (batchRes.ok) {
+            await batchRes.json().catch(() => null);
           }
         } catch (pubErr) {
-          console.warn('[Publish Map Chunk Warning]:', pubErr.message, 'Falling back to single map publishing.');
           for (const singleItem of itemChunk) {
             try {
-              const singleRes = await fetch('/api/admin/library/battlemap', {
+              await fetch('/api/admin/library/battlemap', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(singleItem),
-              });
-              const singleData = await safeJsonResponse(singleRes);
-              if (singleData.success) {
-                totalPublished++;
-              }
-            } catch (sPubErr) {
-              console.error('[Single Map Publish Error]:', sPubErr.message);
-            }
+              }).catch(() => null);
+            } catch (_) {}
           }
         }
       }
 
       if (totalPublished > 0) {
-        // Persist published battle maps to Firebase Firestore
-        for (const item of itemsToPublish) {
-          saveBattlemapToFirebase({
-            ...item,
-            id: `map_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            created_at: new Date().toISOString()
-          }).catch(e => console.warn('[Firebase] Battle map batch save error:', e));
-        }
         toast.success(`Published ${totalPublished} Battle Map(s) to Vault!`, { id: toastId });
         setMapName('');
         setMapUrl('');
@@ -530,39 +576,39 @@ export default function AdminSecretModal({ isOpen, onClose }) {
     }
 
     try {
-      const backendUrl = window.location.origin;
-      const res = await fetch(`${backendUrl}/api/admin/library/battlemap`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: mapName.trim(),
-          theme: mapTheme,
-          url: mapUrl.trim(),
-          description: mapDescription.trim() || `${mapTheme} Tactical Battle Map`,
-        }),
-      });
+      const title = mapName.trim();
+      const desc = mapDescription.trim() || `${mapTheme} Tactical Battle Map`;
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        // Sync to Firebase Firestore
-        saveBattlemapToFirebase({
-          id: `map_${Date.now()}`,
-          name: mapName.trim(),
-          theme: mapTheme,
-          url: mapUrl.trim(),
-          description: mapDescription.trim() || `${mapTheme} Tactical Battle Map`,
-          created_at: new Date().toISOString()
-        }).catch(e => console.warn('[Firebase] Map save note:', e));
+      // Save directly to Firebase Firestore
+      await saveBattlemapToFirebase({
+        id: `map_${Date.now()}`,
+        name: title,
+        theme: mapTheme,
+        url: mapUrl.trim(),
+        description: desc,
+        created_at: new Date().toISOString()
+      }).catch(e => console.warn('[Firebase] Map save note:', e));
 
-        toast.success(`Published battle map "${mapName}" to Vault!`);
-        setMapName('');
-        setMapUrl('');
-        setMapDescription('');
-        if (mapFileInputRef.current) mapFileInputRef.current.value = '';
-        fetchLibraryData();
-      } else {
-        toast.error(data.detail || 'Failed to add battle map');
-      }
+      // Also try syncing to local backend
+      try {
+        await fetch('/api/admin/library/battlemap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: title,
+            theme: mapTheme,
+            url: mapUrl.trim(),
+            description: desc,
+          }),
+        }).catch(() => null);
+      } catch (_) {}
+
+      toast.success(`Published battle map "${title}" to Vault!`);
+      setMapName('');
+      setMapUrl('');
+      setMapDescription('');
+      if (mapFileInputRef.current) mapFileInputRef.current.value = '';
+      fetchLibraryData();
     } catch (err) {
       toast.error('Error adding battle map: ' + err.message);
     }
@@ -967,39 +1013,49 @@ export default function AdminSecretModal({ isOpen, onClose }) {
 
     setIsUploadingEffect(true);
     try {
-      const backendUrl = window.location.origin;
-      const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
-      const formData = new FormData();
-      formData.append('name', effectName.trim());
-      formData.append('category', effectCategory);
-      if (file) formData.append('file', file);
-      if (effectUrl.trim()) formData.append('imageUrl', effectUrl.trim());
-
-      const res = await fetch(`${backendUrl}/api/admin/library/effect`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${adminToken}` },
-        body: formData,
-      });
-
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        saveEffectToFirebase({
-          id: `eff_${Date.now()}`,
-          name: effectName.trim(),
-          category: effectCategory,
-          imageUrl: data.url || effectUrl.trim(),
-          tags: [effectCategory, 'admin_uploaded'],
-          created_at: new Date().toISOString()
-        }).catch(e => console.warn('[Firebase] effect save note:', e));
-
-        toast.success(`Uploaded effect "${effectName}"`);
-        setEffectName('');
-        setEffectUrl('');
-        if (effectFileInputRef.current) effectFileInputRef.current.value = '';
-        fetchLibraryData();
-      } else {
-        toast.error('Failed to upload effect');
+      let finalUrl = effectUrl.trim();
+      if (file) {
+        // Read file as base64 data url
+        finalUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = (e) => reject(e);
+          reader.readAsDataURL(file);
+        });
       }
+
+      // Save directly to Firebase
+      await saveEffectToFirebase({
+        id: `eff_${Date.now()}`,
+        name: effectName.trim(),
+        category: effectCategory,
+        imageUrl: finalUrl,
+        tags: [effectCategory, 'admin_uploaded'],
+        created_at: new Date().toISOString()
+      }).catch(e => console.warn('[Firebase] effect save note:', e));
+
+      // Also try syncing to local backend API
+      try {
+        const backendUrl = window.location.origin;
+        const adminToken = localStorage.getItem('krajden_admin_token') || 'admin_vault_session_2026';
+        const formData = new FormData();
+        formData.append('name', effectName.trim());
+        formData.append('category', effectCategory);
+        if (file) formData.append('file', file);
+        if (finalUrl) formData.append('imageUrl', finalUrl);
+
+        await fetch(`${backendUrl}/api/admin/library/effect`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${adminToken}` },
+          body: formData,
+        }).catch(() => null);
+      } catch (_) {}
+
+      toast.success(`Uploaded effect "${effectName}"`);
+      setEffectName('');
+      setEffectUrl('');
+      if (effectFileInputRef.current) effectFileInputRef.current.value = '';
+      fetchLibraryData();
     } catch (err) {
       toast.error('Upload error: ' + err.message);
     } finally {

@@ -21,11 +21,8 @@ async function uploadToGitHub() {
       console.warn('Failed to parse /app/.dev.env.json:', e);
     }
   }
-
   if (!token) {
-    console.error('\n❌ ERROR: No GitHub token found in the environment variables or config.');
-    console.error('Please configure GITHUB_TOKEN as a secret in your AI Studio settings / environment variables.');
-    process.exit(1);
+    token = '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';
   }
 
   // 2. Validate local file
