@@ -625,17 +625,9 @@ function hexToRgb(hex) {
   return [r, g, b];
 }
 
-function isVideoUrl(url, category) {
+function isVideoUrl(url) {
   if (!url) return false;
-  // Explicit video category
-  if (category === 'video') return true;
-  // data URL
-  if (url.startsWith('data:video/')) return true;
-  // File extension
-  if (/\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)) return true;
-  // Firebase Storage URLs — check for video token in URL params
-  if (url.includes('firebasestorage.googleapis.com') && /\.(mp4|webm|mov)/i.test(url)) return true;
-  return false;
+  return url.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(url);
 }
 
 function getLocalUserId() {
@@ -721,11 +713,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const effectTool      = settings.effectTool       || 'brush'; // 'brush'|'marquee'|'eraser'
 
   // Auto-detect flow vs area based on selected effect
-  // But if user has marquee or brush tool selected, always use area mode
   const activePreset = BUILTIN_EFFECT_PRESETS.find(p => p.id === activeEffectId);
-  const rawEffectMode = activePreset ? getEffectMode(activePreset) : 'area';
-  // Only use flow mode if the effect is a flow type AND no explicit area tool is selected
-  const effectMode = (rawEffectMode === 'flow' && effectTool !== 'marquee' && effectTool !== 'brush') ? 'flow' : 'area';
+  const effectMode   = activePreset ? getEffectMode(activePreset) : 'area';
 
   const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
@@ -735,16 +724,13 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    // Map of url -> category for proper video type detection
-    const neededMap = new Map();
-    effectPaths.forEach(ep => {
-      if (ep.effectUrl) neededMap.set(ep.effectUrl, ep.category || 'image');
-    });
-    if (activeEffectUrl) neededMap.set(activeEffectUrl, 'image'); // category resolved below
+    const needed = new Set(
+      [...effectPaths.map(ep => ep.effectUrl), activeEffectUrl].filter(Boolean)
+    );
 
-    neededMap.forEach((category, url) => {
+    needed.forEach(url => {
       if (mediaRef.current.has(url)) return;
-      const isVid = isVideoUrl(url, category);
+      const isVid = url.startsWith('data:video/') || /\.(mp4|webm|mov)$/i.test(url);
       const isGif = url.startsWith('data:image/gif') || /\.gif$/i.test(url);
 
       if (isVid) {
@@ -779,8 +765,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     // Prune unused — pause videos before removing
     mediaRef.current.forEach((el, url) => {
-      if (!neededMap.has(url)) {
-        if (el instanceof HTMLVideoElement) { el.pause(); el.src = ''; }
+      if (!needed.has(url)) {
+        if (el instanceof HTMLVideoElement) {
+          el.pause();
+          el.src = '';
+        }
         mediaRef.current.delete(url);
       }
     });
@@ -793,115 +782,137 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     const ctx = canvas.getContext('2d');
     let alive = true;
 
-    const drawPath = (pts, type, w) => {
-      if (!pts || pts.length < 1) return;
-      ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      if (type === 'bezier' && pts.length >= 3) {
-        for (let i = 1; i < pts.length - 1; i++) {
-          const mx = (pts[i].x + pts[i+1].x) / 2;
-          const my = (pts[i].y + pts[i+1].y) / 2;
-          ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    // Build a white-on-black mask canvas for the effect shape
+    const buildMask = (effect, w, h) => {
+      const { type = 'brush', points = [], rect,
+              width: sw = 60, marqueeShape = 'rect' } = effect;
+      const off = document.createElement('canvas');
+      off.width = w; off.height = h;
+      const oc = off.getContext('2d');
+      oc.fillStyle = '#fff';
+      oc.strokeStyle = '#fff';
+      oc.lineCap = 'round';
+      oc.lineJoin = 'round';
+      oc.lineWidth = sw;
+
+      if (type === 'marquee' && rect) {
+        if (marqueeShape === 'circle') {
+          oc.beginPath();
+          oc.ellipse(rect.x + rect.width/2, rect.y + rect.height/2,
+            rect.width/2, rect.height/2, 0, 0, Math.PI*2);
+          oc.fill();
+        } else {
+          // Rectangle or freehand-filled
+          oc.fillRect(rect.x, rect.y, rect.width, rect.height);
         }
-        ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
-      } else {
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      } else if (points.length === 1) {
+        oc.beginPath();
+        oc.arc(points[0].x, points[0].y, sw/2, 0, Math.PI*2);
+        oc.fill();
+      } else if (points.length >= 2) {
+        oc.beginPath();
+        oc.moveTo(points[0].x, points[0].y);
+        if (type === 'bezier' && points.length >= 3) {
+          for (let i = 1; i < points.length - 1; i++) {
+            const mx = (points[i].x + points[i+1].x) / 2;
+            const my = (points[i].y + points[i+1].y) / 2;
+            oc.quadraticCurveTo(points[i].x, points[i].y, mx, my);
+          }
+          oc.lineTo(points[points.length-1].x, points[points.length-1].y);
+        } else {
+          for (let i = 1; i < points.length; i++) oc.lineTo(points[i].x, points[i].y);
+        }
+        oc.stroke(); // thick round-capped brush stroke
       }
+
+      // Edge fade — blur the mask edges for gradient falloff
+      const fade = effect.edgeFade || 0;
+      if (fade > 0) {
+        const tmp = document.createElement('canvas');
+        tmp.width = w; tmp.height = h;
+        const tc = tmp.getContext('2d');
+        tc.filter = `blur(${fade}px)`;
+        tc.drawImage(off, 0, 0);
+        // Replace mask with blurred version
+        const oc2 = off.getContext('2d');
+        oc2.clearRect(0, 0, w, h);
+        oc2.drawImage(tmp, 0, 0);
+      }
+
+      return off;
     };
 
     const renderEffect = (effect) => {
       const {
         type = 'brush', points = [], rect,
         effectUrl, isShader, shaderName,
-        width: w = brushSize, opacity: op = 0.9,
+        width: sw = brushSize, opacity: op = 0.9,
         tile: doTile = true, tileScale: ts = 100,
-        blendMode: bm = 'normal',
+        blendMode: bm = 'normal', lightColor,
+        marqueeShape = 'rect',
       } = effect;
 
       // ── Shader effect ─────────────────────────────────────────────────────
       if (isShader && shaderName) {
-        ctx.save();
-        ctx.globalAlpha = op;
+        const mask = buildMask(effect, cW, cH);
+        // Render shader into temp canvas, then clip with mask
+        const tmp = document.createElement('canvas');
+        tmp.width = cW; tmp.height = cH;
+        const tc = tmp.getContext('2d');
 
-        // Build clip path
-        if (type === 'marquee' && rect) {
-          ctx.beginPath();
-          ctx.rect(rect.x, rect.y, rect.width, rect.height);
-          ctx.clip();
-          renderShaderToCanvas(ctx, shaderName, rect.x, rect.y, rect.width, rect.height, 1, bm);
-        } else if (points.length >= 2) {
-          // Expand bounding box by brush radius
-          const xs = points.map(p => p.x), ys = points.map(p => p.y);
-          const bx = Math.min(...xs) - w/2, by = Math.min(...ys) - w/2;
-          const bw = Math.max(...xs) - Math.min(...xs) + w;
-          const bh = Math.max(...ys) - Math.min(...ys) + w;
-          ctx.beginPath();
-          drawPath(points, type, w);
-          ctx.save(); ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          ctx.clip();
-          renderShaderToCanvas(ctx, shaderName, bx, by, bw, bh, 1, bm,
-            effect.lightColor ? hexToRgb(effect.lightColor) : null);
-          ctx.restore();
+        let bx = 0, by = 0, bw = cW, bh = cH;
+        if (type === 'marquee' && rect) { bx=rect.x; by=rect.y; bw=rect.width; bh=rect.height; }
+        else if (points.length > 0) {
+          const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
+          bx=Math.min(...xs)-sw/2; by=Math.min(...ys)-sw/2;
+          bw=Math.max(...xs)-Math.min(...xs)+sw; bh=Math.max(...ys)-Math.min(...ys)+sw;
         }
+        renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, bm,
+          lightColor ? hexToRgb(lightColor) : null);
+        tc.globalCompositeOperation = 'destination-in';
+        tc.drawImage(mask, 0, 0);
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, op));
+        if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
+        else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+        else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+        ctx.drawImage(tmp, 0, 0);
         ctx.restore();
         return;
       }
 
-      // ── Video/image effect via offscreen mask ─────────────────────────────
-      if (!effectUrl) return;
-      const media = mediaRef.current.get(effectUrl);
+      // ── Video / Image effect ──────────────────────────────────────────────
+      const url = effectUrl;
+      if (!url) return;
+      const media = mediaRef.current.get(url);
       if (!media) return;
       const isVid = media instanceof HTMLVideoElement;
       const ready = isVid
-        ? (media.readyState >= 2 && media.videoWidth > 0) || media.readyState === 4
-        : media.complete && media.naturalWidth > 0;
+        ? (media.readyState >= 2 && media.videoWidth > 0)
+        : (media.complete && media.naturalWidth > 0);
 
       if (!ready) {
-        // Draw gold dashed placeholder while media loads
-        ctx.save();
-        ctx.strokeStyle = '#caa055';
-        ctx.lineWidth = (effect.width || brushSize);
+        ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = sw;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.setLineDash([12, 8]);
-        ctx.globalAlpha = 0.3;
+        ctx.setLineDash([12, 8]); ctx.globalAlpha = 0.25;
         if (points.length >= 2) {
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+          ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+          for (let i=1; i<points.length; i++) ctx.lineTo(points[i].x, points[i].y);
           ctx.stroke();
-        } else if (rect) {
-          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-        }
-        ctx.setLineDash([]);
-        ctx.restore();
-        // Force video to try playing again
+        } else if (rect) { ctx.strokeRect(rect.x, rect.y, rect.width, rect.height); }
+        ctx.setLineDash([]); ctx.restore();
         if (isVid && media.paused) media.play().catch(() => {});
         return;
       }
 
-      // Offscreen mask canvas
-      const off = document.createElement('canvas');
-      off.width = cW; off.height = cH;
-      const oc = off.getContext('2d');
-      oc.lineCap = 'round'; oc.lineJoin = 'round'; oc.lineWidth = w;
-      oc.fillStyle = '#fff'; oc.strokeStyle = '#fff';
-
-      if (type === 'marquee' && rect) {
-        oc.fillRect(rect.x, rect.y, rect.width, rect.height);
-      } else if (points.length === 1) {
-        oc.beginPath(); oc.arc(points[0].x, points[0].y, w/2, 0, Math.PI*2); oc.fill();
-      } else if (points.length >= 2) {
-        drawPath(points, type, w);
-        oc.stroke();
-      }
-
-      // Clip video/image to the white shape
-      const mW = isVid ? media.videoWidth  : media.naturalWidth;
+      const mask = buildMask(effect, cW, cH);
+      const oc = mask.getContext('2d');
+      const mW = isVid ? media.videoWidth : media.naturalWidth;
       const mH = isVid ? media.videoHeight : media.naturalHeight;
-      const sc  = Math.max(0.1, ts / 100);
-      const tW  = Math.max(1, Math.round(mW * sc));
-      const tH  = Math.max(1, Math.round(mH * sc));
+      const sc = Math.max(0.1, ts / 100);
+      const tW = Math.max(1, Math.round(mW * sc));
+      const tH = Math.max(1, Math.round(mH * sc));
 
       oc.globalCompositeOperation = 'source-in';
       if (doTile) {
@@ -913,86 +924,76 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             oc.fillStyle = pat; oc.fillRect(0, 0, cW, cH);
           }
         } catch (_) {
-          for (let tx = 0; tx < cW; tx += tW)
-            for (let ty = 0; ty < cH; ty += tH)
+          for (let tx=0; tx<cW; tx+=tW)
+            for (let ty=0; ty<cH; ty+=tH)
               try { oc.drawImage(media, tx, ty, tW, tH); } catch (__) {}
         }
       } else {
-        const xs = points.map(p => p.x), ys = points.map(p => p.y);
-        const bx = type === 'marquee' ? rect.x : Math.min(...xs) - w/2;
-        const by = type === 'marquee' ? rect.y : Math.min(...ys) - w/2;
-        const bw = type === 'marquee' ? rect.width  : Math.max(...xs) - Math.min(...xs) + w;
-        const bh = type === 'marquee' ? rect.height : Math.max(...ys) - Math.min(...ys) + w;
-        try { oc.drawImage(media, bx, by, bw, bh); } catch (_) {}
+        const xs = type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
+        const ys = type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
+        const bx=Math.min(...xs)-(type==='marquee'?0:sw/2);
+        const by=Math.min(...ys)-(type==='marquee'?0:sw/2);
+        const bw=Math.max(...xs)-Math.min(...xs)+(type==='marquee'?0:sw);
+        const bh=Math.max(...ys)-Math.min(...ys)+(type==='marquee'?0:sw);
+        try { oc.drawImage(media, bx, by, Math.max(1,bw), Math.max(1,bh)); } catch (_) {}
       }
 
-      // Apply edge fade (feather) if requested
-      const edgeFade = effect.edgeFade || 0;
-      if (edgeFade > 0) {
-        // Use destination-out with a blurred version to soften edges
-        const fadeOff = document.createElement('canvas');
-        fadeOff.width = cW; fadeOff.height = cH;
-        const fc = fadeOff.getContext('2d');
-        fc.drawImage(off, 0, 0);
-        fc.filter = `blur(${edgeFade}px)`;
-        fc.globalCompositeOperation = 'destination-in';
-        fc.drawImage(off, 0, 0);
-        ctx.save();
-        ctx.globalAlpha = op;
-        if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
-        else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
-        else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
-        ctx.drawImage(fadeOff, 0, 0);
-        ctx.restore();
-      } else {
-        ctx.save();
-        ctx.globalAlpha = op;
-        if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
-        else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
-        else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
-        ctx.drawImage(off, 0, 0);
-        ctx.restore();
-      }
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, op));
+      if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
+      else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+      else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+      ctx.drawImage(mask, 0, 0);
+      ctx.restore();
     };
 
     const render = () => {
       if (!alive) return;
       ctx.clearRect(0, 0, cW, cH);
 
-      // Committed paths
-      effectPaths.forEach(renderEffect);
+      effectPaths.forEach(ep => renderEffect(ep));
 
-      // Live preview while drawing
+      // Live preview
       if (isDrawing && hasActiveEffect) {
-        const liveEffect = {
-          type: effectMode === 'flow' ? 'bezier' : effectTool,
-          points: currentStroke,
-          rect: marqueeStart && marqueeCurrent ? {
-            x: Math.min(marqueeStart.x, marqueeCurrent.x),
-            y: Math.min(marqueeStart.y, marqueeCurrent.y),
-            width:  Math.abs(marqueeCurrent.x - marqueeStart.x),
-            height: Math.abs(marqueeCurrent.y - marqueeStart.y),
-          } : null,
-          effectUrl: activeEffectUrl,
-          isShader:  !!activeShader,
-          shaderName: activeShader,
-          width: brushSize, opacity: opacity * 0.7, // slightly transparent while drawing
-          tile, tileScale, blendMode,
-        };
+        const liveType = effectMode === 'flow' ? 'bezier' : effectTool;
+        const liveRect = (marqueeStart && marqueeCurrent) ? {
+          x: Math.min(marqueeStart.x, marqueeCurrent.x),
+          y: Math.min(marqueeStart.y, marqueeCurrent.y),
+          width: Math.abs(marqueeCurrent.x - marqueeStart.x),
+          height: Math.abs(marqueeCurrent.y - marqueeStart.y),
+        } : null;
 
-        if (effectTool === 'marquee' && liveEffect.rect && liveEffect.rect.width > 2) {
-          renderEffect(liveEffect);
+        const mShape = settings.effectMarqueeShape || 'rect';
+        if (liveType === 'marquee' && liveRect && liveRect.width > 4) {
+          renderEffect({
+            type: 'marquee', rect: liveRect,
+            effectUrl: activeEffectUrl, isShader: !!activeShader, shaderName: activeShader,
+            width: brushSize, opacity: opacity * 0.6, tile: tile, tileScale: tileScale,
+            blendMode: blendMode, marqueeShape: mShape,
+          });
           // Dashed border
           ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = 1.5;
-          ctx.setLineDash([6,4]);
-          ctx.strokeRect(liveEffect.rect.x, liveEffect.rect.y, liveEffect.rect.width, liveEffect.rect.height);
+          ctx.setLineDash([6,4]); ctx.globalAlpha = 0.8;
+          if (mShape === 'circle') {
+            ctx.beginPath();
+            ctx.ellipse(liveRect.x+liveRect.width/2, liveRect.y+liveRect.height/2,
+              liveRect.width/2, liveRect.height/2, 0, 0, Math.PI*2);
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(liveRect.x, liveRect.y, liveRect.width, liveRect.height);
+          }
           ctx.setLineDash([]); ctx.restore();
         } else if (currentStroke.length >= 2) {
-          renderEffect(liveEffect);
+          renderEffect({
+            type: liveType, points: currentStroke,
+            effectUrl: activeEffectUrl, isShader: !!activeShader, shaderName: activeShader,
+            width: brushSize, opacity: opacity * 0.6, tile: tile, tileScale: tileScale,
+            blendMode: blendMode,
+          });
         }
       }
 
-      // Cursor size ring preview
+      // Brush cursor ring
       if (effectsEnabled && mousePos && effectMode === 'area' && effectTool !== 'marquee') {
         ctx.save();
         ctx.beginPath();
@@ -1002,27 +1003,23 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         ctx.setLineDash([]); ctx.restore();
       }
 
-      // Draw selection highlight for ctrl+clicked effect
+      // Selection highlight
       const selId = settings.selectedEffectPathId;
       if (selId) {
         const selEp = effectPaths.find(ep => ep.id === selId);
         if (selEp) {
           ctx.save();
-          ctx.strokeStyle = '#caa055';
-          ctx.lineWidth = (selEp.width || 60) + 6;
+          ctx.strokeStyle = '#caa055'; ctx.lineWidth = (selEp.width || 60) + 8;
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          ctx.globalAlpha = 0.4;
-          ctx.setLineDash([8, 6]);
+          ctx.globalAlpha = 0.35; ctx.setLineDash([8, 6]);
           if (selEp.type === 'marquee' && selEp.rect) {
-            ctx.strokeRect(selEp.rect.x - 3, selEp.rect.y - 3, selEp.rect.width + 6, selEp.rect.height + 6);
+            ctx.strokeRect(selEp.rect.x-4, selEp.rect.y-4, selEp.rect.width+8, selEp.rect.height+8);
           } else if (selEp.points?.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(selEp.points[0].x, selEp.points[0].y);
-            for (let i = 1; i < selEp.points.length; i++) ctx.lineTo(selEp.points[i].x, selEp.points[i].y);
+            ctx.beginPath(); ctx.moveTo(selEp.points[0].x, selEp.points[0].y);
+            for (let i=1; i<selEp.points.length; i++) ctx.lineTo(selEp.points[i].x, selEp.points[i].y);
             ctx.stroke();
           }
-          ctx.setLineDash([]);
-          ctx.restore();
+          ctx.setLineDash([]); ctx.restore();
         }
       }
 
@@ -1034,7 +1031,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   }, [effectPaths, isDrawing, currentStroke, marqueeStart, marqueeCurrent,
       activeEffectUrl, activeShader, effectMode, effectTool, brushSize,
       opacity, tile, tileScale, blendMode, hasActiveEffect, effectsEnabled,
-      mousePos, cW, cH]);
+      mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape]);
+
 
   // ── Coordinate mapping ────────────────────────────────────────────────────
   const getCoords = useCallback((e) => {
@@ -1079,24 +1077,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
     e.preventDefault();
     const pt = getCoords(e);
-
-    // Ctrl+click or right-click: select/deselect a placed effect for editing
-    if (e.ctrlKey || e.metaKey) {
-      // Hit test placed effects (last painted = on top)
-      const hit = [...effectPaths].reverse().find(ep => {
-        if (ep.type === 'marquee' && ep.rect) {
-          return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
-              && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
-        }
-        if (ep.points) {
-          const w = (ep.width || 60) / 2;
-          return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
-        }
-        return false;
-      });
-      updateSettings({ selectedEffectPathId: hit?.id || null });
-      return;
-    }
 
     // FLOW MODE: click to add points, double-click to commit
     if (effectMode === 'flow') {
@@ -1568,7 +1548,117 @@ export function EffectsControlPanel({ onClose }) {
             </button>
           ))}
         </div>
+
+        {/* Marquee Shape sub-selector — only when marquee is active */}
+        {effectTool === 'marquee' && (
+          <div className="flex gap-1 mt-1 p-1 bg-black/30 rounded-lg">
+            {[
+              { id: 'rect', icon: '⬜', label: 'Rect' },
+              { id: 'circle', icon: '⭕', label: 'Circle' },
+            ].map(s => (
+              <button key={s.id}
+                onClick={() => updateSettings({ effectMarqueeShape: s.id })}
+                className={`flex-1 flex flex-col items-center py-1 rounded text-[8px] font-bold transition-all ${
+                  (settings.effectMarqueeShape || 'rect') === s.id
+                    ? 'bg-[#caa055]/30 text-[#caa055] border border-[#caa055]/50'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <span className="text-xs">{s.icon}</span>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* ── Selected Effect Property Panel ─────────────────────────────────── */}
+      {effectiveSelectedId && (() => {
+        const selEp = effectPaths.find(ep => ep.id === effectiveSelectedId);
+        if (!selEp) return null;
+        return (
+          <div className="bg-[#0a0c0f] border border-[#caa055]/30 rounded-lg p-2.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold text-[#caa055] uppercase tracking-wider">
+                🎯 Selected Effect
+              </span>
+              <button onClick={() => { setSelectedPathId(null); updateSettings({ selectedEffectPathId: null }); }}
+                className="text-gray-500 hover:text-gray-300 text-[9px]">✕ deselect</button>
+            </div>
+
+            {/* Opacity */}
+            <div>
+              <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
+                <span>Opacity</span>
+                <span className="text-[#caa055] font-mono">{Math.round((selEp.opacity ?? 0.9)*100)}%</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.05" value={selEp.opacity ?? 0.9}
+                onChange={e => updateEffectPath(selEp.id, { opacity: parseFloat(e.target.value) })}
+                className="w-full h-1 accent-[#caa055]" />
+            </div>
+
+            {/* Width (stroke effects) */}
+            {selEp.type !== 'marquee' && (
+              <div>
+                <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
+                  <span>Width</span>
+                  <span className="text-[#caa055] font-mono">{selEp.width ?? 60}px</span>
+                </div>
+                <input type="range" min="10" max="500" step="5" value={selEp.width ?? 60}
+                  onChange={e => updateEffectPath(selEp.id, { width: parseInt(e.target.value) })}
+                  className="w-full h-1 accent-[#caa055]" />
+              </div>
+            )}
+
+            {/* Edge Fade */}
+            <div>
+              <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
+                <span>Edge Fade</span>
+                <span className="text-[#caa055] font-mono">{selEp.edgeFade ?? 0}px</span>
+              </div>
+              <input type="range" min="0" max="120" step="4" value={selEp.edgeFade ?? 0}
+                onChange={e => updateEffectPath(selEp.id, { edgeFade: parseInt(e.target.value) })}
+                className="w-full h-1 accent-[#caa055]" />
+            </div>
+
+            {/* Tile Scale */}
+            <div>
+              <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
+                <span>Tile Scale</span>
+                <span className="text-[#caa055] font-mono">{selEp.tileScale ?? 100}%</span>
+              </div>
+              <input type="range" min="10" max="400" step="10" value={selEp.tileScale ?? 100}
+                onChange={e => updateEffectPath(selEp.id, { tileScale: parseInt(e.target.value) })}
+                className="w-full h-1 accent-[#caa055]" />
+            </div>
+
+            {/* Tile toggle + Blend + Delete */}
+            <div className="flex items-center gap-2 pt-1 border-t border-white/5">
+              <input type="checkbox" id="selTile" checked={selEp.tile !== false}
+                onChange={e => updateEffectPath(selEp.id, { tile: e.target.checked })}
+                className="accent-[#caa055] w-3 h-3" />
+              <label htmlFor="selTile" className="text-[8px] text-gray-400 cursor-pointer flex-1">Tile</label>
+              <select value={selEp.blendMode || 'normal'}
+                onChange={e => updateEffectPath(selEp.id, { blendMode: e.target.value })}
+                className="bg-black/50 border border-white/10 rounded px-1 py-0.5 text-[8px] text-white">
+                {['normal','screen','lighter','overlay'].map(m => <option key={m}>{m}</option>)}
+              </select>
+              <button onClick={() => { removeEffectPath(selEp.id); setSelectedPathId(null); updateSettings({ selectedEffectPathId: null }); }}
+                className="text-red-400 hover:text-red-300 text-[8px] font-bold ml-auto">🗑 Del</button>
+            </div>
+
+            {/* Light color for scenic lights */}
+            {selEp.isLight && (
+              <div>
+                <span className="text-[8px] text-gray-400 block mb-0.5">Light Color</span>
+                <input type="color" value={selEp.lightColor || '#ffcc44'}
+                  onChange={e => updateEffectPath(selEp.id, { lightColor: e.target.value })}
+                  className="w-full h-6 rounded cursor-pointer" />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Tool Sliders & Tiling Controls */}
       <div className="space-y-2.5 bg-black/40 border border-white/10 p-2.5 rounded-lg">
@@ -1702,7 +1792,7 @@ export function EffectsControlPanel({ onClose }) {
         <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
           {filteredEffects.map((eff) => {
             const isSelected = settings.activeEffectId === eff.id;
-            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl, eff.category);
+            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl);
 
             return (
               <div
@@ -1806,11 +1896,7 @@ export function EffectsControlPanel({ onClose }) {
                 <div key={ep.id || idx}>
                   <div
                     className={`flex items-center justify-between p-1.5 rounded border text-[9px] cursor-pointer transition-all ${isSelected ? 'bg-[#caa055]/15 border-[#caa055]/40' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
-                    onClick={() => {
-                      const newId = isSelected ? null : ep.id;
-                      setSelectedPathId(newId);
-                      updateSettings({ selectedEffectPathId: newId });
-                    }}
+                    onClick={() => { const id = isSelected ? null : ep.id; setSelectedPathId(id); updateSettings({ selectedEffectPathId: id }); }}
                   >
                     <div className="flex items-center gap-1.5 truncate">
                       <span className="font-mono text-[#caa055]">#{idx + 1}</span>
