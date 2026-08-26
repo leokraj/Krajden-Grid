@@ -65,6 +65,14 @@ export function BackgroundLayersPanel({ onUndock }) {
   const [globalBattleMaps, setGlobalBattleMaps] = useState([]);
   const [firebaseMaps, setFirebaseMaps] = useState(() => {
     try {
+      // Clear cache if project changed
+      const cachedProject = localStorage.getItem('krajden_firebase_project');
+      const currentProject = 'krajdengrid';
+      if (cachedProject !== currentProject) {
+        localStorage.removeItem('krajden_cached_firebase_maps');
+        localStorage.setItem('krajden_firebase_project', currentProject);
+        return [];
+      }
       const cached = JSON.parse(localStorage.getItem('krajden_cached_firebase_maps') || '[]');
       return Array.isArray(cached) ? cached : [];
     } catch {
@@ -315,7 +323,10 @@ export function BackgroundLayersPanel({ onUndock }) {
       try {
         const saved = await saveBattlemapToFirebase(newMap);
         toast.success(`"${mapName}" uploaded to vault!`, { id: toastId });
-        // Update active layer with permanent Storage URL
+        const finalUrl = saved?.url || url;
+        const finalMap = { ...newMap, url: finalUrl, imageUrl: finalUrl, source: 'vault' };
+        // Add to firebaseMaps immediately so it shows in Vault tab without waiting
+        setFirebaseMaps(prev => [finalMap, ...prev.filter(m => m.id !== newMap.id)]);
         if (saved?.url && saved.url !== url) {
           setLocalCustomMaps(prev => prev.map(m => m.id === newMap.id ? { ...m, url: saved.url, imageUrl: saved.url } : m));
         }
