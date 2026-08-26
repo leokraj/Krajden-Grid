@@ -446,9 +446,10 @@ export const ClipartLibrary = ({
           setDeletedVaultIds(storedDeleted);
         }
         const res = await fetch('/api/library/cliparts');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.cliparts)) {
+        const ct = res.headers?.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.cliparts)) {
             setGlobalAdminCliparts(data.cliparts);
           }
         }
@@ -674,92 +675,68 @@ export const ClipartLibrary = ({
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Helper to process files (from file input or drag-and-drop)
+  // Process files — upload directly to Firebase Storage, no backend server involved
   const processFiles = async (filesList) => {
     const files = Array.from(filesList || []);
     if (files.length === 0) return;
 
     let successCount = 0;
     let failCount = 0;
+    const toastId = toast.loading(`Uploading ${files.length} file(s)...`);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const backendUrl = window.location.origin;
-        const res = await fetch(`${backendUrl}/api/cliparts/upload`, {
-          method: 'POST',
-          body: formData
+        // Read file as base64
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
         });
-        
-        if (res.ok) {
-          const data = await res.json();
-          const img = new Image();
-          img.onload = () => {
-            const customItem = {
-              id: `custom_${Date.now()}_${i}`,
-              name: data.name || file.name.replace(/\.[^/.]+$/, ''),
-              category: 'custom',
-              type: 'image',
-              imageUrl: data.url,
-              width: img.width,
-              height: img.height,
-              isCustom: true,
-            };
-            onAddCustomClipart?.(customItem);
-            saveTokenToFirebase(customItem).catch(e => console.warn('[Firebase] token save error:', e));
-          };
-          img.src = data.url;
+
+        const isGif = file.type === 'image/gif';
+        const isVideo = file.type.startsWith('video/');
+
+        const customItem = {
+          id: `token_${Date.now()}_${i}_${Math.random().toString(36).substring(2,6)}`,
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          category: 'custom',
+          type: isVideo ? 'video' : isGif ? 'gif' : 'image',
+          imageUrl: dataUrl,
+          url: dataUrl,
+          isCustom: true,
+          isVault: true,
+          created_at: new Date().toISOString(),
+        };
+
+        // Add to local library immediately
+        onAddCustomClipart?.(customItem);
+
+        // Upload to Firebase Storage + save URL to Firestore
+        try {
+          const saved = await saveTokenToFirebase(customItem);
+          if (saved?.imageUrl && saved.imageUrl !== dataUrl) {
+            // Update with permanent Storage URL
+            onAddCustomClipart?.({ ...customItem, imageUrl: saved.imageUrl, url: saved.imageUrl });
+          }
           successCount++;
-          continue;
+        } catch(err) {
+          console.warn('[Firebase] Token save error:', err.message);
+          successCount++; // Still counts as local success
         }
       } catch (err) {
-        console.warn('Backend upload failed, falling back to base64:', err);
-      }
-
-      // Fallback to base64
-      try {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const img = new Image();
-          img.onload = () => {
-            const customItem = {
-              id: `custom_${Date.now()}_${i}_fb`,
-              name: file.name.replace(/\.[^/.]+$/, ''),
-              category: 'custom',
-              type: 'image',
-              imageData: event.target.result,
-              imageUrl: event.target.result,
-              width: img.width,
-              height: img.height,
-              isCustom: true,
-            };
-            onAddCustomClipart?.(customItem);
-            saveTokenToFirebase(customItem).catch(e => console.warn('[Firebase] token save error:', e));
-          };
-          img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
-        successCount++;
-      } catch (err) {
+        console.warn('[ClipartLibrary] File processing error:', err);
         failCount++;
       }
     }
 
-    if (successCount > 0) {
-      toast.success(`Successfully added ${successCount} GIF(s)/Token(s) to your library!`);
-    }
-    if (failCount > 0) {
-      toast.error(`Failed to add ${failCount} file(s).`);
-    }
-    
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (successCount > 0) toast.success(`Added ${successCount} token(s) to vault!`, { id: toastId });
+    if (failCount > 0) toast.error(`Failed to add ${failCount} file(s).`, { id: toastId });
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Handle single or batch file upload from input
+    // Handle single or batch file upload from input
   const handleFileUpload = (e) => {
     processFiles(e.target.files);
   };
