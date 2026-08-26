@@ -625,9 +625,17 @@ function hexToRgb(hex) {
   return [r, g, b];
 }
 
-function isVideoUrl(url) {
+function isVideoUrl(url, category) {
   if (!url) return false;
-  return url.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(url);
+  // Explicit video category
+  if (category === 'video') return true;
+  // data URL
+  if (url.startsWith('data:video/')) return true;
+  // File extension
+  if (/\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)) return true;
+  // Firebase Storage URLs — check for video token in URL params
+  if (url.includes('firebasestorage.googleapis.com') && /\.(mp4|webm|mov)/i.test(url)) return true;
+  return false;
 }
 
 function getLocalUserId() {
@@ -713,8 +721,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const effectTool      = settings.effectTool       || 'brush'; // 'brush'|'marquee'|'eraser'
 
   // Auto-detect flow vs area based on selected effect
+  // But if user has marquee or brush tool selected, always use area mode
   const activePreset = BUILTIN_EFFECT_PRESETS.find(p => p.id === activeEffectId);
-  const effectMode   = activePreset ? getEffectMode(activePreset) : 'area';
+  const rawEffectMode = activePreset ? getEffectMode(activePreset) : 'area';
+  // Only use flow mode if the effect is a flow type AND no explicit area tool is selected
+  const effectMode = (rawEffectMode === 'flow' && effectTool !== 'marquee' && effectTool !== 'brush') ? 'flow' : 'area';
 
   const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
@@ -724,13 +735,16 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    const needed = new Set(
-      [...effectPaths.map(ep => ep.effectUrl), activeEffectUrl].filter(Boolean)
-    );
+    // Map of url -> category for proper video type detection
+    const neededMap = new Map();
+    effectPaths.forEach(ep => {
+      if (ep.effectUrl) neededMap.set(ep.effectUrl, ep.category || 'image');
+    });
+    if (activeEffectUrl) neededMap.set(activeEffectUrl, 'image'); // category resolved below
 
-    needed.forEach(url => {
+    neededMap.forEach((category, url) => {
       if (mediaRef.current.has(url)) return;
-      const isVid = url.startsWith('data:video/') || /\.(mp4|webm|mov)$/i.test(url);
+      const isVid = isVideoUrl(url, category);
       const isGif = url.startsWith('data:image/gif') || /\.gif$/i.test(url);
 
       if (isVid) {
@@ -765,11 +779,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     // Prune unused — pause videos before removing
     mediaRef.current.forEach((el, url) => {
-      if (!needed.has(url)) {
-        if (el instanceof HTMLVideoElement) {
-          el.pause();
-          el.src = '';
-        }
+      if (!neededMap.has(url)) {
+        if (el instanceof HTMLVideoElement) { el.pause(); el.src = ''; }
         mediaRef.current.delete(url);
       }
     });
@@ -991,6 +1002,30 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         ctx.setLineDash([]); ctx.restore();
       }
 
+      // Draw selection highlight for ctrl+clicked effect
+      const selId = settings.selectedEffectPathId;
+      if (selId) {
+        const selEp = effectPaths.find(ep => ep.id === selId);
+        if (selEp) {
+          ctx.save();
+          ctx.strokeStyle = '#caa055';
+          ctx.lineWidth = (selEp.width || 60) + 6;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.globalAlpha = 0.4;
+          ctx.setLineDash([8, 6]);
+          if (selEp.type === 'marquee' && selEp.rect) {
+            ctx.strokeRect(selEp.rect.x - 3, selEp.rect.y - 3, selEp.rect.width + 6, selEp.rect.height + 6);
+          } else if (selEp.points?.length >= 2) {
+            ctx.beginPath();
+            ctx.moveTo(selEp.points[0].x, selEp.points[0].y);
+            for (let i = 1; i < selEp.points.length; i++) ctx.lineTo(selEp.points[i].x, selEp.points[i].y);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+
       rafRef.current = requestAnimationFrame(render);
     };
 
@@ -1044,6 +1079,24 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
     e.preventDefault();
     const pt = getCoords(e);
+
+    // Ctrl+click or right-click: select/deselect a placed effect for editing
+    if (e.ctrlKey || e.metaKey) {
+      // Hit test placed effects (last painted = on top)
+      const hit = [...effectPaths].reverse().find(ep => {
+        if (ep.type === 'marquee' && ep.rect) {
+          return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
+              && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
+        }
+        if (ep.points) {
+          const w = (ep.width || 60) / 2;
+          return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
+        }
+        return false;
+      });
+      updateSettings({ selectedEffectPathId: hit?.id || null });
+      return;
+    }
 
     // FLOW MODE: click to add points, double-click to commit
     if (effectMode === 'flow') {
@@ -1236,7 +1289,10 @@ export function EffectsControlPanel({ onClose }) {
   const [communityEffects, setCommunityEffects] = useState([]);
   const [myEffects, setMyEffects] = useState([]);
   const [localEffects, setLocalEffects] = useState(() => getLocalEffects());
-  const [selectedPathId, setSelectedPathId] = useState(null); // id of placed effect being edited
+  const [selectedPathId, setSelectedPathId] = useState(null);
+  // Sync with canvas ctrl+click selection
+  const canvasSelectedId = settings.selectedEffectPathId || null;
+  const effectiveSelectedId = canvasSelectedId || selectedPathId;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTheme, setSelectedTheme] = useState('ALL');
   const [isUploading, setIsUploading] = useState(false);
@@ -1646,7 +1702,7 @@ export function EffectsControlPanel({ onClose }) {
         <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
           {filteredEffects.map((eff) => {
             const isSelected = settings.activeEffectId === eff.id;
-            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl);
+            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl, eff.category);
 
             return (
               <div
@@ -1745,12 +1801,16 @@ export function EffectsControlPanel({ onClose }) {
 
           <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
             {effectPaths.map((ep, idx) => {
-              const isSelected = selectedPathId === ep.id;
+              const isSelected = effectiveSelectedId === ep.id;
               return (
                 <div key={ep.id || idx}>
                   <div
                     className={`flex items-center justify-between p-1.5 rounded border text-[9px] cursor-pointer transition-all ${isSelected ? 'bg-[#caa055]/15 border-[#caa055]/40' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
-                    onClick={() => setSelectedPathId(isSelected ? null : ep.id)}
+                    onClick={() => {
+                      const newId = isSelected ? null : ep.id;
+                      setSelectedPathId(newId);
+                      updateSettings({ selectedEffectPathId: newId });
+                    }}
                   >
                     <div className="flex items-center gap-1.5 truncate">
                       <span className="font-mono text-[#caa055]">#{idx + 1}</span>
