@@ -256,6 +256,14 @@ export function FullscreenContent() {
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#0d0f12] select-none" data-testid="fullscreen-page">
+
+      {/* Draggable title bar — invisible 24px strip at top for moving window between monitors */}
+      {window.electronAPI && (
+        <div
+          className="fixed top-0 left-0 right-0 z-[999]"
+          style={{ height: 24, WebkitAppRegion: 'drag', background: 'transparent' }}
+        />
+      )}
       {/* Background layer color */}
       <div 
         className="absolute inset-0 transition-colors duration-300"
