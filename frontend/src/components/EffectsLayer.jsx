@@ -798,14 +798,28 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    const needed = new Set(
-      [...effectPaths.map(ep => ep.effectUrl), activeEffectUrl].filter(Boolean)
-    );
+    // Build a map of url -> category so we can detect video type properly
+    const neededMap = new Map();
+    effectPaths.forEach(ep => {
+      if (ep.effectUrl) neededMap.set(ep.effectUrl, ep.category || 'image');
+    });
+    if (activeEffectUrl) {
+      // Find category from active effect settings
+      const activeCat = settings.activeEffectCategory || 'image';
+      neededMap.set(activeEffectUrl, activeCat);
+    }
 
-    needed.forEach(url => {
+    neededMap.forEach((category, url) => {
       if (mediaRef.current.has(url)) return;
-      const isVid = url.startsWith('data:video/') || /\.(mp4|webm|mov)$/i.test(url);
-      const isGif = url.startsWith('data:image/gif') || /\.gif$/i.test(url);
+
+      // Detect video: check category field first, then URL patterns
+      const isVid = category === 'video'
+        || url.startsWith('data:video/')
+        || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)
+        || (url.includes('firebasestorage') && /[._](mp4|webm|mov)/i.test(url));
+      const isGif = category === 'animated'
+        || url.startsWith('data:image/gif')
+        || /\.gif(\?|$)/i.test(url);
 
       if (isVid) {
         const v = document.createElement('video');
@@ -815,7 +829,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         v.playsInline = true;
         v.preload = 'auto';
         v.src = url;
-        // Force play — needed for autoplay policies in Electron
         const tryPlay = () => v.play().catch(() => {
           setTimeout(() => v.play().catch(() => {}), 500);
         });
@@ -823,12 +836,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         v.addEventListener('canplay', tryPlay, { once: true });
         v.load();
         mediaRef.current.set(url, v);
-      } else if (isGif) {
-        // GIFs render fine as images — browser animates them
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = url;
-        mediaRef.current.set(url, img);
       } else {
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -837,17 +844,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       }
     });
 
-    // Prune unused — pause videos before removing
+    // Prune unused
     mediaRef.current.forEach((el, url) => {
-      if (!needed.has(url)) {
-        if (el instanceof HTMLVideoElement) {
-          el.pause();
-          el.src = '';
-        }
+      if (!neededMap.has(url)) {
+        if (el instanceof HTMLVideoElement) { el.pause(); el.src = ''; }
         mediaRef.current.delete(url);
       }
     });
-  }, [effectPaths, activeEffectUrl]);
+  }, [effectPaths, activeEffectUrl, settings.activeEffectCategory]);
 
   // ── Render loop ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -933,98 +937,42 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ['lava_river','mud_river','shader_lava_river','shader_mud_river'].includes(effect.effectId || '');
 
         if (isFlow && isFlowEffect && points.length >= 2) {
-          // ── PATH-SPACE UV RENDERING ────────────────────────────────────────
-          // For river/flow effects: render the shader in path-local coordinates
-          // UV.x follows arc length along path, UV.y goes across width
-          // This makes the texture FLOW along the path direction
+          // ── FLOW SHADER RENDERING ──────────────────────────────────────────
+          // Render shader once into full canvas, clip to path stroke shape.
+          // The shader scrolls internally via u_time — no per-segment tricks needed.
+          // This produces a single continuous ribbon, not segments.
 
-          // Tessellate the bezier into fine segments
-          const tessPoints = [];
-          if (type === 'bezier' && points.length >= 3) {
-            const STEPS = Math.min(200, points.length * 20);
-            for (let s = 0; s <= STEPS; s++) {
-              const t2 = s / STEPS;
-              // Catmull-Rom interpolation through control points
-              const n = points.length - 1;
-              const idx = Math.min(Math.floor(t2 * n), n - 1);
-              const local_t = t2 * n - idx;
-              const p0 = points[Math.max(0, idx - 1)];
-              const p1 = points[idx];
-              const p2 = points[Math.min(n, idx + 1)];
-              const p3 = points[Math.min(n, idx + 2)];
-              const t3 = local_t;
-              const x = 0.5 * ((2*p1.x) + (-p0.x+p2.x)*t3 + (2*p0.x-5*p1.x+4*p2.x-p3.x)*t3*t3 + (-p0.x+3*p1.x-3*p2.x+p3.x)*t3*t3*t3);
-              const y = 0.5 * ((2*p1.y) + (-p0.y+p2.y)*t3 + (2*p0.y-5*p1.y+4*p2.y-p3.y)*t3*t3 + (-p0.y+3*p1.y-3*p2.y+p3.y)*t3*t3*t3);
-              tessPoints.push({ x, y });
-            }
-          } else {
-            tessPoints.push(...points);
-          }
+          // Build stroke mask from the path
+          const mask = buildMask(effect, cW, cH);
 
-          // Compute arc lengths for UV.x mapping
-          const arcLengths = [0];
-          for (let i = 1; i < tessPoints.length; i++) {
-            const dx = tessPoints[i].x - tessPoints[i-1].x;
-            const dy = tessPoints[i].y - tessPoints[i-1].y;
-            arcLengths.push(arcLengths[i-1] + Math.sqrt(dx*dx + dy*dy));
-          }
-          const totalLen = arcLengths[arcLengths.length - 1] || 1;
-          const halfW = sw / 2;
-          const now = (Date.now() / 1000) % 1000;
+          // Render the shader into a temp canvas sized to the path bounding box
+          const xs = points.map(p => p.x), ys = points.map(p => p.y);
+          const bx = Math.min(...xs) - sw/2;
+          const by = Math.min(...ys) - sw/2;
+          const bw = Math.max(...xs) - Math.min(...xs) + sw;
+          const bh = Math.max(...ys) - Math.min(...ys) + sw;
+
+          const tmp = document.createElement('canvas');
+          tmp.width = cW; tmp.height = cH;
+          const tc = tmp.getContext('2d');
+          renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, 'normal',
+            lightColor ? hexToRgb(lightColor) : null);
+
+          // Clip shader to the path mask
+          tc.globalCompositeOperation = 'destination-in';
+          tc.drawImage(mask, 0, 0);
 
           ctx.save();
           ctx.globalAlpha = Math.max(0, Math.min(1, op));
           if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
           else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
           else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
-
-          // Render each segment as a small quad with path-aligned UV
-          const SEGS = tessPoints.length - 1;
-          for (let i = 0; i < SEGS; i++) {
-            const p0 = tessPoints[i];
-            const p1 = tessPoints[i + 1];
-            const dx = p1.x - p0.x;
-            const dy = p1.y - p0.y;
-            const len = Math.sqrt(dx*dx + dy*dy);
-            if (len < 0.5) continue;
-
-            // Perpendicular
-            const nx = -dy / len;
-            const ny = dx / len;
-
-            // UV along path: scroll using time
-            const flowSpeed = 0.3;
-            const uvX0 = (arcLengths[i] / totalLen - now * flowSpeed) % 1;
-            const uvX1 = (arcLengths[i+1] / totalLen - now * flowSpeed) % 1;
-
-            // Render a thin shader slice for this segment
-            const segCanvas = document.createElement('canvas');
-            const segW = Math.max(2, Math.round(len));
-            const segH = Math.max(2, Math.round(sw));
-            segCanvas.width = segW; segCanvas.height = segH;
-            const sc2 = segCanvas.getContext('2d');
-
-            // Render the full shader texture, then we'll sample the right slice
-            renderShaderToCanvas(sc2, shaderName, 0, 0, segW, segH, 1, 'normal',
-              lightColor ? hexToRgb(lightColor) : null);
-
-            // Draw the quad on the main canvas rotated to follow the path
-            const angle = Math.atan2(dy, dx);
-            const midX = (p0.x + p1.x) / 2;
-            const midY = (p0.y + p1.y) / 2;
-
-            ctx.save();
-            ctx.translate(midX, midY);
-            ctx.rotate(angle);
-            ctx.drawImage(segCanvas, -len/2, -sw/2, len, sw);
-            ctx.restore();
-          }
-
+          ctx.drawImage(tmp, 0, 0);
           ctx.restore();
           return;
         }
 
-        // ── AREA SHADER (non-flow) ─────────────────────────────────────────
+                // ── AREA SHADER (non-flow) ─────────────────────────────────────────
         const mask = buildMask(effect, cW, cH);
         // Render shader into temp canvas, then clip with mask
         const tmp = document.createElement('canvas');
@@ -1249,6 +1197,33 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     e.preventDefault();
     const pt = getCoords(e);
 
+    // Helper: hit test all placed effects
+    const hitTest = (pt) => [...effectPaths].reverse().find(ep => {
+      if (ep.type === 'marquee' && ep.rect) {
+        return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
+            && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
+      }
+      if (ep.points) {
+        const w = (ep.width || 60) / 2 + 10; // small tolerance
+        return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
+      }
+      return false;
+    });
+
+    // SELECT TOOL: click to select placed effect for editing
+    if (effectTool === 'select') {
+      const hit = hitTest(pt);
+      updateSettings({ selectedEffectPathId: hit?.id || null });
+      return;
+    }
+
+    // CTRL+CLICK: select in any mode without switching tools
+    if (e.ctrlKey || e.metaKey) {
+      const hit = hitTest(pt);
+      updateSettings({ selectedEffectPathId: hit?.id || null });
+      return;
+    }
+
     // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
     // Scroll wheel changes width while drawing
     if (effectMode === 'flow') {
@@ -1309,7 +1284,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         points: [...currentStroke],
         effectUrl: activeEffectUrl, effectId: activeEffectId,
         isShader: !!activeShader, shaderName: activeShader || null,
-        category: isFlow ? 'flow' : undefined,
+        category: isFlow ? 'flow' : (settings.activeEffectCategory || undefined),
         width: brushSize, opacity, tile, tileScale, blendMode,
       });
     }
@@ -1352,8 +1327,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Cursor ────────────────────────────────────────────────────────────────
   const cursorStyle = !effectsEnabled    ? 'default'
-    : !hasActiveEffect                    ? 'not-allowed'
+    : !hasActiveEffect && effectTool !== 'select' && effectTool !== 'eraser' ? 'not-allowed'
     : effectMode === 'flow'               ? 'crosshair'
+    : effectTool === 'select'             ? 'pointer'
     : effectTool === 'eraser'             ? 'cell'
     : effectTool === 'marquee'            ? 'crosshair'
     : 'none';
@@ -1536,7 +1512,8 @@ export function EffectsControlPanel({ onClose }) {
       activeEffectId: eff.id,
       activeEffectUrl: eff.isShader ? null : (eff.url || eff.imageUrl),
       activeEffectShader: eff.isShader ? eff.shaderName : null,
-      effectsEnabled: true
+      activeEffectCategory: eff.category || (eff.isShader ? 'shader' : 'image'),
+      effectsEnabled: true,
     });
     toast.success(`Active: "${eff.name}" — Draw on map!`);
   };
@@ -1672,6 +1649,7 @@ export function EffectsControlPanel({ onClose }) {
         </Label>
         <div className="grid grid-cols-4 gap-1 p-1 bg-black/50 border border-white/10 rounded-lg">
           {[
+            { id: 'select', label: 'Select', icon: '🎯', desc: 'Click to Select & Edit' },
             { id: 'brush', label: 'Brush', icon: '🖌️', desc: 'Freehand Paint' },
             { id: 'marquee', label: 'Marquee', icon: '🔲', desc: 'Box Window' },
             { id: 'bezier', label: 'Bezier', icon: '〰️', desc: 'Curved Path' },
