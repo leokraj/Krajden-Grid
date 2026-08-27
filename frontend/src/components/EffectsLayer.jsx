@@ -111,6 +111,14 @@ import {
 // ── Effect Categories ─────────────────────────────────────────────────────
 // FLOW effects follow a drawn path (rivers, streams, lava flows)
 // AREA effects fill a painted region (fire, fog, poison, splatter)
+// ── Effect Categories ─────────────────────────────────────────────────────
+export const EFFECT_CATEGORIES = {
+  RIVER:  'river',   // flows along a path — UV-deformed ribbon mesh
+  AREA:   'area',    // fills a painted region
+  STATIC: 'static',  // placed once, no animation (splats, decals)
+  LIGHT:  'light',   // scenic light sources
+};
+
 export const FLOW_EFFECTS = new Set([
   'river', 'lava_river', 'mud_river', 'blood_stream', 'acid_stream', 'water_stream', 'water_river',
   'shader_lava_river', 'shader_mud_river', 'shader_water_river', 'shader_blood_stream', 'shader_acid_stream',
@@ -137,6 +145,227 @@ const SHADER_VERT = `
   varying vec2 v_uv;
   void main() { v_uv = (a_pos + 1.0) * 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
+
+// ── WebGL Ribbon Mesh Renderer ─────────────────────────────────────────────
+// Renders a UV-deformed ribbon mesh along a bezier path.
+// UV.x follows arc length (tiled by repeatCount), UV.y goes across width.
+// Works for both video textures and shader effects.
+
+const RIBBON_VERT = `
+  precision mediump float;
+  attribute vec2 a_pos;  // screen-space position
+  attribute vec2 a_uv;   // path-space UV
+  uniform vec2 u_res;    // canvas resolution
+  varying vec2 v_uv;
+  void main() {
+    v_uv = a_uv;
+    // Convert screen coords to clip space
+    vec2 clip = (a_pos / u_res) * 2.0 - 1.0;
+    clip.y = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+  }
+`;
+
+const RIBBON_FRAG_TEX = `
+  precision mediump float;
+  uniform sampler2D u_tex;
+  uniform float u_opacity;
+  varying vec2 v_uv;
+  void main() {
+    vec2 uv = vec2(fract(v_uv.x), v_uv.y);
+    vec4 col = texture2D(u_tex, uv);
+    gl_FragColor = vec4(col.rgb, col.a * u_opacity);
+  }
+`;
+
+const RIBBON_FRAG_SHADER = `
+  precision mediump float;
+  uniform float u_time;
+  uniform vec2 u_ribbonSize; // width, totalLength for shader sampling
+  uniform float u_opacity;
+  varying vec2 v_uv;
+  // Noise helpers
+  float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+  float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+  float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+  void main() {
+    // v_uv.x = along path (scrolls), v_uv.y = across width (0=edge, 1=center, 0=edge)
+    float along = fract(v_uv.x - u_time * 0.4);
+    float across = v_uv.y; // 0 at edges, 1 at center
+    // Edge feathering
+    float edge = smoothstep(0., 0.15, across) * smoothstep(1., 0.85, across);
+    gl_FragColor = vec4(vec3(along, across, 0.5), edge * u_opacity);
+  }
+`;
+
+let _ribbonGl = null;
+let _ribbonCanvas = null;
+let _ribbonProgTex = null;
+let _ribbonProgShader = null;
+let _ribbonPosBuf = null;
+let _ribbonUvBuf = null;
+
+function getRibbonGL(cW, cH) {
+  if (!_ribbonCanvas) {
+    _ribbonCanvas = document.createElement('canvas');
+    const gl = _ribbonCanvas.getContext('webgl', { premultipliedAlpha: false, alpha: true });
+    if (!gl) return null;
+    _ribbonGl = gl;
+
+    const compile = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn('Ribbon shader:', gl.getShaderInfoLog(s)); return null; }
+      return s;
+    };
+    const link = (vs, fs) => {
+      const p = gl.createProgram();
+      gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.warn('Ribbon link failed'); return null; }
+      return p;
+    };
+
+    const rv = compile(gl.VERTEX_SHADER, RIBBON_VERT);
+    const rtex = compile(gl.FRAGMENT_SHADER, RIBBON_FRAG_TEX);
+    if (rv && rtex) _ribbonProgTex = link(rv, rtex);
+
+    _ribbonPosBuf = gl.createBuffer();
+    _ribbonUvBuf = gl.createBuffer();
+  }
+
+  if (_ribbonCanvas.width !== cW || _ribbonCanvas.height !== cH) {
+    _ribbonCanvas.width = cW;
+    _ribbonCanvas.height = cH;
+  }
+  return { gl: _ribbonGl, canvas: _ribbonCanvas, progTex: _ribbonProgTex };
+}
+
+// Build ribbon geometry: returns {positions, uvs} Float32Arrays
+function buildRibbonGeometry(points, type, strokeWidth, repeatCount, widthVariation) {
+  // Tessellate the path
+  const tess = [];
+  if (type === 'bezier' && points.length >= 3) {
+    const STEPS = Math.min(300, points.length * 30);
+    for (let s = 0; s <= STEPS; s++) {
+      const t = s / STEPS;
+      const n2 = points.length - 1;
+      const idx = Math.min(Math.floor(t * n2), n2 - 1);
+      const lt = t * n2 - idx;
+      const p0 = points[Math.max(0, idx - 1)];
+      const p1 = points[idx];
+      const p2 = points[Math.min(n2, idx + 1)];
+      const p3 = points[Math.min(n2, idx + 2)];
+      const x = 0.5 * ((2*p1.x) + (-p0.x+p2.x)*lt + (2*p0.x-5*p1.x+4*p2.x-p3.x)*lt*lt + (-p0.x+3*p1.x-3*p2.x+p3.x)*lt*lt*lt);
+      const y = 0.5 * ((2*p1.y) + (-p0.y+p2.y)*lt + (2*p0.y-5*p1.y+4*p2.y-p3.y)*lt*lt + (-p0.y+3*p1.y-3*p2.y+p3.y)*lt*lt*lt);
+      tess.push({ x, y });
+    }
+  } else {
+    tess.push(...points);
+  }
+
+  // Compute arc lengths
+  const arcs = [0];
+  for (let i = 1; i < tess.length; i++) {
+    const dx = tess[i].x - tess[i-1].x, dy = tess[i].y - tess[i-1].y;
+    arcs.push(arcs[i-1] + Math.sqrt(dx*dx + dy*dy));
+  }
+  const total = arcs[arcs.length-1] || 1;
+
+  // Build triangle strip: top edge then bottom edge interleaved
+  const positions = [];
+  const uvs = [];
+
+  for (let i = 0; i < tess.length; i++) {
+    const t = arcs[i] / total;
+    const uvX = t * repeatCount;
+
+    // Tangent for perpendicular
+    let tx, ty;
+    if (i === 0) { tx = tess[1].x - tess[0].x; ty = tess[1].y - tess[0].y; }
+    else if (i === tess.length - 1) { tx = tess[i].x - tess[i-1].x; ty = tess[i].y - tess[i-1].y; }
+    else { tx = tess[i+1].x - tess[i-1].x; ty = tess[i+1].y - tess[i-1].y; }
+    const tl = Math.sqrt(tx*tx + ty*ty) || 1;
+    const nx = -ty / tl, ny = tx / tl; // perpendicular
+
+    // Width variation: taper at ends if widthVariation > 0
+    const endFade = Math.min(t, 1-t) * 2; // 0 at tips, 1 in middle
+    const w = (strokeWidth / 2) * (1 - widthVariation * (1 - endFade));
+
+    // Top vertex (uvY = 0), Bottom vertex (uvY = 1)
+    positions.push(tess[i].x + nx * w, tess[i].y + ny * w);
+    uvs.push(uvX, 0);
+    positions.push(tess[i].x - nx * w, tess[i].y - ny * w);
+    uvs.push(uvX, 1);
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    uvs: new Float32Array(uvs),
+    count: tess.length * 2
+  };
+}
+
+// Render ribbon with video texture
+export function renderRibbonWithVideo(ctx, media, points, type, strokeWidth, opacity, repeatCount, widthVariation, edgeFade, cW, cH) {
+  const r = getRibbonGL(cW, cH);
+  if (!r || !r.progTex) return false;
+  const { gl, canvas, progTex } = r;
+
+  const isVid = media instanceof HTMLVideoElement;
+  const mW = isVid ? media.videoWidth : media.naturalWidth;
+  const mH = isVid ? media.videoHeight : media.naturalHeight;
+  if (!mW || !mH) return false;
+
+  const geom = buildRibbonGeometry(points, type, strokeWidth, repeatCount, widthVariation);
+
+  gl.viewport(0, 0, cW, cH);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(progTex);
+
+  // Upload geometry
+  const posLoc = gl.getAttribLocation(progTex, 'a_pos');
+  const uvLoc = gl.getAttribLocation(progTex, 'a_uv');
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, _ribbonPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, geom.positions, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, _ribbonUvBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, geom.uvs, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(uvLoc);
+  gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
+
+  // Set uniforms
+  gl.uniform2f(gl.getUniformLocation(progTex, 'u_res'), cW, cH);
+  gl.uniform1f(gl.getUniformLocation(progTex, 'u_opacity'), opacity);
+
+  // Upload video/image as texture
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  try {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, media);
+  } catch(_) { gl.deleteTexture(tex); return false; }
+
+  gl.uniform1i(gl.getUniformLocation(progTex, 'u_tex'), 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, geom.count);
+  gl.deleteTexture(tex);
+
+  // Apply edge fade via canvas blur if needed
+  ctx.save();
+  if (edgeFade > 0) ctx.filter = `blur(${Math.round(edgeFade * 0.3)}px)`;
+  ctx.drawImage(canvas, 0, 0);
+  ctx.filter = 'none';
+  ctx.restore();
+
+  return true;
+}
 
 // Each shader is distinct — different palettes, timing, and visual character
 const SHADER_FRAGS = {
@@ -939,18 +1168,36 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ['lava_river','mud_river','shader_lava_river','shader_mud_river'].includes(effect.effectId || '');
 
         if (isFlow && isFlowEffect && points.length >= 2) {
-          // ── FLOW SHADER RENDERING ──────────────────────────────────────────
-          // Render shader once into full canvas, clip to path stroke shape.
-          // The shader scrolls internally via u_time — no per-segment tricks needed.
-          // This produces a single continuous ribbon, not segments.
+          // ── RIBBON MESH RENDERING ─────────────────────────────────────────
+          // For shader effects: render once, clip to stroke mask
+          // For video/image effects: UV-deformed WebGL ribbon mesh
 
-          // Build stroke mask from the path
+          const repeatCount = effect.repeatCount || 3;
+          const widthVariation = effect.widthVariation || 0;
+
+          // Try WebGL ribbon for video/image effects
+          if (!isShader && effectUrl) {
+            const media = mediaRef.current.get(effectUrl);
+            if (media) {
+              const isVid = media instanceof HTMLVideoElement;
+              const ready = isVid
+                ? (media.readyState >= 1 && (media.videoWidth > 0 || media.videoHeight > 0))
+                : (media.complete && media.naturalWidth > 0);
+
+              if (ready) {
+                const ok = renderRibbonWithVideo(ctx, media, points, type,
+                  sw, op, repeatCount, widthVariation, effect.edgeFade || 0, cW, cH);
+                if (ok) return;
+              } else {
+                if (isVid && media.paused) media.play().catch(() => {});
+              }
+            }
+          }
+
+          // Fallback / shader effects: render shader into bounding box, clip to stroke
           const mask = buildMask(effect, cW, cH);
-
-          // Render the shader into a temp canvas sized to the path bounding box
           const xs = points.map(p => p.x), ys = points.map(p => p.y);
-          const bx = Math.min(...xs) - sw/2;
-          const by = Math.min(...ys) - sw/2;
+          const bx = Math.min(...xs) - sw/2, by = Math.min(...ys) - sw/2;
           const bw = Math.max(...xs) - Math.min(...xs) + sw;
           const bh = Math.max(...ys) - Math.min(...ys) + sw;
 
@@ -959,8 +1206,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           const tc = tmp.getContext('2d');
           renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, 'normal',
             lightColor ? hexToRgb(lightColor) : null);
-
-          // Clip shader to the path mask
           tc.globalCompositeOperation = 'destination-in';
           tc.drawImage(mask, 0, 0);
 
@@ -1374,22 +1619,26 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       )}
 
       {/* ── Floating Effect Controls Bar ────────────────────────────────────── */}
-      {/* Shows above selected effect on canvas — same style as clipart controls */}
       {(() => {
         const selId = settings.selectedEffectPathId;
         if (!selId) return null;
         const ep = effectPaths.find(e => e.id === selId);
         if (!ep) return null;
 
-        // Position the bar above the effect's centroid
+        const isRiver = ep.category === 'flow' || FLOW_EFFECTS.has(ep.effectId || '');
+
+        // Position above the effect — find topmost point
         let barX = cW / 2, barY = 80;
         if (ep.type === 'marquee' && ep.rect) {
           barX = ep.rect.x + ep.rect.width / 2;
-          barY = Math.max(60, ep.rect.y - 16);
+          barY = Math.max(60, ep.rect.y - 20);
         } else if (ep.points?.length > 0) {
           barX = ep.points.reduce((s, p) => s + p.x, 0) / ep.points.length;
-          barY = Math.max(60, Math.min(...ep.points.map(p => p.y)) - 16);
+          barY = Math.max(60, Math.min(...ep.points.map(p => p.y)) - 20);
         }
+
+        // Clamp to canvas bounds
+        barX = Math.max(200, Math.min(cW - 200, barX));
 
         return (
           <div
@@ -1404,82 +1653,106 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             }}
             onMouseDown={e => e.stopPropagation()}
           >
-            {/* Opacity */}
+            {/* Opacity — all effects */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-white/50">opacity</span>
+              <span className="text-[9px] text-white/50">opacity</span>
               <input type="range" min="0" max="1" step="0.05"
                 value={ep.opacity ?? 0.9}
                 onChange={e => updateEffectPath(ep.id, { opacity: parseFloat(e.target.value) })}
                 className="w-20 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
               />
-              <span className="text-[10px] text-[#caa055] font-mono w-7">{Math.round((ep.opacity ?? 0.9) * 100)}%</span>
+              <span className="text-[9px] text-[#caa055] font-mono w-7">{Math.round((ep.opacity ?? 0.9)*100)}%</span>
             </div>
 
-            <div className="w-px h-5 bg-white/20" />
+            {/* River-specific controls */}
+            {isRiver && (<>
+              <div className="w-px h-5 bg-white/20" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-white/50">width</span>
+                <input type="range" min="10" max="500" step="5"
+                  value={ep.width ?? 60}
+                  onChange={e => updateEffectPath(ep.id, { width: parseInt(e.target.value) })}
+                  className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                />
+                <span className="text-[9px] text-[#caa055] font-mono w-8">{ep.width ?? 60}px</span>
+              </div>
+              <div className="w-px h-5 bg-white/20" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-white/50">repeat</span>
+                <input type="range" min="1" max="20" step="0.5"
+                  value={ep.repeatCount ?? 3}
+                  onChange={e => updateEffectPath(ep.id, { repeatCount: parseFloat(e.target.value) })}
+                  className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                />
+                <span className="text-[9px] text-[#caa055] font-mono w-5">{ep.repeatCount ?? 3}×</span>
+              </div>
+              <div className="w-px h-5 bg-white/20" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-white/50">taper</span>
+                <input type="range" min="0" max="1" step="0.05"
+                  value={ep.widthVariation ?? 0}
+                  onChange={e => updateEffectPath(ep.id, { widthVariation: parseFloat(e.target.value) })}
+                  className="w-14 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                />
+                <span className="text-[9px] text-[#caa055] font-mono w-6">{Math.round((ep.widthVariation ?? 0)*100)}%</span>
+              </div>
+            </>)}
 
-            {/* Edge Fade */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-white/50">fade</span>
-              <input type="range" min="0" max="120" step="4"
-                value={ep.edgeFade ?? 0}
-                onChange={e => updateEffectPath(ep.id, { edgeFade: parseInt(e.target.value) })}
-                className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
-              />
-              <span className="text-[10px] text-[#caa055] font-mono w-7">{ep.edgeFade ?? 0}px</span>
-            </div>
-
-            <div className="w-px h-5 bg-white/20" />
-
-            {/* Tile Scale */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-white/50">tile</span>
-              <input type="range" min="10" max="400" step="10"
-                value={ep.tileScale ?? 100}
-                onChange={e => updateEffectPath(ep.id, { tileScale: parseInt(e.target.value) })}
-                className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
-              />
-              <span className="text-[10px] text-[#caa055] font-mono w-8">{ep.tileScale ?? 100}%</span>
-            </div>
-
-            {/* Width (for strokes) */}
-            {ep.type !== 'marquee' && (
-              <>
+            {/* Area-effect controls */}
+            {!isRiver && (<>
+              <div className="w-px h-5 bg-white/20" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-white/50">tile</span>
+                <input type="range" min="10" max="400" step="10"
+                  value={ep.tileScale ?? 100}
+                  onChange={e => updateEffectPath(ep.id, { tileScale: parseInt(e.target.value) })}
+                  className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                />
+                <span className="text-[9px] text-[#caa055] font-mono w-8">{ep.tileScale ?? 100}%</span>
+              </div>
+              {ep.type !== 'marquee' && (<>
                 <div className="w-px h-5 bg-white/20" />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-white/50">width</span>
+                  <span className="text-[9px] text-white/50">width</span>
                   <input type="range" min="10" max="500" step="5"
                     value={ep.width ?? 60}
                     onChange={e => updateEffectPath(ep.id, { width: parseInt(e.target.value) })}
                     className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
                   />
-                  <span className="text-[10px] text-[#caa055] font-mono w-8">{ep.width ?? 60}px</span>
+                  <span className="text-[9px] text-[#caa055] font-mono w-8">{ep.width ?? 60}px</span>
                 </div>
-              </>
-            )}
+              </>)}
+            </>)}
+
+            {/* Edge fade — all effects */}
+            <div className="w-px h-5 bg-white/20" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-white/50">fade</span>
+              <input type="range" min="0" max="120" step="4"
+                value={ep.edgeFade ?? 0}
+                onChange={e => updateEffectPath(ep.id, { edgeFade: parseInt(e.target.value) })}
+                className="w-14 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+              />
+              <span className="text-[9px] text-[#caa055] font-mono w-7">{ep.edgeFade ?? 0}px</span>
+            </div>
 
             <div className="w-px h-5 bg-white/20" />
 
             {/* Blend mode */}
-            <select
-              value={ep.blendMode || 'normal'}
+            <select value={ep.blendMode || 'normal'}
               onChange={e => updateEffectPath(ep.id, { blendMode: e.target.value })}
-              className="bg-black/60 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white cursor-pointer"
-            >
+              className="bg-black/60 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white cursor-pointer">
               {['normal','screen','lighter','overlay'].map(m => <option key={m}>{m}</option>)}
             </select>
 
             {/* Deselect + Delete */}
-            <button
-              onClick={() => updateSettings({ selectedEffectPathId: null })}
-              className="text-white/40 hover:text-white text-[10px] px-1"
-              title="Deselect"
-            >✕</button>
-            <button
-              onClick={() => { removeEffectPath(ep.id); updateSettings({ selectedEffectPathId: null }); }}
-              className="text-red-400 hover:text-red-300 ml-1"
-              title="Delete effect"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            <button onClick={() => updateSettings({ selectedEffectPathId: null })}
+              className="text-white/40 hover:text-white text-[10px] px-1" title="Deselect">✕</button>
+            <button onClick={() => { removeEffectPath(ep.id); updateSettings({ selectedEffectPathId: null }); }}
+              className="text-red-400 hover:text-red-300 ml-1" title="Delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>
+              </svg>
             </button>
           </div>
         );
