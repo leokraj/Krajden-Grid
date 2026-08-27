@@ -140,9 +140,10 @@ function createMainWindow(targetUrl) {
     width,
     height,
     title: 'Krajden Grid',
-    frame: false,
+    frame: false,        // frameless but we add a drag region in the HTML
+    movable: true,       // allows dragging between monitors
     resizable: true,
-    maximizeable: true,
+    maximizable: true,
     backgroundColor: '#0d0f12',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -213,19 +214,36 @@ function createMainWindow(targetUrl) {
   });
 }
 
-function createChildWindow(mode, title, width = 450, height = 650) {
+function createChildWindow(mode, title, width = 450, height = 650, senderBounds = null) {
   if (childWindows[mode] && !childWindows[mode].isDestroyed()) {
     childWindows[mode].focus();
     return;
   }
 
+  // Position on same monitor as the sender (controls window), not the grid
+  let winX, winY;
+  if (senderBounds) {
+    const senderDisplay = screen.getDisplayMatching(senderBounds);
+    const { x, y, width: dw, height: dh } = senderDisplay.workArea;
+    // Center the child window on that display
+    winX = x + Math.round((dw - width) / 2);
+    winY = y + Math.round((dh - height) / 2);
+  } else {
+    const primary = screen.getPrimaryDisplay().workArea;
+    winX = primary.x + Math.round((primary.width - width) / 2);
+    winY = primary.y + Math.round((primary.height - height) / 2);
+  }
+
   const win = new BrowserWindow({
-    parent: mainWindow || undefined,
+    x: winX,
+    y: winY,
     width,
     height,
     title,
     frame: true,
-    alwaysOnTop: true,
+    movable: true,
+    resizable: true,
+    alwaysOnTop: false,
     hasShadow: true,
     backgroundColor: '#0d0f12',
     webPreferences: {
@@ -295,11 +313,7 @@ ipcMain.handle('set-display', (event, displayId) => {
     const targetDisplay = displays.find(d => d.id === Number(displayId) || d.id.toString() === displayId.toString());
     if (targetDisplay && mainWindow && !mainWindow.isDestroyed()) {
       const { x, y, width, height } = targetDisplay.bounds;
-      
-      // Update bounds to position the transparent overlay perfectly on the chosen monitor
       mainWindow.setBounds({ x, y, width, height });
-      
-      // Let all windows know about the monitor update
       mainWindow.webContents.send('display-updated', { displayId, bounds: targetDisplay.bounds });
       Object.values(childWindows).forEach(win => {
         if (win && !win.isDestroyed()) {
@@ -313,6 +327,43 @@ ipcMain.handle('set-display', (event, displayId) => {
     console.error('Error in set-display:', err);
     return false;
   }
+});
+
+// Move a specific window (main or child by mode) to a specific display
+ipcMain.handle('move-window-to-display', (event, { windowMode, displayId }) => {
+  try {
+    const displays = screen.getAllDisplays();
+    const targetDisplay = displays.find(d => d.id === Number(displayId) || d.id.toString() === displayId.toString());
+    if (!targetDisplay) return false;
+    const { x, y, width, height } = targetDisplay.bounds;
+
+    const targetWin = windowMode === 'main'
+      ? mainWindow
+      : (childWindows[windowMode] && !childWindows[windowMode].isDestroyed() ? childWindows[windowMode] : null);
+
+    if (targetWin && !targetWin.isDestroyed()) {
+      targetWin.setBounds({ x, y, width, height });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Error in move-window-to-display:', err);
+    return false;
+  }
+});
+
+// Snap main window to fullscreen on its current monitor
+ipcMain.handle('snap-fullscreen', (event, windowMode) => {
+  try {
+    const targetWin = windowMode === 'main'
+      ? mainWindow
+      : (childWindows[windowMode] && !childWindows[windowMode].isDestroyed() ? childWindows[windowMode] : null);
+    if (!targetWin || targetWin.isDestroyed()) return false;
+    const display = screen.getDisplayMatching(targetWin.getBounds());
+    const { x, y, width, height } = display.bounds;
+    targetWin.setBounds({ x, y, width, height });
+    return true;
+  } catch (err) { return false; }
 });
 
 // Google & Social Auth flow interceptor
@@ -358,24 +409,34 @@ ipcMain.on('google-auth', (event, authUrl) => {
 });
 
 // Window creation actions requested by frontend panels
-ipcMain.on('open-clipart-window', () => {
-  createChildWindow('clipart', 'Krajden Grid - Clipart & Token Library', 520, 720);
+ipcMain.on('open-clipart-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('clipart', 'Krajden Grid - Clipart & Token Library', 520, 720, bounds);
 });
 
-ipcMain.on('open-community-window', () => {
-  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 720);
+ipcMain.on('open-community-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 720, bounds);
 });
 
-ipcMain.on('open-layers-window', () => {
-  createChildWindow('layers', 'Krajden Grid - Battle Maps & Layers', 450, 650);
+ipcMain.on('open-layers-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('layers', 'Krajden Grid - Battle Maps & Layers', 450, 650, bounds);
 });
 
-ipcMain.on('open-effects-window', () => {
-  createChildWindow('effects', 'Krajden Grid - Visual Effects Library', 480, 680);
+ipcMain.on('open-effects-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('effects', 'Krajden Grid - Visual Effects Library', 480, 680, bounds);
 });
 
-ipcMain.on('open-scenes-window', () => {
-  createChildWindow('scenes', 'Krajden Grid - Saved Scenes', 450, 650);
+ipcMain.on('open-scenes-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('scenes', 'Krajden Grid - Saved Scenes', 450, 650, bounds);
 });
 
 app.whenReady().then(async () => {
