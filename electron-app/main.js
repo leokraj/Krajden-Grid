@@ -140,8 +140,10 @@ function createMainWindow(targetUrl) {
     width,
     height,
     title: 'Krajden Grid',
-    frame: false,        // frameless but we add a drag region in the HTML
-    movable: true,       // allows dragging between monitors
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
+    movable: true,
     resizable: true,
     maximizable: true,
     backgroundColor: '#0d0f12',
