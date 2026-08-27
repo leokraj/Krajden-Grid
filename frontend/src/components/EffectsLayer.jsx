@@ -112,8 +112,8 @@ import {
 // FLOW effects follow a drawn path (rivers, streams, lava flows)
 // AREA effects fill a painted region (fire, fog, poison, splatter)
 export const FLOW_EFFECTS = new Set([
-  'river', 'lava_river', 'mud_river', 'blood_stream', 'acid_stream', 'water_stream',
-  'shader_lava_river', 'shader_mud_river',
+  'river', 'lava_river', 'mud_river', 'blood_stream', 'acid_stream', 'water_stream', 'water_river',
+  'shader_lava_river', 'shader_mud_river', 'shader_water_river', 'shader_blood_stream', 'shader_acid_stream',
 ]);
 export const AREA_EFFECTS = new Set([
   'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke',
@@ -447,7 +447,78 @@ const SHADER_FRAGS = {
       gl_FragColor=vec4(c*total,total*0.92);
     }`,
 
-  // LAVA RIVER — for flow mode: scrolling molten channels
+  // WATER RIVER — clear blue-green flowing water for flow mode
+  water_river: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+    void main(){
+      vec2 uv=v_uv; float t=u_time*1.2;
+      // Flow along X — matches path direction
+      vec2 p=uv*u_res/150.;
+      p.x-=t*0.8;
+      vec2 q=vec2(fbm(p+vec2(0.,t*0.15)),fbm(p+vec2(3.1,0.)));
+      float base=fbm(p+1.5*q);
+      // Ripple highlights
+      float ripple=n(uv*vec2(6.,15.)+vec2(-t*3.,0.))*0.2;
+      float wave=sin(uv.x*20.-t*8.)*0.5+0.5;
+      float total=base*0.6+ripple*0.25+wave*0.15;
+      float i=smoothstep(0.2,0.8,total);
+      // Blue-green-white water palette
+      vec3 c=i<0.3?mix(vec3(0.02,0.08,0.18),vec3(0.1,0.35,0.55),i/0.3)
+              :i<0.65?mix(vec3(0.1,0.35,0.55),vec3(0.25,0.62,0.8),(i-0.3)/0.35)
+              :mix(vec3(0.25,0.62,0.8),vec3(0.8,0.95,1.0),(i-0.65)/0.35);
+      // Edge fade
+      float edge=smoothstep(0.,0.12,uv.y)*smoothstep(1.,0.88,uv.y);
+      float a=smoothstep(0.15,0.4,total)*edge;
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // BLOOD STREAM — dark crimson flow for flow mode
+  blood_stream: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.55;for(int i=0;i<4;i++){v+=a*n(p);p*=2.;a*=0.48;}return v;}
+    void main(){
+      vec2 uv=v_uv; float t=u_time*0.8;
+      vec2 p=uv*u_res/120.;
+      p.x-=t*0.6;
+      float base=fbm(p+vec2(0.,t*0.1));
+      float clot=n(uv*vec2(4.,8.)+vec2(-t*1.5,0.))*0.3;
+      float total=base*0.7+clot*0.3;
+      float edge=smoothstep(0.,0.15,uv.y)*smoothstep(1.,0.85,uv.y);
+      float i=smoothstep(0.3,0.8,total);
+      vec3 c=i<0.4?mix(vec3(0.2,0.,0.),vec3(0.55,0.02,0.02),i/0.4)
+              :mix(vec3(0.55,0.02,0.02),vec3(0.85,0.05,0.05),(i-0.4)/0.6);
+      float a=smoothstep(0.25,0.5,total)*edge*0.95;
+      gl_FragColor=vec4(c*a,a);
+    }`,
+
+  // ACID STREAM — neon green flow for flow mode
+  acid_stream: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
+    float h(vec2 p){p=fract(p*vec2(443.9,441.4));p+=dot(p,p+19.19);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.;float a=0.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.;a*=0.5;}return v;}
+    void main(){
+      vec2 uv=v_uv; float t=u_time*1.1;
+      vec2 p=uv*u_res/140.;
+      p.x-=t*0.7;
+      vec2 q=vec2(fbm(p+vec2(0.,t*0.2)),fbm(p+vec2(5.,0.)));
+      float base=fbm(p+1.2*q);
+      float bubble=n(uv*vec2(5.,10.)+vec2(-t*2.,0.))*0.25;
+      float total=base*0.65+bubble*0.35;
+      float pulse=sin(fbm(uv*3.+vec2(t*0.5))*8.+t*2.)*0.5+0.5;
+      total*=0.7+pulse*0.5;
+      float edge=smoothstep(0.,0.12,uv.y)*smoothstep(1.,0.88,uv.y);
+      float i=smoothstep(0.25,0.75,total);
+      vec3 c=i<0.4?mix(vec3(0.05,0.2,0.),vec3(0.35,0.75,0.05),i/0.4)
+              :mix(vec3(0.35,0.75,0.05),vec3(0.75,1.,0.2),(i-0.4)/0.6);
+      float a=smoothstep(0.2,0.45,total)*edge*0.92;
+      gl_FragColor=vec4(c*a,a);
+    }`,
   lava_river: `precision mediump float;
     uniform float u_time; uniform vec2 u_res; varying vec2 v_uv;
     float h(vec2 p){p=fract(p*vec2(127.1,311.7));p+=dot(p,p+19.19);return fract(p.x*p.y);}
@@ -609,9 +680,12 @@ export const BUILTIN_EFFECT_PRESETS = [
   { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:null, url: null, category:'area', tags:['blood','combat','splatter'], description:'Dark red paint splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'blood', previewColor:'#dc2626', emoji:'🩸' },
   { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:null, url: null, category:'area', tags:['acid','toxic','splatter'],  description:'Neon green corrosive splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'acid',  previewColor:'#84cc16', emoji:'🟢' },
   { id:'shader_arcane',         name:'Arcane Portal',  shaderName:'arcane',         category:'area',  tags:['arcane','magic','portal'],        description:'Swirling purple-cyan portal energy',          isShader:true,isPreset:true,previewColor:'#8b5cf6',emoji:'🔮' },
-  // FLOW effects — drawn along a path
-  { id:'shader_lava_river',     name:'Lava River',     shaderName:'lava_river',     category:'flow',  tags:['lava','fire','flow','river'],     description:'Scrolling molten lava channels',              isShader:true,isPreset:true,previewColor:'#f97316',emoji:'🌋' },
-  { id:'shader_mud_river',      name:'Mud River',      shaderName:'mud_river',      category:'flow',  tags:['mud','earth','flow','river'],     description:'Dark brown turbid flowing mud',               isShader:true,isPreset:true,previewColor:'#92400e',emoji:'🟤' },
+  // FLOW effects — drawn along a path (click to place points, double-click to finish)
+  { id:'shader_lava_river',    name:'Lava River',    shaderName:'lava_river',    category:'flow', tags:['lava','fire','flow','river'],    description:'Scrolling molten lava channels',    isShader:true,isPreset:true,previewColor:'#f97316',emoji:'🌋' },
+  { id:'shader_mud_river',     name:'Mud River',     shaderName:'mud_river',     category:'flow', tags:['mud','earth','flow','river'],    description:'Dark brown turbid flowing mud',     isShader:true,isPreset:true,previewColor:'#92400e',emoji:'🟤' },
+  { id:'shader_water_river',   name:'Water River',   shaderName:'water_river',   category:'flow', tags:['water','river','stream','blue'], description:'Clear blue-green flowing water',   isShader:true,isPreset:true,previewColor:'#38bdf8',emoji:'🌊' },
+  { id:'shader_blood_stream',  name:'Blood Stream',  shaderName:'blood_stream',  category:'flow', tags:['blood','combat','stream'],       description:'Dark crimson blood flow',           isShader:true,isPreset:true,previewColor:'#dc2626',emoji:'🩸' },
+  { id:'shader_acid_stream',   name:'Acid Stream',   shaderName:'acid_stream',   category:'flow', tags:['acid','toxic','stream'],         description:'Neon green corrosive flow',        isShader:true,isPreset:true,previewColor:'#84cc16',emoji:'☣️' },
   // SCENIC LIGHT — click to place a circular light source
   { id:'scenic_light', name:'Scenic Light', shaderName:'scenic_light', category:'area', tags:['light','torch','glow','ambient'], description:'Placeable circular light — adjustable color and radius', isShader:true, isPreset:true, previewColor:'#fde68a', emoji:'🕯️', isLight:true },
 ];
@@ -854,6 +928,103 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
       // ── Shader effect ─────────────────────────────────────────────────────
       if (isShader && shaderName) {
+        const isFlow = type === 'bezier' || type === 'brush';
+        const isFlowEffect = effect.category === 'flow' ||
+          ['lava_river','mud_river','shader_lava_river','shader_mud_river'].includes(effect.effectId || '');
+
+        if (isFlow && isFlowEffect && points.length >= 2) {
+          // ── PATH-SPACE UV RENDERING ────────────────────────────────────────
+          // For river/flow effects: render the shader in path-local coordinates
+          // UV.x follows arc length along path, UV.y goes across width
+          // This makes the texture FLOW along the path direction
+
+          // Tessellate the bezier into fine segments
+          const tessPoints = [];
+          if (type === 'bezier' && points.length >= 3) {
+            const STEPS = Math.min(200, points.length * 20);
+            for (let s = 0; s <= STEPS; s++) {
+              const t2 = s / STEPS;
+              // Catmull-Rom interpolation through control points
+              const n = points.length - 1;
+              const idx = Math.min(Math.floor(t2 * n), n - 1);
+              const local_t = t2 * n - idx;
+              const p0 = points[Math.max(0, idx - 1)];
+              const p1 = points[idx];
+              const p2 = points[Math.min(n, idx + 1)];
+              const p3 = points[Math.min(n, idx + 2)];
+              const t3 = local_t;
+              const x = 0.5 * ((2*p1.x) + (-p0.x+p2.x)*t3 + (2*p0.x-5*p1.x+4*p2.x-p3.x)*t3*t3 + (-p0.x+3*p1.x-3*p2.x+p3.x)*t3*t3*t3);
+              const y = 0.5 * ((2*p1.y) + (-p0.y+p2.y)*t3 + (2*p0.y-5*p1.y+4*p2.y-p3.y)*t3*t3 + (-p0.y+3*p1.y-3*p2.y+p3.y)*t3*t3*t3);
+              tessPoints.push({ x, y });
+            }
+          } else {
+            tessPoints.push(...points);
+          }
+
+          // Compute arc lengths for UV.x mapping
+          const arcLengths = [0];
+          for (let i = 1; i < tessPoints.length; i++) {
+            const dx = tessPoints[i].x - tessPoints[i-1].x;
+            const dy = tessPoints[i].y - tessPoints[i-1].y;
+            arcLengths.push(arcLengths[i-1] + Math.sqrt(dx*dx + dy*dy));
+          }
+          const totalLen = arcLengths[arcLengths.length - 1] || 1;
+          const halfW = sw / 2;
+          const now = (Date.now() / 1000) % 1000;
+
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, op));
+          if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
+          else if (bm === 'lighter') ctx.globalCompositeOperation = 'lighter';
+          else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
+
+          // Render each segment as a small quad with path-aligned UV
+          const SEGS = tessPoints.length - 1;
+          for (let i = 0; i < SEGS; i++) {
+            const p0 = tessPoints[i];
+            const p1 = tessPoints[i + 1];
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len < 0.5) continue;
+
+            // Perpendicular
+            const nx = -dy / len;
+            const ny = dx / len;
+
+            // UV along path: scroll using time
+            const flowSpeed = 0.3;
+            const uvX0 = (arcLengths[i] / totalLen - now * flowSpeed) % 1;
+            const uvX1 = (arcLengths[i+1] / totalLen - now * flowSpeed) % 1;
+
+            // Render a thin shader slice for this segment
+            const segCanvas = document.createElement('canvas');
+            const segW = Math.max(2, Math.round(len));
+            const segH = Math.max(2, Math.round(sw));
+            segCanvas.width = segW; segCanvas.height = segH;
+            const sc2 = segCanvas.getContext('2d');
+
+            // Render the full shader texture, then we'll sample the right slice
+            renderShaderToCanvas(sc2, shaderName, 0, 0, segW, segH, 1, 'normal',
+              lightColor ? hexToRgb(lightColor) : null);
+
+            // Draw the quad on the main canvas rotated to follow the path
+            const angle = Math.atan2(dy, dx);
+            const midX = (p0.x + p1.x) / 2;
+            const midY = (p0.y + p1.y) / 2;
+
+            ctx.save();
+            ctx.translate(midX, midY);
+            ctx.rotate(angle);
+            ctx.drawImage(segCanvas, -len/2, -sw/2, len, sw);
+            ctx.restore();
+          }
+
+          ctx.restore();
+          return;
+        }
+
+        // ── AREA SHADER (non-flow) ─────────────────────────────────────────
         const mask = buildMask(effect, cW, cH);
         // Render shader into temp canvas, then clip with mask
         const tmp = document.createElement('canvas');
@@ -1078,24 +1249,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     e.preventDefault();
     const pt = getCoords(e);
 
-    // FLOW MODE: click to add points, double-click to commit
+    // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
+    // Scroll wheel changes width while drawing
     if (effectMode === 'flow') {
-      if (e.detail === 2 && flowPoints.length >= 2) {
-        if (hasActiveEffect) {
-          addEffectPath({
-            type: 'bezier',
-            points: [...flowPoints],
-            effectUrl: activeEffectUrl,
-            effectId: activeEffectId,
-            isShader: !!activeShader,
-            shaderName: activeShader || null,
-            width: brushSize, opacity, tile, tileScale, blendMode,
-          });
-        }
-        setFlowPoints([]);
-        return;
-      }
-      setFlowPoints(prev => [...prev, pt]);
+      setIsDrawing(true);
+      setCurrentStroke([pt]);
       return;
     }
 
@@ -1145,16 +1303,18 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       }
       setMarqueeStart(null); setMarqueeCurrent(null);
     } else if (currentStroke.length >= 2 && hasActiveEffect) {
+      const isFlow = effectMode === 'flow';
       addEffectPath({
-        type: effectTool === 'bezier' ? 'bezier' : 'brush',
+        type: isFlow ? 'bezier' : (effectTool === 'bezier' ? 'bezier' : 'brush'),
         points: [...currentStroke],
         effectUrl: activeEffectUrl, effectId: activeEffectId,
         isShader: !!activeShader, shaderName: activeShader || null,
+        category: isFlow ? 'flow' : undefined,
         width: brushSize, opacity, tile, tileScale, blendMode,
       });
     }
     setCurrentStroke([]);
-  }, [isDrawing, effectTool, marqueeStart, marqueeCurrent, currentStroke,
+  }, [isDrawing, effectMode, effectTool, marqueeStart, marqueeCurrent, currentStroke,
       hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
       brushSize, opacity, tile, tileScale, blendMode, addEffectPath]);
 
@@ -1166,7 +1326,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     return () => window.removeEventListener('mouseup', up);
   }, [isDrawing, handleMouseUp]);
 
-  // Escape cancels flow path
+  // Scroll wheel changes brush size when effects mode is active
+  useEffect(() => {
+    if (!effectsEnabled) return;
+    const handler = (e) => {
+      if (!effectsEnabled) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -5 : 5;
+      const newSize = Math.max(10, Math.min(500, brushSize + delta));
+      updateSettings({ effectBrushSize: newSize });
+    };
+    const canvas = canvasRef.current;
+    if (canvas) canvas.addEventListener('wheel', handler, { passive: false });
+    return () => { if (canvas) canvas.removeEventListener('wheel', handler); };
+  }, [effectsEnabled, brushSize, updateSettings]);
+
+  // Escape cancels flow/brush drawing
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') { setFlowPoints([]); setIsDrawing(false); setCurrentStroke([]); } };
     window.addEventListener('keydown', handler);
@@ -1181,7 +1356,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     : effectMode === 'flow'               ? 'crosshair'
     : effectTool === 'eraser'             ? 'cell'
     : effectTool === 'marquee'            ? 'crosshair'
-    : 'none'; // brush uses the canvas ring preview as cursor
+    : 'none';
 
   return (
     <div
@@ -1204,42 +1379,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         onTouchEnd={handleMouseUp}
       />
 
-      {/* Flow mode: SVG point overlay */}
-      {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 16 }}>
-          {flowPoints.length >= 2 && (
-            <polyline
-              points={flowPoints.map(p => `${p.x * cW / cW},${p.y * cH / cH}`).join(' ')}
-              fill="none" stroke="#caa055" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.8"
-            />
-          )}
-          {flowPoints.map((pt, idx) => (
-            <g key={idx}>
-              <circle cx={pt.x} cy={pt.y} r={idx === 0 ? 8 : 5}
-                fill={idx === 0 ? '#caa055' : '#fff'}
-                stroke="#caa055" strokeWidth="2" opacity="0.95" />
-              {idx === 0 && (
-                <text x={pt.x + 12} y={pt.y - 8} fill="#caa055"
-                  fontSize="11" fontFamily="monospace" opacity="0.9">START</text>
-              )}
-            </g>
-          ))}
-          <rect x="8" y="8" width="340" height="20" rx="4" fill="rgba(0,0,0,0.6)" />
-          <text x="14" y="22" fill="#caa055" fontSize="11" fontFamily="monospace">
-            {`Click to place · Double-click to finish · ${flowPoints.length} point${flowPoints.length !== 1 ? 's' : ''}`}
-          </text>
-        </svg>
-      )}
-
-      {/* Flow cancel button */}
-      {effectsEnabled && effectMode === 'flow' && flowPoints.length > 0 && (
-        <button
-          onClick={() => setFlowPoints([])}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded bg-black/80 border border-red-500/40 text-red-400 text-xs font-mono hover:bg-red-900/30 transition-all"
-          style={{ zIndex: 20 }}
-        >
-          Cancel (Esc)
-        </button>
+      {/* Flow mode: drag hint + scroll wheel tip */}
+      {effectsEnabled && effectMode === 'flow' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-[9px] font-mono pointer-events-none" style={{ zIndex: 20 }}>
+          🌊 Click &amp; drag to draw river · Scroll wheel to change width
+        </div>
       )}
 
       {/* No effect selected warning */}
