@@ -736,6 +736,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     settings,
     updateSettings,
     addEffectPath,
+    removeEffectPath,
+    updateEffectPath,
   } = useGrid();
 
   // ── Self-measured canvas size ─────────────────────────────────────────────
@@ -1007,11 +1009,20 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       const media = mediaRef.current.get(url);
       if (!media) return;
       const isVid = media instanceof HTMLVideoElement;
+
+      // More permissive ready check — readyState 1 (HAVE_METADATA) means we at least know dimensions
       const ready = isVid
-        ? (media.readyState >= 2 && media.videoWidth > 0)
+        ? (media.readyState >= 1 && (media.videoWidth > 0 || media.videoHeight > 0))
         : (media.complete && media.naturalWidth > 0);
 
+      // If video has metadata but no dimensions yet, try to get them another way
+      if (isVid && !ready && media.readyState === 0) {
+        media.load();
+        return;
+      }
+
       if (!ready) {
+        // Show placeholder while loading
         ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = sw;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.setLineDash([12, 8]); ctx.globalAlpha = 0.25;
@@ -1027,26 +1038,19 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
       const mask = buildMask(effect, cW, cH);
       const oc = mask.getContext('2d');
-      const mW = isVid ? media.videoWidth : media.naturalWidth;
-      const mH = isVid ? media.videoHeight : media.naturalHeight;
+      const mW = isVid ? (media.videoWidth || 512) : (media.naturalWidth || 512);
+      const mH = isVid ? (media.videoHeight || 512) : (media.naturalHeight || 512);
       const sc = Math.max(0.1, ts / 100);
       const tW = Math.max(1, Math.round(mW * sc));
       const tH = Math.max(1, Math.round(mH * sc));
 
       oc.globalCompositeOperation = 'source-in';
       if (doTile) {
-        try {
-          const pat = oc.createPattern(media, 'repeat');
-          if (pat) {
-            const dm = new DOMMatrix(); dm.a = sc; dm.d = sc;
-            pat.setTransform(dm);
-            oc.fillStyle = pat; oc.fillRect(0, 0, cW, cH);
-          }
-        } catch (_) {
-          for (let tx=0; tx<cW; tx+=tW)
-            for (let ty=0; ty<cH; ty+=tH)
-              try { oc.drawImage(media, tx, ty, tW, tH); } catch (__) {}
-        }
+        // Direct drawImage tiling — more reliable than createPattern in Electron
+        // Add 1px overlap to prevent visible seams between tiles
+        for (let tx = 0; tx < cW; tx += tW - 1)
+          for (let ty = 0; ty < cH; ty += tH - 1)
+            try { oc.drawImage(media, tx, ty, tW + 1, tH + 1); } catch (_) {}
       } else {
         const xs = type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
         const ys = type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
@@ -1363,11 +1367,123 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       )}
 
       {/* No effect selected warning */}
-      {effectsEnabled && !hasActiveEffect && (
+      {effectsEnabled && !hasActiveEffect && effectTool !== 'select' && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-xs font-mono pointer-events-none" style={{ zIndex: 20 }}>
           Select an effect from the panel first
         </div>
       )}
+
+      {/* ── Floating Effect Controls Bar ────────────────────────────────────── */}
+      {/* Shows above selected effect on canvas — same style as clipart controls */}
+      {(() => {
+        const selId = settings.selectedEffectPathId;
+        if (!selId) return null;
+        const ep = effectPaths.find(e => e.id === selId);
+        if (!ep) return null;
+
+        // Position the bar above the effect's centroid
+        let barX = cW / 2, barY = 80;
+        if (ep.type === 'marquee' && ep.rect) {
+          barX = ep.rect.x + ep.rect.width / 2;
+          barY = Math.max(60, ep.rect.y - 16);
+        } else if (ep.points?.length > 0) {
+          barX = ep.points.reduce((s, p) => s + p.x, 0) / ep.points.length;
+          barY = Math.max(60, Math.min(...ep.points.map(p => p.y)) - 16);
+        }
+
+        return (
+          <div
+            className="absolute flex items-center gap-2 bg-black/95 rounded-xl px-3 py-2 shadow-2xl border border-white/20 whitespace-nowrap"
+            style={{
+              left: barX,
+              top: barY,
+              transform: 'translateX(-50%)',
+              zIndex: 50,
+              pointerEvents: 'all',
+              WebkitAppRegion: 'no-drag',
+            }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            {/* Opacity */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-white/50">opacity</span>
+              <input type="range" min="0" max="1" step="0.05"
+                value={ep.opacity ?? 0.9}
+                onChange={e => updateEffectPath(ep.id, { opacity: parseFloat(e.target.value) })}
+                className="w-20 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+              />
+              <span className="text-[10px] text-[#caa055] font-mono w-7">{Math.round((ep.opacity ?? 0.9) * 100)}%</span>
+            </div>
+
+            <div className="w-px h-5 bg-white/20" />
+
+            {/* Edge Fade */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-white/50">fade</span>
+              <input type="range" min="0" max="120" step="4"
+                value={ep.edgeFade ?? 0}
+                onChange={e => updateEffectPath(ep.id, { edgeFade: parseInt(e.target.value) })}
+                className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+              />
+              <span className="text-[10px] text-[#caa055] font-mono w-7">{ep.edgeFade ?? 0}px</span>
+            </div>
+
+            <div className="w-px h-5 bg-white/20" />
+
+            {/* Tile Scale */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-white/50">tile</span>
+              <input type="range" min="10" max="400" step="10"
+                value={ep.tileScale ?? 100}
+                onChange={e => updateEffectPath(ep.id, { tileScale: parseInt(e.target.value) })}
+                className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+              />
+              <span className="text-[10px] text-[#caa055] font-mono w-8">{ep.tileScale ?? 100}%</span>
+            </div>
+
+            {/* Width (for strokes) */}
+            {ep.type !== 'marquee' && (
+              <>
+                <div className="w-px h-5 bg-white/20" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-white/50">width</span>
+                  <input type="range" min="10" max="500" step="5"
+                    value={ep.width ?? 60}
+                    onChange={e => updateEffectPath(ep.id, { width: parseInt(e.target.value) })}
+                    className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                  />
+                  <span className="text-[10px] text-[#caa055] font-mono w-8">{ep.width ?? 60}px</span>
+                </div>
+              </>
+            )}
+
+            <div className="w-px h-5 bg-white/20" />
+
+            {/* Blend mode */}
+            <select
+              value={ep.blendMode || 'normal'}
+              onChange={e => updateEffectPath(ep.id, { blendMode: e.target.value })}
+              className="bg-black/60 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white cursor-pointer"
+            >
+              {['normal','screen','lighter','overlay'].map(m => <option key={m}>{m}</option>)}
+            </select>
+
+            {/* Deselect + Delete */}
+            <button
+              onClick={() => updateSettings({ selectedEffectPathId: null })}
+              className="text-white/40 hover:text-white text-[10px] px-1"
+              title="Deselect"
+            >✕</button>
+            <button
+              onClick={() => { removeEffectPath(ep.id); updateSettings({ selectedEffectPathId: null }); }}
+              className="text-red-400 hover:text-red-300 ml-1"
+              title="Delete effect"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
