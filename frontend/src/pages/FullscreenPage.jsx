@@ -257,13 +257,11 @@ export function FullscreenContent() {
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#0d0f12] select-none" data-testid="fullscreen-page">
 
-      {/* Draggable title bar — invisible 24px strip at top for moving window between monitors */}
-      {window.electronAPI && (
-        <div
-          className="fixed top-0 left-0 right-0 z-[999]"
-          style={{ height: 24, WebkitAppRegion: 'drag', background: 'transparent' }}
-        />
-      )}
+      {/* Draggable title bar — grab this strip to move window between monitors */}
+      <div
+        className="fixed top-0 left-0 right-0 z-[9999]"
+        style={{ height: 32, WebkitAppRegion: 'drag', cursor: 'move', background: 'transparent' }}
+      />
       {/* Background layer color */}
       <div 
         className="absolute inset-0 transition-colors duration-300"
@@ -287,7 +285,8 @@ export function FullscreenContent() {
 
       {/* Floating UI Overlays */}
       {showControls && (
-        <div className="fixed top-4 left-4 z-50 max-h-[90vh] overflow-y-auto" data-testid="fullscreen-controls">
+        <div className="fixed top-4 left-4 z-50 max-h-[90vh] overflow-y-auto" data-testid="fullscreen-controls"
+          style={{ WebkitAppRegion: 'no-drag' }}>
           <FloatingControls onClose={() => setShowControls(false)} />
         </div>
       )}
