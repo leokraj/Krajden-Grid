@@ -257,11 +257,7 @@ export function FullscreenContent() {
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#0d0f12] select-none" data-testid="fullscreen-page">
 
-      {/* Draggable title bar — grab this strip to move window between monitors */}
-      <div
-        className="fixed top-0 left-0 right-0 z-[9999]"
-        style={{ height: 32, WebkitAppRegion: 'drag', cursor: 'move', background: 'transparent' }}
-      />
+      {/* Native title bar overlay handles window dragging between monitors */}
       {/* Background layer color */}
       <div 
         className="absolute inset-0 transition-colors duration-300"
