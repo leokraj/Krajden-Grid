@@ -1032,11 +1032,21 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // Build a map of url -> category so we can detect video type properly
     const neededMap = new Map();
     effectPaths.forEach(ep => {
-      if (ep.effectUrl) neededMap.set(ep.effectUrl, ep.category || 'image');
+      if (!ep.effectUrl) return;
+      // Try to find category from the effect definition if not on the path
+      let cat = ep.category;
+      if (!cat) {
+        // Look up from active effect settings if this is the active effect
+        if (ep.effectUrl === activeEffectUrl) cat = settings.activeEffectCategory;
+        // Default: treat Firebase Storage URLs with unknown category as video
+        if (!cat && ep.effectUrl.includes('firebasestorage')) cat = 'video';
+        if (!cat) cat = 'image';
+      }
+      neededMap.set(ep.effectUrl, cat);
     });
     if (activeEffectUrl) {
-      // Find category from active effect settings
-      const activeCat = settings.activeEffectCategory || 'image';
+      const activeCat = settings.activeEffectCategory || 
+        (activeEffectUrl.includes('firebasestorage') ? 'video' : 'image');
       neededMap.set(activeEffectUrl, activeCat);
     }
 
@@ -1045,9 +1055,10 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
       // Detect video: check category field first, then URL patterns
       const isVid = category === 'video'
+        || category === 'animated'  // treat animated (GIF) same as video for canvas
         || url.startsWith('data:video/')
         || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)
-        || (url.includes('firebasestorage') && /[._](mp4|webm|mov)/i.test(url));
+        || (url.includes('firebasestorage') && category !== 'image');
       const isGif = category === 'animated'
         || url.startsWith('data:image/gif')
         || /\.gif(\?|$)/i.test(url);
@@ -1522,6 +1533,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           type: 'marquee', rect: { x, y, width: w, height: h },
           effectUrl: activeEffectUrl, effectId: activeEffectId,
           isShader: !!activeShader, shaderName: activeShader || null,
+          category: settings.activeEffectCategory || undefined,
           opacity, tile, tileScale, blendMode,
         });
       }
@@ -2303,7 +2315,11 @@ export function EffectsControlPanel({ onClose }) {
         <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
           {filteredEffects.map((eff) => {
             const isSelected = settings.activeEffectId === eff.id;
-            const isVideo = !eff.isShader && isVideoUrl(eff.url || eff.imageUrl);
+            const isVideo = !eff.isShader && (
+              eff.category === 'video' ||
+              isVideoUrl(eff.url || eff.imageUrl) ||
+              (eff.url || eff.imageUrl || '').includes('firebasestorage')
+            );
 
             return (
               <div
