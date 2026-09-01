@@ -921,6 +921,22 @@ export const BUILTIN_EFFECT_PRESETS = [
 
 
 
+// ── Shared Debug Store ──────────────────────────────────────────────────────
+// EffectsDrawingOverlay (canvas) writes to this; EffectsControlPanel (sidebar) reads it.
+// Plain module-level object + listener pattern since these are separate React trees.
+const effectsDebugStore = {
+  info: [],
+  listeners: new Set(),
+  set(info) {
+    this.info = info;
+    this.listeners.forEach(fn => fn(info));
+  },
+  subscribe(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  },
+};
+
 function hexToRgb(hex) {
   const r = parseInt(hex.slice(1,3),16)/255;
   const g = parseInt(hex.slice(3,5),16)/255;
@@ -999,8 +1015,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const [marqueeCurrent, setMarqueeCurrent] = useState(null);
   const [flowPoints, setFlowPoints]       = useState([]);
   const [mousePos, setMousePos]           = useState(null); // for cursor preview
-  const [debugOpen, setDebugOpen]         = useState(false);
-  const [debugInfo, setDebugInfo]         = useState([]); // per-effect status for debug panel
   const debugInfoRef = useRef([]);
 
   const canvasRef       = useRef(null);
@@ -1486,14 +1500,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape]);
 
 
-  // Flush debug info to React state periodically (not every frame — too expensive)
+  // Flush debug info to the shared store periodically (not every frame — too expensive)
   useEffect(() => {
-    if (!debugOpen) return;
+    if (!effectsEnabled) return;
     const interval = setInterval(() => {
-      setDebugInfo([...debugInfoRef.current]);
+      effectsDebugStore.set([...debugInfoRef.current]);
     }, 500);
     return () => clearInterval(interval);
-  }, [debugOpen]);
+  }, [effectsEnabled]);
 
   // ── Coordinate mapping ────────────────────────────────────────────────────
   const getCoords = useCallback((e) => {
@@ -1712,59 +1726,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         </div>
       )}
 
-      {/* Debug toggle button — bottom right corner */}
-      {effectsEnabled && (
-        <button
-          onClick={() => setDebugOpen(o => !o)}
-          className="absolute bottom-4 right-4 px-2 py-1 rounded bg-black/80 border border-white/20 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/40 text-[9px] font-mono"
-          style={{ zIndex: 60, pointerEvents: 'all', WebkitAppRegion: 'no-drag' }}
-        >
-          🐛 {debugOpen ? 'Hide' : 'Show'} Debug
-        </button>
-      )}
-
-      {/* Debug panel — shows live render status for every placed effect */}
-      {effectsEnabled && debugOpen && (
-        <div
-          className="absolute bottom-12 right-4 w-96 max-h-[400px] overflow-y-auto bg-black/95 border border-[#caa055]/30 rounded-lg p-3 text-[9px] font-mono"
-          style={{ zIndex: 60, pointerEvents: 'all', WebkitAppRegion: 'no-drag' }}
-        >
-          <div className="text-[#caa055] font-bold mb-2 flex items-center justify-between">
-            <span>EFFECT RENDER DEBUG ({debugInfo.length})</span>
-            <button onClick={() => setDebugOpen(false)} className="text-white/40 hover:text-white">✕</button>
-          </div>
-          {debugInfo.length === 0 && (
-            <div className="text-white/40">No effects placed yet, or debug data not flushed.</div>
-          )}
-          {debugInfo.map((d, i) => {
-            const statusColor =
-              d.status === 'composited-ok' ? 'text-green-400' :
-              d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
-              d.status === 'not-ready' ? 'text-yellow-400' :
-              'text-white/60';
-            return (
-              <div key={d.id || i} className="border-b border-white/10 py-1.5 last:border-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-white/80">#{i+1} {d.type}</span>
-                  <span className={statusColor}>{d.status}</span>
-                </div>
-                <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
-                  {d.isShader !== undefined && <div>isShader: {String(d.isShader)} {d.shaderName ? `(${d.shaderName})` : ''}</div>}
-                  {d.category && <div>category: {d.category}</div>}
-                  {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
-                  {d.readyState !== undefined && d.readyState !== null && <div>readyState: {d.readyState}</div>}
-                  {d.videoWidth !== undefined && d.videoWidth !== null && <div>dimensions: {d.videoWidth}×{d.videoHeight || '?'}</div>}
-                  {d.naturalWidth !== undefined && d.naturalWidth !== null && <div>naturalWidth: {d.naturalWidth}</div>}
-                  {d.complete !== undefined && d.complete !== null && <div>img.complete: {String(d.complete)}</div>}
-                  {d.createdInline !== undefined && <div>createdInline: {String(d.createdInline)}</div>}
-                  {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {/* ── Floating Effect Controls Bar ────────────────────────────────────── */}
       {(() => {
         const selId = settings.selectedEffectPathId;
@@ -1937,6 +1898,13 @@ export function EffectsControlPanel({ onClose }) {
   const fileInputRef = useRef(null);
   const userId = getLocalUserId();
   const effectPaths = settings.effectPaths || [];
+
+  // Debug panel — subscribes to the shared store written by EffectsDrawingOverlay
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(effectsDebugStore.info);
+  useEffect(() => {
+    return effectsDebugStore.subscribe(setDebugInfo);
+  }, []);
 
   // Active Tool & Settings
   const effectsEnabled = !!settings.effectsEnabled;
@@ -2654,6 +2622,51 @@ export function EffectsControlPanel({ onClose }) {
           </div>
         </div>
       )}
+
+      {/* ── Debug Panel (sidebar) ────────────────────────────────────────────── */}
+      <div className="mt-4 pt-3 border-t border-white/10">
+        <button
+          onClick={() => setDebugOpen(o => !o)}
+          className="w-full flex items-center justify-between px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono transition-all"
+        >
+          <span>🐛 Effect Render Debug</span>
+          <span>{debugOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {debugOpen && (
+          <div className="mt-2 max-h-[300px] overflow-y-auto bg-black/60 border border-white/10 rounded-lg p-2 text-[9px] font-mono">
+            {debugInfo.length === 0 && (
+              <div className="text-white/40">No effects placed yet, or debug data not flushed.</div>
+            )}
+            {debugInfo.map((d, i) => {
+              const statusColor =
+                d.status === 'composited-ok' ? 'text-green-400' :
+                d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
+                d.status === 'not-ready' ? 'text-yellow-400' :
+                'text-white/60';
+              return (
+                <div key={d.id || i} className="border-b border-white/10 py-1.5 last:border-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/80">#{i+1} {d.type}</span>
+                    <span className={statusColor}>{d.status}</span>
+                  </div>
+                  <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
+                    {d.isShader !== undefined && <div>isShader: {String(d.isShader)} {d.shaderName ? `(${d.shaderName})` : ''}</div>}
+                    {d.category && <div>category: {d.category}</div>}
+                    {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
+                    {d.readyState !== undefined && d.readyState !== null && <div>readyState: {d.readyState}</div>}
+                    {d.videoWidth !== undefined && d.videoWidth !== null && <div>dimensions: {d.videoWidth}×{d.videoHeight || '?'}</div>}
+                    {d.naturalWidth !== undefined && d.naturalWidth !== null && <div>naturalWidth: {d.naturalWidth}</div>}
+                    {d.complete !== undefined && d.complete !== null && <div>img.complete: {String(d.complete)}</div>}
+                    {d.createdInline !== undefined && <div>createdInline: {String(d.createdInline)}</div>}
+                    {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
