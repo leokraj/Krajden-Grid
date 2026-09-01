@@ -999,6 +999,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const [marqueeCurrent, setMarqueeCurrent] = useState(null);
   const [flowPoints, setFlowPoints]       = useState([]);
   const [mousePos, setMousePos]           = useState(null); // for cursor preview
+  const [debugOpen, setDebugOpen]         = useState(false);
+  const [debugInfo, setDebugInfo]         = useState([]); // per-effect status for debug panel
+  const debugInfoRef = useRef([]);
 
   const canvasRef       = useRef(null);
   const mediaRef        = useRef(new Map()); // url → HTMLVideoElement | HTMLImageElement
@@ -1172,6 +1175,20 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         marqueeShape = 'rect',
       } = effect;
 
+      // Debug tracking — records what path this effect took through the renderer
+      const dbg = { id: effect.id, type, isShader, shaderName: shaderName || null,
+        effectUrl: effectUrl ? effectUrl.slice(0, 60) + '...' : null,
+        category: effect.category || null, status: 'started' };
+
+      const setDbg = (status, extra) => {
+        dbg.status = status;
+        if (extra) Object.assign(dbg, extra);
+        const idx = debugInfoRef.current.findIndex(d => d.id === effect.id);
+        if (idx >= 0) debugInfoRef.current[idx] = dbg;
+        else debugInfoRef.current.push(dbg);
+      };
+      setDbg('started');
+
       // ── Shader effect ─────────────────────────────────────────────────────
       if (isShader && shaderName) {
         const isFlow = type === 'bezier' || type === 'brush';
@@ -1261,24 +1278,61 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
       // ── Video / Image effect ──────────────────────────────────────────────
       const url = effectUrl;
-      if (!url) return;
-      const media = mediaRef.current.get(url);
-      if (!media) return;
+      if (!url) { setDbg('no-url'); return; }
+
+      // Get or create media element — create inline if not in ref yet
+      let media = mediaRef.current.get(url);
+      let createdInline = false;
+      if (!media) {
+        createdInline = true;
+        // Determine if video based on URL and category
+        const cat = effect.category || '';
+        const isVidUrl = cat === 'video' || cat === 'animated'
+          || url.startsWith('data:video/')
+          || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)
+          || url.includes('firebasestorage');
+        if (isVidUrl) {
+          const v = document.createElement('video');
+          v.crossOrigin = 'anonymous';
+          v.loop = true; v.muted = true; v.playsInline = true; v.preload = 'auto';
+          v.src = url;
+          v.addEventListener('loadeddata', () => v.play().catch(() => {}), { once: true });
+          v.addEventListener('canplay', () => v.play().catch(() => {}), { once: true });
+          v.addEventListener('error', (e) => {
+            setDbg('media-error', { errorDetail: v.error ? `code ${v.error.code}: ${v.error.message}` : 'unknown' });
+          });
+          v.load();
+          mediaRef.current.set(url, v);
+          media = v;
+        } else {
+          const img = new Image(); img.crossOrigin = 'anonymous';
+          img.onerror = () => setDbg('media-error', { errorDetail: 'image failed to load' });
+          img.src = url;
+          mediaRef.current.set(url, img);
+          media = img;
+        }
+      }
+      if (!media) { setDbg('no-media'); return; }
       const isVid = media instanceof HTMLVideoElement;
 
-      // More permissive ready check — readyState 1 (HAVE_METADATA) means we at least know dimensions
+      // Try to draw even if not fully ready — videos may still render partial frames
       const ready = isVid
-        ? (media.readyState >= 1 && (media.videoWidth > 0 || media.videoHeight > 0))
+        ? (media.readyState >= 1 || media.videoWidth > 0)
         : (media.complete && media.naturalWidth > 0);
 
-      // If video has metadata but no dimensions yet, try to get them another way
-      if (isVid && !ready && media.readyState === 0) {
-        media.load();
-        return;
+      if (isVid && media.paused && media.readyState >= 1) {
+        media.play().catch(() => {});
       }
 
       if (!ready) {
-        // Show placeholder while loading
+        setDbg('not-ready', {
+          createdInline,
+          readyState: isVid ? media.readyState : null,
+          videoWidth: isVid ? media.videoWidth : null,
+          naturalWidth: !isVid ? media.naturalWidth : null,
+          complete: !isVid ? media.complete : null,
+        });
+        // Show placeholder dashed outline while loading
         ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = sw;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.setLineDash([12, 8]); ctx.globalAlpha = 0.25;
@@ -1288,9 +1342,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ctx.stroke();
         } else if (rect) { ctx.strokeRect(rect.x, rect.y, rect.width, rect.height); }
         ctx.setLineDash([]); ctx.restore();
-        if (isVid && media.paused) media.play().catch(() => {});
+        if (isVid) { media.load(); media.play().catch(() => {}); }
         return;
       }
+
+      setDbg('drawing', {
+        readyState: isVid ? media.readyState : null,
+        videoWidth: isVid ? media.videoWidth : media.naturalWidth,
+        videoHeight: isVid ? media.videoHeight : media.naturalHeight,
+      });
 
       const mask = buildMask(effect, cW, cH);
       const oc = mask.getContext('2d');
@@ -1324,17 +1384,27 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
       ctx.drawImage(mask, 0, 0);
       ctx.restore();
+      setDbg('composited-ok');
     };
 
     const render = () => {
       if (!alive) return;
-      ctx.clearRect(0, 0, cW, cH);
+      try {
+        ctx.clearRect(0, 0, cW, cH);
 
-      effectPaths.forEach(ep => renderEffect(ep));
+        debugInfoRef.current = [];
+        effectPaths.forEach(ep => {
+          try {
+            renderEffect(ep);
+          } catch (err) {
+            console.warn('[EffectsLayer] Failed to render effect', ep.id, err);
+            debugInfoRef.current.push({ id: ep.id, type: ep.type, status: 'CRASHED', errorDetail: err.message });
+          }
+        });
 
-      // Live preview
-      if (isDrawing && hasActiveEffect) {
-        const liveType = effectMode === 'flow' ? 'bezier' : effectTool;
+        // Live preview
+        if (isDrawing && hasActiveEffect) {
+          const liveType = effectMode === 'flow' ? 'bezier' : effectTool;
         const liveRect = (marqueeStart && marqueeCurrent) ? {
           x: Math.min(marqueeStart.x, marqueeCurrent.x),
           y: Math.min(marqueeStart.y, marqueeCurrent.y),
@@ -1401,6 +1471,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ctx.setLineDash([]); ctx.restore();
         }
       }
+      } catch (err) {
+        console.warn('[EffectsLayer] Render loop error (recovering):', err);
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -1412,6 +1485,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       opacity, tile, tileScale, blendMode, hasActiveEffect, effectsEnabled,
       mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape]);
 
+
+  // Flush debug info to React state periodically (not every frame — too expensive)
+  useEffect(() => {
+    if (!debugOpen) return;
+    const interval = setInterval(() => {
+      setDebugInfo([...debugInfoRef.current]);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [debugOpen]);
 
   // ── Coordinate mapping ────────────────────────────────────────────────────
   const getCoords = useCallback((e) => {
@@ -1627,6 +1709,59 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       {effectsEnabled && !hasActiveEffect && effectTool !== 'select' && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-xs font-mono pointer-events-none" style={{ zIndex: 20 }}>
           Select an effect from the panel first
+        </div>
+      )}
+
+      {/* Debug toggle button — bottom right corner */}
+      {effectsEnabled && (
+        <button
+          onClick={() => setDebugOpen(o => !o)}
+          className="absolute bottom-4 right-4 px-2 py-1 rounded bg-black/80 border border-white/20 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/40 text-[9px] font-mono"
+          style={{ zIndex: 60, pointerEvents: 'all', WebkitAppRegion: 'no-drag' }}
+        >
+          🐛 {debugOpen ? 'Hide' : 'Show'} Debug
+        </button>
+      )}
+
+      {/* Debug panel — shows live render status for every placed effect */}
+      {effectsEnabled && debugOpen && (
+        <div
+          className="absolute bottom-12 right-4 w-96 max-h-[400px] overflow-y-auto bg-black/95 border border-[#caa055]/30 rounded-lg p-3 text-[9px] font-mono"
+          style={{ zIndex: 60, pointerEvents: 'all', WebkitAppRegion: 'no-drag' }}
+        >
+          <div className="text-[#caa055] font-bold mb-2 flex items-center justify-between">
+            <span>EFFECT RENDER DEBUG ({debugInfo.length})</span>
+            <button onClick={() => setDebugOpen(false)} className="text-white/40 hover:text-white">✕</button>
+          </div>
+          {debugInfo.length === 0 && (
+            <div className="text-white/40">No effects placed yet, or debug data not flushed.</div>
+          )}
+          {debugInfo.map((d, i) => {
+            const statusColor =
+              d.status === 'composited-ok' ? 'text-green-400' :
+              d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
+              d.status === 'not-ready' ? 'text-yellow-400' :
+              'text-white/60';
+            return (
+              <div key={d.id || i} className="border-b border-white/10 py-1.5 last:border-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-white/80">#{i+1} {d.type}</span>
+                  <span className={statusColor}>{d.status}</span>
+                </div>
+                <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
+                  {d.isShader !== undefined && <div>isShader: {String(d.isShader)} {d.shaderName ? `(${d.shaderName})` : ''}</div>}
+                  {d.category && <div>category: {d.category}</div>}
+                  {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
+                  {d.readyState !== undefined && d.readyState !== null && <div>readyState: {d.readyState}</div>}
+                  {d.videoWidth !== undefined && d.videoWidth !== null && <div>dimensions: {d.videoWidth}×{d.videoHeight || '?'}</div>}
+                  {d.naturalWidth !== undefined && d.naturalWidth !== null && <div>naturalWidth: {d.naturalWidth}</div>}
+                  {d.complete !== undefined && d.complete !== null && <div>img.complete: {String(d.complete)}</div>}
+                  {d.createdInline !== undefined && <div>createdInline: {String(d.createdInline)}</div>}
+                  {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
