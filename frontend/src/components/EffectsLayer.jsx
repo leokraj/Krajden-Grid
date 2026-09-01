@@ -1082,7 +1082,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
       if (isVid) {
         const v = document.createElement('video');
-        v.crossOrigin = 'anonymous';
+        // NOTE: no crossOrigin attribute — Firebase Storage videos don't need it
+        // for drawImage() compositing, and setting it can trigger CORS blocks
+        // that leave the video stuck at readyState 0 with no visible error.
         v.loop = true;
         v.muted = true;
         v.playsInline = true;
@@ -1093,11 +1095,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         });
         v.addEventListener('loadeddata', tryPlay, { once: true });
         v.addEventListener('canplay', tryPlay, { once: true });
+        v.addEventListener('error', () => {
+          const errCode = v.error ? v.error.code : 'unknown';
+          const errMsg = v.error ? v.error.message : 'no error detail available';
+          console.warn('[EffectsLayer] Video failed to load:', url, `code ${errCode}: ${errMsg}`);
+          effectsDebugStore.set([
+            ...effectsDebugStore.info.filter(d => d.effectUrl !== url?.slice(0, 60) + '...'),
+            { id: 'media-mgr-' + url.slice(-20), type: 'media-manager', status: 'media-error',
+              effectUrl: url.slice(0, 60) + '...', errorDetail: `code ${errCode}: ${errMsg}` },
+          ]);
+        });
         v.load();
         mediaRef.current.set(url, v);
       } else {
         const img = new Image();
-        img.crossOrigin = 'anonymous';
+        // No crossOrigin here either — same CORS reasoning as video above
+        img.onerror = () => console.warn('[EffectsLayer] Image failed to load:', url);
         img.src = url;
         mediaRef.current.set(url, img);
       }
@@ -1307,7 +1320,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           || url.includes('firebasestorage');
         if (isVidUrl) {
           const v = document.createElement('video');
-          v.crossOrigin = 'anonymous';
+          // No crossOrigin — see note in media manager useEffect above
           v.loop = true; v.muted = true; v.playsInline = true; v.preload = 'auto';
           v.src = url;
           v.addEventListener('loadeddata', () => v.play().catch(() => {}), { once: true });
@@ -1319,7 +1332,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           mediaRef.current.set(url, v);
           media = v;
         } else {
-          const img = new Image(); img.crossOrigin = 'anonymous';
+          const img = new Image();
           img.onerror = () => setDbg('media-error', { errorDetail: 'image failed to load' });
           img.src = url;
           mediaRef.current.set(url, img);
