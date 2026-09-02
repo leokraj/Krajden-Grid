@@ -1435,6 +1435,27 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
       ctx.drawImage(mask, 0, 0);
       ctx.restore();
+
+      // Second canary: draw a solid outline directly at this effect's bounds,
+      // bypassing the mask/video pipeline entirely. If THIS is also invisible,
+      // the problem is compositing/canvas visibility at this location, not the
+      // video itself. If this shows but the video content doesn't, the bug is
+      // specifically in buildMask + tiling + source-in compositing.
+      ctx.save();
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      if (type === 'marquee' && rect) {
+        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+      } else if (points.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.stroke();
+      }
+      ctx.restore();
+
       setDbg('composited-ok', { canvasSize: `${cW}×${cH}`, samplePixel: sampleInfo, tileSize: `${tW}×${tH}`, opacity: op });
     };
 
@@ -1442,6 +1463,23 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       if (!alive) return;
       try {
         ctx.clearRect(0, 0, cW, cH);
+
+        // ── CANARY TEST ──────────────────────────────────────────────────────
+        // Unconditional bright shape drawn every frame at a fixed position.
+        // If this is NOT visible on screen, the canvas itself is hidden/covered
+        // (a CSS/z-index/layering problem). If it IS visible but effects aren't,
+        // the bug is specifically in the mask/video compositing logic below.
+        if (effectsEnabled) {
+          ctx.save();
+          ctx.fillStyle = '#ff00ff';
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillRect(20, 20, 100, 100);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '12px monospace';
+          ctx.fillText('CANARY', 30, 75);
+          ctx.restore();
+        }
 
         debugInfoRef.current = [];
 
