@@ -1216,6 +1216,36 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       };
       setDbg('started');
 
+      // ── FLOW / RIVER: UV-deformed ribbon mesh for video/image textures ─────
+      // Applies to ANY effect drawn as a curve/stroke and tagged as a river/flow
+      // category — regardless of whether it's a shader or an uploaded video.
+      // This must run BEFORE the isShader/video split below, since it needs to
+      // intercept video effects before they fall into the flat masked-clip path.
+      const isFlowStroke = (type === 'bezier' || type === 'brush');
+      const isFlowCategory = effect.category === 'flow' || FLOW_EFFECTS.has(effect.effectId || '');
+
+      if (!isShader && isFlowStroke && isFlowCategory && points.length >= 2 && effectUrl) {
+        const media = mediaRef.current.get(effectUrl);
+        if (media) {
+          const isVid = media instanceof HTMLVideoElement;
+          const ready = isVid
+            ? (media.readyState >= 1 && (media.videoWidth > 0 || media.videoHeight > 0))
+            : (media.complete && media.naturalWidth > 0);
+
+          if (ready) {
+            const repeatCount = effect.repeatCount || 3;
+            const widthVariation = effect.widthVariation || 0;
+            const ok = renderRibbonWithVideo(ctx, media, points, type,
+              sw, op, repeatCount, widthVariation, effect.edgeFade || 0, cW, cH);
+            if (ok) { setDbg('composited-ok', { renderPath: 'ribbon-mesh' }); return; }
+          } else if (isVid && media.paused) {
+            media.play().catch(() => {});
+          }
+        }
+        // If ribbon rendering isn't ready/available yet, fall through to the
+        // normal video masking path below as a visible fallback while loading.
+      }
+
       // ── Shader effect ─────────────────────────────────────────────────────
       if (isShader && shaderName) {
         const isFlow = type === 'bezier' || type === 'brush';
@@ -1223,33 +1253,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ['lava_river','mud_river','shader_lava_river','shader_mud_river'].includes(effect.effectId || '');
 
         if (isFlow && isFlowEffect && points.length >= 2) {
-          // ── RIBBON MESH RENDERING ─────────────────────────────────────────
-          // For shader effects: render once, clip to stroke mask
-          // For video/image effects: UV-deformed WebGL ribbon mesh
-
-          const repeatCount = effect.repeatCount || 3;
-          const widthVariation = effect.widthVariation || 0;
-
-          // Try WebGL ribbon for video/image effects
-          if (!isShader && effectUrl) {
-            const media = mediaRef.current.get(effectUrl);
-            if (media) {
-              const isVid = media instanceof HTMLVideoElement;
-              const ready = isVid
-                ? (media.readyState >= 1 && (media.videoWidth > 0 || media.videoHeight > 0))
-                : (media.complete && media.naturalWidth > 0);
-
-              if (ready) {
-                const ok = renderRibbonWithVideo(ctx, media, points, type,
-                  sw, op, repeatCount, widthVariation, effect.edgeFade || 0, cW, cH);
-                if (ok) return;
-              } else {
-                if (isVid && media.paused) media.play().catch(() => {});
-              }
-            }
-          }
-
-          // Fallback / shader effects: render shader into bounding box, clip to stroke
+          // Shader-based river/flow: render shader into bounding box, clip to stroke.
+          // (Video/image rivers are handled above via renderRibbonWithVideo, before
+          // this block, so this path only ever runs for GPU shader flow effects.)
           const mask = buildMask(effect, cW, cH);
           const xs = points.map(p => p.x), ys = points.map(p => p.y);
           const bx = Math.min(...xs) - sw/2, by = Math.min(...ys) - sw/2;
@@ -1448,26 +1454,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       ctx.drawImage(mask, 0, 0);
       ctx.restore();
 
-      // Second canary: draw a solid outline directly at this effect's bounds,
-      // bypassing the mask/video pipeline entirely. If THIS is also invisible,
-      // the problem is compositing/canvas visibility at this location, not the
-      // video itself. If this shows but the video content doesn't, the bug is
-      // specifically in buildMask + tiling + source-in compositing.
-      ctx.save();
-      ctx.strokeStyle = '#00ffff';
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = 'source-over';
-      if (type === 'marquee' && rect) {
-        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-      } else if (points.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-        ctx.stroke();
-      }
-      ctx.restore();
-
       setDbg('composited-ok', { canvasSize: `${cW}×${cH}`, samplePixel: sampleInfo, tileSize: `${tW}×${tH}`, opacity: op });
     };
 
@@ -1475,23 +1461,6 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       if (!alive) return;
       try {
         ctx.clearRect(0, 0, cW, cH);
-
-        // ── CANARY TEST ──────────────────────────────────────────────────────
-        // Unconditional bright shape drawn every frame at a fixed position.
-        // If this is NOT visible on screen, the canvas itself is hidden/covered
-        // (a CSS/z-index/layering problem). If it IS visible but effects aren't,
-        // the bug is specifically in the mask/video compositing logic below.
-        if (effectsEnabled) {
-          ctx.save();
-          ctx.fillStyle = '#ff00ff';
-          ctx.globalAlpha = 1;
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.fillRect(20, 20, 100, 100);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '12px monospace';
-          ctx.fillText('CANARY', 30, 75);
-          ctx.restore();
-        }
 
         debugInfoRef.current = [];
 
