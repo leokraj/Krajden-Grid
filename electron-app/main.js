@@ -268,6 +268,11 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
 
   win.on('closed', () => {
     delete childWindows[mode];
+    // If the detached controls window closes for any reason (OS close button,
+    // Alt+F4, etc.), tell the main window to show the embedded panel again.
+    if (mode === 'controls' && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('settings-update', { settings: { controlsDetached: false } });
+    }
   });
 }
 
@@ -443,6 +448,17 @@ ipcMain.on('open-scenes-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
   createChildWindow('scenes', 'Krajden Grid - Saved Scenes', 450, 650, bounds);
+});
+
+ipcMain.on('open-controls-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('controls', 'Krajden Grid - Controls', 420, 800, bounds);
+});
+
+ipcMain.on('close-controls-window', () => {
+  const win = childWindows['controls'];
+  if (win && !win.isDestroyed()) win.close();
 });
 
 app.whenReady().then(async () => {
