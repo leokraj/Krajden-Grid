@@ -1387,13 +1387,21 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       const tW = Math.max(1, Math.round(mW * sc));
       const tH = Math.max(1, Math.round(mH * sc));
 
-      oc.globalCompositeOperation = 'source-in';
+      // Build the video texture on a SEPARATE canvas first using normal
+      // compositing. Applying 'source-in' repeatedly inside a tiling loop is
+      // broken — each iteration only keeps the overlap with the PREVIOUS
+      // result, so non-overlapping tiles wipe each other out almost entirely.
+      // source-in must be applied exactly ONCE, after all tiles are drawn.
+      const texCanvas = document.createElement('canvas');
+      texCanvas.width = cW; texCanvas.height = cH;
+      const texCtx = texCanvas.getContext('2d');
+
       if (doTile) {
-        // Direct drawImage tiling — more reliable than createPattern in Electron
+        // Normal (source-over, default) tiling — no masking yet
         // Add 1px overlap to prevent visible seams between tiles
         for (let tx = 0; tx < cW; tx += tW - 1)
           for (let ty = 0; ty < cH; ty += tH - 1)
-            try { oc.drawImage(media, tx, ty, tW + 1, tH + 1); } catch (_) {}
+            try { texCtx.drawImage(media, tx, ty, tW + 1, tH + 1); } catch (_) {}
       } else {
         const xs = type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
         const ys = type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
@@ -1401,8 +1409,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         const by=Math.min(...ys)-(type==='marquee'?0:sw/2);
         const bw=Math.max(...xs)-Math.min(...xs)+(type==='marquee'?0:sw);
         const bh=Math.max(...ys)-Math.min(...ys)+(type==='marquee'?0:sw);
-        try { oc.drawImage(media, bx, by, Math.max(1,bw), Math.max(1,bh)); } catch (_) {}
+        try { texCtx.drawImage(media, bx, by, Math.max(1,bw), Math.max(1,bh)); } catch (_) {}
       }
+
+      // Apply source-in exactly once: clip the fully-built texture to the mask shape
+      oc.globalCompositeOperation = 'source-in';
+      oc.drawImage(texCanvas, 0, 0);
 
       // Diagnostic: sample the mask's alpha at the effect's center to see if
       // the tiling/masking actually produced visible pixels before compositing
