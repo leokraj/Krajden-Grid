@@ -1404,6 +1404,26 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         try { oc.drawImage(media, bx, by, Math.max(1,bw), Math.max(1,bh)); } catch (_) {}
       }
 
+      // Diagnostic: sample the mask's alpha at the effect's center to see if
+      // the tiling/masking actually produced visible pixels before compositing
+      let sampleInfo = null;
+      try {
+        let sampleX, sampleY;
+        if (type === 'marquee' && rect) {
+          sampleX = Math.round(rect.x + rect.width / 2);
+          sampleY = Math.round(rect.y + rect.height / 2);
+        } else if (points.length > 0) {
+          sampleX = Math.round(points[0].x);
+          sampleY = Math.round(points[0].y);
+        }
+        if (sampleX !== undefined && sampleX >= 0 && sampleX < cW && sampleY >= 0 && sampleY < cH) {
+          const px = oc.getImageData(sampleX, sampleY, 1, 1).data;
+          sampleInfo = `rgba(${px[0]},${px[1]},${px[2]},${px[3]}) at (${sampleX},${sampleY})`;
+        }
+      } catch (e) {
+        sampleInfo = `sample failed: ${e.message}`;
+      }
+
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, op));
       if (bm === 'screen') ctx.globalCompositeOperation = 'screen';
@@ -1411,7 +1431,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       else if (bm === 'overlay') ctx.globalCompositeOperation = 'overlay';
       ctx.drawImage(mask, 0, 0);
       ctx.restore();
-      setDbg('composited-ok');
+      setDbg('composited-ok', { canvasSize: `${cW}×${cH}`, samplePixel: sampleInfo, tileSize: `${tW}×${tH}`, opacity: op });
     };
 
     const render = () => {
@@ -1420,6 +1440,43 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         ctx.clearRect(0, 0, cW, cH);
 
         debugInfoRef.current = [];
+
+        // Canvas/environment snapshot — captured once per render, helps rule out
+        // layering, sizing, and visibility issues unrelated to per-effect drawing
+        try {
+          const canvasEl = canvasRef.current;
+          const containerEl = containerRef.current;
+          const canvasRect = canvasEl ? canvasEl.getBoundingClientRect() : null;
+          const containerRect = containerEl ? containerEl.getBoundingClientRect() : null;
+          const canvasStyle = canvasEl ? window.getComputedStyle(canvasEl) : null;
+          const containerStyle = containerEl ? window.getComputedStyle(containerEl) : null;
+          // Sample a corner of the actual visible main canvas after clearing (should be transparent/0,0,0,0 if empty)
+          let mainCanvasSample = null;
+          try {
+            const midData = ctx.getImageData(Math.floor(cW/2), Math.floor(cH/2), 1, 1).data;
+            mainCanvasSample = `rgba(${midData[0]},${midData[1]},${midData[2]},${midData[3]})`;
+          } catch (e) { mainCanvasSample = `sample error: ${e.message}`; }
+
+          debugInfoRef.current.push({
+            id: '__env__', type: 'ENVIRONMENT', status: 'info',
+            canvasWH: canvasEl ? `${canvasEl.width}×${canvasEl.height}` : 'no canvas ref',
+            canvasClientWH: canvasRect ? `${Math.round(canvasRect.width)}×${Math.round(canvasRect.height)}` : null,
+            containerClientWH: containerRect ? `${Math.round(containerRect.width)}×${Math.round(containerRect.height)}` : null,
+            canvasCssDisplay: canvasStyle ? canvasStyle.display : null,
+            canvasCssOpacity: canvasStyle ? canvasStyle.opacity : null,
+            canvasCssVisibility: canvasStyle ? canvasStyle.visibility : null,
+            canvasCssZIndex: canvasStyle ? canvasStyle.zIndex : null,
+            containerCssZIndex: containerStyle ? containerStyle.zIndex : null,
+            containerCssPointerEvents: containerStyle ? containerStyle.pointerEvents : null,
+            devicePixelRatio: window.devicePixelRatio,
+            effectsEnabledFlag: effectsEnabled,
+            effectPathCount: effectPaths.length,
+            mainCanvasMidPixel: mainCanvasSample,
+          });
+        } catch (envErr) {
+          debugInfoRef.current.push({ id: '__env__', type: 'ENVIRONMENT', status: 'diagnostic-error', errorDetail: envErr.message });
+        }
+
         effectPaths.forEach(ep => {
           try {
             renderEffect(ep);
@@ -1428,6 +1485,36 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             debugInfoRef.current.push({ id: ep.id, type: ep.type, status: 'CRASHED', errorDetail: err.message });
           }
         });
+
+        // Post-render scan: sample a grid of points across the whole canvas to see
+        // if ANY non-transparent pixels exist anywhere, regardless of where effects
+        // think they drew. This catches cases where drawing happened at the wrong
+        // coordinates entirely.
+        if (effectPaths.length > 0) {
+          try {
+            let nonTransparentCount = 0;
+            let firstNonTransparent = null;
+            const GRID = 20;
+            for (let gx = 0; gx < GRID; gx++) {
+              for (let gy = 0; gy < GRID; gy++) {
+                const px = Math.floor((gx / GRID) * cW);
+                const py = Math.floor((gy / GRID) * cH);
+                const d = ctx.getImageData(px, py, 1, 1).data;
+                if (d[3] > 0) {
+                  nonTransparentCount++;
+                  if (!firstNonTransparent) firstNonTransparent = `(${px},${py}) rgba(${d[0]},${d[1]},${d[2]},${d[3]})`;
+                }
+              }
+            }
+            debugInfoRef.current.push({
+              id: '__scan__', type: 'FULL_CANVAS_SCAN', status: nonTransparentCount > 0 ? 'found-pixels' : 'ALL_TRANSPARENT',
+              nonTransparentPoints: `${nonTransparentCount}/${GRID*GRID}`,
+              firstNonTransparent: firstNonTransparent || 'none found',
+            });
+          } catch (scanErr) {
+            debugInfoRef.current.push({ id: '__scan__', type: 'FULL_CANVAS_SCAN', status: 'scan-error', errorDetail: scanErr.message });
+          }
+        }
 
         // Live preview
         if (isDrawing && hasActiveEffect) {
@@ -1915,6 +2002,82 @@ export function EffectsControlPanel({ onClose }) {
   // Debug panel — subscribes to the shared store written by EffectsDrawingOverlay
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugInfo, setDebugInfo] = useState(effectsDebugStore.info);
+  const debugWindowRef = useRef(null);
+
+  // Renders the debug info list as an HTML string for the popped-out window
+  const renderDebugHtml = useCallback((info) => {
+    const esc = (s) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rows = info.map((d, i) => {
+      const statusColor =
+        d.status === 'composited-ok' || d.status === 'found-pixels' ? '#4ade80' :
+        d.status === 'CRASHED' || d.status === 'media-error' || d.status === 'ALL_TRANSPARENT' || d.status === 'scan-error' || d.status === 'diagnostic-error' ? '#f87171' :
+        d.status === 'not-ready' ? '#facc15' :
+        d.status === 'info' ? '#60a5fa' : '#999';
+      const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
+      const fieldRows = Object.entries(d)
+        .filter(([k]) => !['id', 'type', 'status'].includes(k))
+        .map(([k, v]) => `<div class="field">${esc(k)}: <span class="val">${esc(v)}</span></div>`)
+        .join('');
+      return `
+        <div class="entry ${isSpecial ? 'special' : ''}">
+          <div class="entry-head">
+            <span class="entry-title">${isSpecial ? esc(d.type) : `#${i+1} ${esc(d.type)}`}</span>
+            <span class="entry-status" style="color:${statusColor}">${esc(d.status)}</span>
+          </div>
+          <div class="entry-body">${fieldRows}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="header">
+        <span>🐛 EFFECT RENDER DEBUG (${info.length})</span>
+        <span class="ts">updated ${new Date().toLocaleTimeString()}</span>
+      </div>
+      ${info.length === 0 ? '<div class="empty">No effects placed yet.</div>' : rows}
+    `;
+  }, []);
+
+  // Opens (or focuses) a real detached OS window showing live debug info
+  const openDebugWindow = useCallback(() => {
+    if (debugWindowRef.current && !debugWindowRef.current.closed) {
+      debugWindowRef.current.focus();
+      return;
+    }
+    const win = window.open('', 'krajden_debug', 'width=520,height=760,resizable=yes');
+    if (!win) { toast.error('Popup blocked — allow popups for this app'); return; }
+    win.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Krajden Grid — Effect Debug</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin:0; background:#0a0c0f; color:#e5e5e5; font-family: 'Courier New', monospace; font-size:11px; }
+        .header { position:sticky; top:0; background:#111214; border-bottom:1px solid rgba(202,160,85,0.3); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; color:#caa055; font-weight:bold; }
+        .ts { color:#666; font-weight:normal; font-size:9px; }
+        .empty { padding:20px; color:#666; text-align:center; }
+        .entry { border-bottom:1px solid rgba(255,255,255,0.08); padding:10px 14px; }
+        .entry.special { background:rgba(255,255,255,0.04); }
+        .entry-head { display:flex; justify-content:space-between; margin-bottom:4px; }
+        .entry-title { color:#ccc; font-weight:bold; }
+        .entry-body { color:#888; font-size:10px; line-height:1.6; }
+        .field { word-break:break-all; }
+        .val { color:#bbb; }
+      </style></head>
+      <body><div id="root"></div></body></html>
+    `);
+    win.document.getElementById('root').innerHTML = renderDebugHtml(debugInfo);
+    win.document.close();
+    debugWindowRef.current = win;
+  }, [debugInfo, renderDebugHtml]);
+
+  // Keep the popped-out window's content in sync whenever debug info updates
+  useEffect(() => {
+    const win = debugWindowRef.current;
+    if (win && !win.closed) {
+      const root = win.document.getElementById('root');
+      if (root) root.innerHTML = renderDebugHtml(debugInfo);
+    }
+  }, [debugInfo, renderDebugHtml]);
+
   useEffect(() => {
     return effectsDebugStore.subscribe(setDebugInfo);
   }, []);
@@ -2638,13 +2801,37 @@ export function EffectsControlPanel({ onClose }) {
 
       {/* ── Debug Panel (sidebar) ────────────────────────────────────────────── */}
       <div className="mt-4 pt-3 border-t border-white/10">
-        <button
-          onClick={() => setDebugOpen(o => !o)}
-          className="w-full flex items-center justify-between px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono transition-all"
-        >
-          <span>🐛 Effect Render Debug</span>
-          <span>{debugOpen ? '▲' : '▼'}</span>
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setDebugOpen(o => !o)}
+            className="flex-1 flex items-center justify-between px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono transition-all"
+          >
+            <span>🐛 Effect Render Debug</span>
+            <span>{debugOpen ? '▲' : '▼'}</span>
+          </button>
+          <button
+            onClick={openDebugWindow}
+            className="px-2 py-1.5 rounded bg-black/40 border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/10 text-[10px] font-mono"
+            title="Pop out debug panel into its own window"
+          >
+            📌 Tear Off
+          </button>
+          {debugInfo.length > 0 && (
+            <button
+              onClick={() => {
+                const text = JSON.stringify(debugInfo, null, 2);
+                navigator.clipboard?.writeText(text).then(
+                  () => toast.success('Debug info copied to clipboard'),
+                  () => toast.error('Copy failed — clipboard unavailable')
+                );
+              }}
+              className="px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono"
+              title="Copy full debug JSON to clipboard"
+            >
+              📋
+            </button>
+          )}
+        </div>
 
         {debugOpen && (
           <div className="mt-2 max-h-[300px] overflow-y-auto bg-black/60 border border-white/10 rounded-lg p-2 text-[9px] font-mono">
@@ -2653,17 +2840,22 @@ export function EffectsControlPanel({ onClose }) {
             )}
             {debugInfo.map((d, i) => {
               const statusColor =
-                d.status === 'composited-ok' ? 'text-green-400' :
-                d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
+                d.status === 'composited-ok' || d.status === 'found-pixels' ? 'text-green-400' :
+                d.status === 'CRASHED' || d.status === 'media-error' || d.status === 'ALL_TRANSPARENT' || d.status === 'scan-error' || d.status === 'diagnostic-error' ? 'text-red-400' :
                 d.status === 'not-ready' ? 'text-yellow-400' :
+                d.status === 'info' ? 'text-blue-400' :
                 'text-white/60';
+              const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
               return (
-                <div key={d.id || i} className="border-b border-white/10 py-1.5 last:border-0">
+                <div key={d.id || i} className={`border-b border-white/10 py-1.5 last:border-0 ${isSpecial ? 'bg-white/5 -mx-2 px-2 rounded' : ''}`}>
                   <div className="flex items-center justify-between">
-                    <span className="text-white/80">#{i+1} {d.type}</span>
+                    <span className={isSpecial ? 'text-[#caa055] font-bold' : 'text-white/80'}>
+                      {isSpecial ? d.type : `#${i+1} ${d.type}`}
+                    </span>
                     <span className={statusColor}>{d.status}</span>
                   </div>
                   <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
+                    {/* Per-effect fields */}
                     {d.isShader !== undefined && <div>isShader: {String(d.isShader)} {d.shaderName ? `(${d.shaderName})` : ''}</div>}
                     {d.category && <div>category: {d.category}</div>}
                     {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
@@ -2672,6 +2864,27 @@ export function EffectsControlPanel({ onClose }) {
                     {d.naturalWidth !== undefined && d.naturalWidth !== null && <div>naturalWidth: {d.naturalWidth}</div>}
                     {d.complete !== undefined && d.complete !== null && <div>img.complete: {String(d.complete)}</div>}
                     {d.createdInline !== undefined && <div>createdInline: {String(d.createdInline)}</div>}
+                    {d.canvasSize && <div>canvasSize: {d.canvasSize}</div>}
+                    {d.tileSize && <div>tileSize: {d.tileSize}</div>}
+                    {d.opacity !== undefined && <div>opacity: {d.opacity}</div>}
+                    {d.samplePixel && <div className={d.samplePixel.includes(',0)') ? 'text-red-400' : 'text-green-400'}>samplePixel: {d.samplePixel}</div>}
+                    {/* ENVIRONMENT fields */}
+                    {d.canvasWH && <div>canvas element W×H: {d.canvasWH}</div>}
+                    {d.canvasClientWH && <div>canvas rendered size: {d.canvasClientWH}</div>}
+                    {d.containerClientWH && <div>container rendered size: {d.containerClientWH}</div>}
+                    {d.canvasCssDisplay && <div>canvas CSS display: {d.canvasCssDisplay}</div>}
+                    {d.canvasCssOpacity && <div>canvas CSS opacity: {d.canvasCssOpacity}</div>}
+                    {d.canvasCssVisibility && <div>canvas CSS visibility: {d.canvasCssVisibility}</div>}
+                    {d.canvasCssZIndex && <div>canvas CSS z-index: {d.canvasCssZIndex}</div>}
+                    {d.containerCssZIndex && <div>container CSS z-index: {d.containerCssZIndex}</div>}
+                    {d.containerCssPointerEvents && <div>container pointer-events: {d.containerCssPointerEvents}</div>}
+                    {d.devicePixelRatio !== undefined && <div>devicePixelRatio: {d.devicePixelRatio}</div>}
+                    {d.effectsEnabledFlag !== undefined && <div>effectsEnabled: {String(d.effectsEnabledFlag)}</div>}
+                    {d.effectPathCount !== undefined && <div>total effect paths: {d.effectPathCount}</div>}
+                    {d.mainCanvasMidPixel && <div>canvas center pixel (pre-draw): {d.mainCanvasMidPixel}</div>}
+                    {/* FULL_CANVAS_SCAN fields */}
+                    {d.nonTransparentPoints && <div className={d.status === 'ALL_TRANSPARENT' ? 'text-red-400' : 'text-green-400'}>non-transparent grid points: {d.nonTransparentPoints}</div>}
+                    {d.firstNonTransparent && <div>first non-transparent pixel: {d.firstNonTransparent}</div>}
                     {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
                   </div>
                 </div>
