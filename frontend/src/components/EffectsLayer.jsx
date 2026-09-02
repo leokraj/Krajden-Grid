@@ -2032,6 +2032,9 @@ export function EffectsControlPanel({ onClose }) {
 
   // Debug panel — subscribes to the shared store written by EffectsDrawingOverlay
   const [debugOpen, setDebugOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState({ river: true, area: true, static: true, light: true });
+  const toggleGroup = (g) => setOpenGroups(prev => ({ ...prev, [g]: !prev[g] }));
   const [debugInfo, setDebugInfo] = useState(effectsDebugStore.info);
   const debugWindowRef = useRef(null);
 
@@ -2322,6 +2325,17 @@ export function EffectsControlPanel({ onClose }) {
           </h3>
         </div>
         <div className="flex items-center gap-1.5">
+          {window.electronAPI?.openEffectsWindow && (
+            <Button
+              onClick={() => window.electronAPI.openEffectsWindow()}
+              size="sm"
+              variant="ghost"
+              className="h-6 px-1.5 text-[9px] text-[#caa055] hover:bg-[#caa055]/10"
+              title="Open Effects panel in its own window"
+            >
+              📌 Tear Off
+            </Button>
+          )}
           <Button
             onClick={handleSyncFirebase}
             disabled={isSyncingFirebase}
@@ -2494,8 +2508,17 @@ export function EffectsControlPanel({ onClose }) {
         );
       })()}
 
-      {/* Tool Sliders & Tiling Controls */}
-      <div className="space-y-2.5 bg-black/40 border border-white/10 p-2.5 rounded-lg">
+      {/* Tool Sliders & Tiling Controls — collapsible */}
+      <div className="bg-black/40 border border-white/10 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setSettingsOpen(o => !o)}
+          className="w-full flex items-center justify-between px-2.5 py-2 text-[10px] font-bold text-gray-300 hover:text-[#caa055] transition-colors"
+        >
+          <span>⚙️ Effect Settings</span>
+          <span className="text-[#caa055]">{settingsOpen ? '▲' : '▼'}</span>
+        </button>
+        {settingsOpen && (
+        <div className="space-y-2.5 p-2.5 pt-0">
         {/* Brush Size / Line Width */}
         {effectTool !== 'marquee' && (
           <div className="space-y-1">
@@ -2575,6 +2598,8 @@ export function EffectsControlPanel({ onClose }) {
             <option value="overlay">Overlay</option>
           </select>
         </div>
+        </div>
+        )}
       </div>
 
       {/* Video & Effect Presets Vault */}
@@ -2622,9 +2647,9 @@ export function EffectsControlPanel({ onClose }) {
           ))}
         </div>
 
-        {/* Effect Grid */}
-        <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
-          {filteredEffects.map((eff) => {
+        {/* Effect Grid — grouped/collapsible for Built-in, flat for others */}
+        {(() => {
+          const renderCard = (eff) => {
             const isSelected = settings.activeEffectId === eff.id;
             const isVideo = !eff.isShader && (
               eff.category === 'video' ||
@@ -2699,8 +2724,50 @@ export function EffectsControlPanel({ onClose }) {
                 </div>
               </div>
             );
-          })}
-        </div>
+          };
+
+          if (activeTab !== 'builtin') {
+            // Flat grid for Vault / Cloud / Mine
+            return (
+              <div className="grid grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                {filteredEffects.map(renderCard)}
+              </div>
+            );
+          }
+
+          // Grouped + collapsible for Built-in — group by category/flags
+          const groups = [
+            { key: 'river', label: '🌊 Rivers', match: (e) => e.category === 'flow' },
+            { key: 'light', label: '🕯️ Lights', match: (e) => e.isLight },
+            { key: 'static', label: '🩸 Static', match: (e) => e.isStaticSvg },
+            { key: 'area', label: '🔥 Area Effects', match: (e) => e.category !== 'flow' && !e.isLight && !e.isStaticSvg },
+          ];
+
+          return (
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+              {groups.map(g => {
+                const items = filteredEffects.filter(g.match);
+                if (items.length === 0) return null;
+                return (
+                  <div key={g.key} className="border border-white/10 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleGroup(g.key)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 bg-black/50 text-[10px] font-bold text-gray-300 hover:text-[#caa055] transition-colors"
+                    >
+                      <span>{g.label} ({items.length})</span>
+                      <span className="text-[#caa055]">{openGroups[g.key] ? '▲' : '▼'}</span>
+                    </button>
+                    {openGroups[g.key] && (
+                      <div className="grid grid-cols-2 gap-2 p-2 bg-black/20">
+                        {items.map(renderCard)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Active Placed Effect Masks Manager */}
