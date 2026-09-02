@@ -45,5 +45,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   openScenesWindow: () => {
     ipcRenderer.send('open-scenes-window');
+  },
+
+  openControlsWindow: () => {
+    ipcRenderer.send('open-controls-window');
+  },
+
+  closeControlsWindow: () => {
+    ipcRenderer.send('close-controls-window');
   }
 });
