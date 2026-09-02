@@ -123,6 +123,34 @@ export function FullscreenContent() {
     );
   }
 
+  if (mode === 'controls') {
+    return (
+      <div className="fixed inset-0 bg-transparent text-white flex flex-col h-screen w-screen select-none p-1.5 animate-in fade-in duration-200" data-testid="fullscreen-controls-mode">
+        <div className="flex-1 bg-[#0d0d0f] rounded-2xl border border-white/15 overflow-hidden shadow-2xl flex flex-col p-4">
+          <div
+            className="flex items-center justify-between border-b border-white/10 pb-2 mb-4 bg-white/5 p-2 rounded-t-xl shrink-0 cursor-move"
+            style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } : undefined}
+          >
+            <div className="flex items-center gap-1.5 select-none">
+              <span className="text-xs font-semibold text-white">🎛 Krajden Grid Controls</span>
+            </div>
+            <button
+              onClick={() => window.close()}
+              className="h-6 w-6 text-white/60 hover:text-white hover:bg-white/10 rounded flex items-center justify-center font-bold text-xs cursor-pointer"
+              style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } : undefined}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto pr-1">
+            <FloatingControls onClose={() => window.close()} />
+          </div>
+        </div>
+        <Toaster position="top-right" />
+      </div>
+    );
+  }
+
   if (mode === 'effects') {
     return (
       <div className="fixed inset-0 bg-transparent text-white flex flex-col h-screen w-screen select-none p-1.5 animate-in fade-in duration-200" data-testid="fullscreen-effects-mode">
@@ -280,15 +308,42 @@ export function FullscreenContent() {
       />
 
       {/* Floating UI Overlays */}
-      {showControls && (
+      {showControls && !settings.controlsDetached && (
         <div className="fixed top-4 left-4 z-50 max-h-[90vh] overflow-y-auto" data-testid="fullscreen-controls"
           style={{ WebkitAppRegion: 'no-drag' }}>
+          <div className="flex justify-end mb-1">
+            <button
+              onClick={() => {
+                window.electronAPI?.openControlsWindow?.();
+                updateSettings({ controlsDetached: true });
+              }}
+              className="text-[9px] text-[#caa055]/70 hover:text-[#caa055] font-mono px-2 py-1 rounded bg-black/60 border border-[#caa055]/20 hover:border-[#caa055]/40 transition-all"
+              title="Move controls to their own window — the grid window will then be free to move to another monitor alone"
+            >
+              📌 Detach to Own Window
+            </button>
+          </div>
           <FloatingControls onClose={() => setShowControls(false)} />
         </div>
       )}
 
+      {/* When controls are detached, show a small reattach pill instead of the full panel */}
+      {settings.controlsDetached && (
+        <button
+          onClick={() => {
+            window.electronAPI?.closeControlsWindow?.();
+            updateSettings({ controlsDetached: false });
+          }}
+          className="fixed top-4 left-4 z-50 bg-[#111214]/94 hover:bg-[#caa055] hover:text-[#111214] border border-[#caa055]/30 rounded-[4px] px-3 py-1.5 text-[10px] font-bold text-white transition-all shadow-lg font-mono tracking-widest cursor-pointer"
+          style={{ WebkitAppRegion: 'no-drag' }}
+          title="Controls are open in a separate window — click to bring them back here"
+        >
+          ⛶ CONTROLS DETACHED — CLICK TO REATTACH
+        </button>
+      )}
+
       {/* Mini toggle to restore controls if hidden */}
-      {!showControls && (
+      {!showControls && !settings.controlsDetached && (
         <button
           onClick={() => setShowControls(true)}
           className="fixed bottom-4 left-4 z-50 bg-[#111214]/94 hover:bg-[#caa055] hover:text-[#111214] border border-[#caa055]/30 rounded-[4px] px-3 py-1.5 text-[10px] font-bold text-white transition-all shadow-lg font-mono tracking-widest cursor-pointer"
