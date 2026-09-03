@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
+import { appDebugStore } from '../lib/debugStore';
 
 // Module-level constants — defined outside component to avoid bundler initialization issues
 export const TOKEN_SIZE_PRESETS = [
@@ -137,6 +138,10 @@ const defaultSettings = {
   pingMode: false,
   pingColor: '#FFD700',
   pingLabel: '',
+  // Scene layer visibility — which saved scenes' items are currently hidden.
+  // Lives in settings (not separate state) so it syncs across windows via
+  // the existing settings-update broadcast, same as everything else here.
+  hiddenSceneIds: [],
   // Effects Reverse-Mask Painting tool
   effectsEnabled: false,
   effectPaths: [],
@@ -285,6 +290,7 @@ export const GridProvider = ({ children }) => {
       }
       return updated;
     });
+    appDebugStore.log({ category: 'ping', message: `Placed a ping${newPing.name ? ` "${newPing.name}"` : ''}`, detail: `at (${Math.round(x)}, ${Math.round(y)})` });
     return newPing;
   }, [settings.pingColor, settings.pingLabel]);
 
@@ -462,12 +468,14 @@ export const GridProvider = ({ children }) => {
   const [undoStack, setUndoStack] = useState([]);
 
   const addDrawingPath = useCallback((path) => {
+    const tagged = { ...path, id: path.id || `draw_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
     setSettings((prev) => ({
       ...prev,
-      drawingPaths: [...(prev.drawingPaths || []), { ...path, sceneId: activeSceneId }]
+      drawingPaths: [...(prev.drawingPaths || []), tagged]
     }));
     setUndoStack([]);
-  }, [activeSceneId]);
+    appDebugStore.log({ category: 'drawing', message: 'Drew a stroke', detail: `points: ${(path.points || []).length}, color: ${path.color || 'default'}` });
+  }, []);
 
   const clearDrawings = useCallback(() => {
     updateSettings({ drawingPaths: [] });
@@ -536,8 +544,7 @@ export const GridProvider = ({ children }) => {
       scale: options.initialScale || Math.max(window.innerWidth || 1920, 1920),
       rotation: 0,
       opacity: 100,
-      visible: true,
-      sceneId: activeSceneId,
+      visible: true
     };
 
     setSettings((prev) => {
@@ -549,9 +556,13 @@ export const GridProvider = ({ children }) => {
       return { ...prev, backgroundLayers: updated };
     });
 
+    appDebugStore.log({ category: 'background', message: `Added map/background layer "${newLayer.name}"`, detail: `type: ${newLayer.type}, id: ${newLayer.id}` });
     return newLayer.id;
-  }, [activeSceneId]);
+  }, []);
 
+  // NOTE: updateBackgroundLayer is deliberately NOT logged — like clipart
+  // updates, it fires continuously during drag/resize (many times per
+  // second), which would flood the log with noise.
   const updateBackgroundLayer = useCallback((id, updates) => {
     setSettings((prev) => {
       const updated = prev.backgroundLayers.map((layer) => {
@@ -576,6 +587,7 @@ export const GridProvider = ({ children }) => {
       return { ...prev, backgroundLayers: updated };
     });
     setSelectedBgLayerId((curr) => (curr === id ? null : curr));
+    appDebugStore.log({ category: 'background', message: 'Removed a map/background layer', detail: `id: ${id}` });
   }, []);
 
   const reorderBackgroundLayers = useCallback((fromIndex, toIndex) => {
@@ -648,8 +660,7 @@ export const GridProvider = ({ children }) => {
       x: clipart.x || 100,
       y: clipart.y || 100,
       scale: clipart.scale || 50,
-      rotation: clipart.rotation || 0,
-      sceneId: activeSceneId,
+      rotation: clipart.rotation || 0
     };
     setSettings((prev) => {
       const nextPlaced = [...(prev.placedCliparts || []), newPlaced];
@@ -661,9 +672,13 @@ export const GridProvider = ({ children }) => {
         placedCliparts: nextPlaced
       };
     });
+    appDebugStore.log({ category: 'clipart', message: `Placed "${clipart.name || clipart.label || 'token'}"`, detail: `id: ${newPlaced.instanceId}` });
     return newPlaced.instanceId;
-  }, [activeSceneId]);
+  }, []);
 
+  // NOTE: updatePlacedClipart is deliberately NOT logged — it fires continuously
+  // during drag/resize/rotate (many times per second), which would flood the
+  // debug log with noise. Only discrete actions (place, remove) are logged.
   const updatePlacedClipart = useCallback((instanceId, updates) => {
     setSettings((prev) => {
       const nextPlaced = (prev.placedCliparts || []).map((cp) => {
@@ -691,6 +706,7 @@ export const GridProvider = ({ children }) => {
       return { ...prev, placedCliparts: nextPlaced };
     });
     setSelectedClipartId((curr) => (curr === instanceId ? null : curr));
+    appDebugStore.log({ category: 'clipart', message: 'Removed a token', detail: `id: ${instanceId}` });
   }, []);
 
   // ── Token label ────────────────────────────────────────────────────────────
@@ -748,10 +764,9 @@ export const GridProvider = ({ children }) => {
       effectPaths: [...(prev.effectPaths || []), {
         ...effectPath,
         id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
-        sceneId: effectPath.sceneId ?? activeSceneId,
       }],
     }));
-  }, [activeSceneId]);
+  }, []);
 
   const updateEffectPath = useCallback((id, updates) => {
     setSettings((prev) => ({
@@ -920,6 +935,11 @@ export const GridProvider = ({ children }) => {
       newScene,
     ]);
     setActiveSceneId(newScene.id);
+    appDebugStore.log({
+      category: 'scene-save',
+      message: `Saved new scene "${sceneName}"`,
+      detail: `tokens: ${(data.placedCliparts||[]).length}, drawings: ${(data.drawingPaths||[]).length}, masks: ${(data.maskPaths||[]).length + (data.maskRects||[]).length}, backgrounds: ${(data.backgroundLayers||[]).length}, effects: ${data.effectPaths.length}${data.effectPaths.length ? ' (' + data.effectPaths.map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''}`,
+    });
     toast.success(`Saved scene: "${sceneName}" (${data.effectPaths.length} effect${data.effectPaths.length === 1 ? '' : 's'})`);
     return newScene;
   }, [captureCanvasData, scenes.length]);
@@ -942,6 +962,11 @@ export const GridProvider = ({ children }) => {
         return s;
       })
     );
+    appDebugStore.log({
+      category: 'scene-save',
+      message: `Updated active scene with current canvas`,
+      detail: `tokens: ${(data.placedCliparts||[]).length}, drawings: ${(data.drawingPaths||[]).length}, masks: ${(data.maskPaths||[]).length + (data.maskRects||[]).length}, backgrounds: ${(data.backgroundLayers||[]).length}, effects: ${data.effectPaths.length}${data.effectPaths.length ? ' (' + data.effectPaths.map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''}`,
+    });
     toast.success(`Active scene updated with current canvas changes (${data.effectPaths.length} effect${data.effectPaths.length === 1 ? '' : 's'}).`);
   }, [activeSceneId, captureCanvasData]);
 
@@ -949,6 +974,13 @@ export const GridProvider = ({ children }) => {
     setScenes((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates, updatedAt: Date.now() } : s))
     );
+    if (updates?.data) {
+      appDebugStore.log({
+        category: 'scene-save',
+        message: `Overwrote scene with current canvas ("Save Here")`,
+        detail: `effects: ${(updates.data.effectPaths || []).length}`,
+      });
+    }
   }, []);
 
   // Scene loading now asks Replace vs Merge before touching the grid.
@@ -1017,6 +1049,11 @@ export const GridProvider = ({ children }) => {
       }
 
       const mergedCount = (d.effectPaths || []).length;
+      appDebugStore.log({
+        category: 'scene-load',
+        message: `Merged scene "${scene.name}" onto grid`,
+        detail: `added tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${mergedCount}${mergedCount ? ' (' + (d.effectPaths||[]).map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''}`,
+      });
       toast.success(`Merged scene: "${scene.name}" (${mergedCount} effect${mergedCount === 1 ? '' : 's'} added)`);
       setPendingSceneLoad(null);
       return;
@@ -1066,9 +1103,58 @@ export const GridProvider = ({ children }) => {
     }
 
     const loadedEffectCount = (d.effectPaths || []).length;
+    appDebugStore.log({
+      category: 'scene-load',
+      message: `Replaced grid with scene "${scene.name}"`,
+      detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${loadedEffectCount}${loadedEffectCount ? ' (' + (d.effectPaths||[]).map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''}`,
+    });
     toast.success(`Loaded scene: "${scene.name}" (${loadedEffectCount} effect${loadedEffectCount === 1 ? '' : 's'})`);
     setPendingSceneLoad(null);
   }, [scenes]);
+
+  // Pure layer-visibility toggle — the "eye" button. Hides/shows exactly the
+  // items that were on the grid when this scene was SAVED (its snapshot),
+  // regardless of when each item was created or which scene was active at
+  // creation time. This never loads, replaces, or merges anything — it's a
+  // pure show/hide, like a layer visibility toggle in an image editor.
+  const toggleSceneVisibility = useCallback((sceneId) => {
+    setSettings((prev) => {
+      const hidden = prev.hiddenSceneIds || [];
+      const isHidden = hidden.includes(sceneId);
+      const next = isHidden ? hidden.filter(id => id !== sceneId) : [...hidden, sceneId];
+      const scene = scenes.find(s => s.id === sceneId);
+      const d = scene?.data || {};
+      appDebugStore.log({
+        category: 'scene-visibility',
+        message: `${isHidden ? 'Showed' : 'Hid'} scene "${scene?.name || sceneId}"`,
+        detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${(d.effectPaths||[]).length}`,
+      });
+      const nextSettings = { ...prev, hiddenSceneIds: next };
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { hiddenSceneIds: next } });
+      }
+      return nextSettings;
+    });
+  }, [scenes]);
+
+  // Derived lookup: for every hidden scene, collect the exact item ids that
+  // were captured in its snapshot, grouped by item type. GridCanvas.jsx and
+  // EffectsLayer.jsx use these Sets to filter what actually renders.
+  const hiddenItemKeys = useMemo(() => {
+    const cliparts = new Set(), effects = new Set(), drawings = new Set(),
+          maskPaths = new Set(), maskRects = new Set(), backgrounds = new Set();
+    (settings.hiddenSceneIds || []).forEach(sceneId => {
+      const scene = scenes.find(s => s.id === sceneId);
+      const d = scene?.data || {};
+      (d.placedCliparts || []).forEach(c => c.instanceId && cliparts.add(c.instanceId));
+      (d.effectPaths || []).forEach(e => e.id && effects.add(e.id));
+      (d.drawingPaths || []).forEach(p => p.id && drawings.add(p.id));
+      (d.maskPaths || []).forEach(p => p.id && maskPaths.add(p.id));
+      (d.maskRects || []).forEach(r => r.id && maskRects.add(r.id));
+      (d.backgroundLayers || []).forEach(l => l.id && backgrounds.add(l.id));
+    });
+    return { cliparts, effects, drawings, maskPaths, maskRects, backgrounds };
+  }, [scenes, settings.hiddenSceneIds]);
 
   const toggleSceneActive = useCallback((sceneId) => {
     const target = scenes.find((s) => s.id === sceneId);
@@ -1100,23 +1186,6 @@ export const GridProvider = ({ children }) => {
       loadScene(sceneId);
     }
   }, [scenes, activeSceneId, loadScene]);
-
-  // Pure layer-visibility toggle — hides/shows everything tagged with this
-  // scene's id (tokens, drawings, maps, effects, masks) without touching
-  // what's loaded or triggering the Replace/Merge prompt. This is the "eye"
-  // button — a Photoshop-style layer visibility toggle, not a scene switch.
-  const toggleSceneVisibility = useCallback((sceneId) => {
-    setSettings((prev) => {
-      const hidden = prev.hiddenSceneIds || [];
-      const isHidden = hidden.includes(sceneId);
-      const nextHidden = isHidden ? hidden.filter(id => id !== sceneId) : [...hidden, sceneId];
-      const nextSettings = { ...prev, hiddenSceneIds: nextHidden };
-      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
-        window.electronAPI.broadcast("settings-update", { settings: { hiddenSceneIds: nextHidden } });
-      }
-      return nextSettings;
-    });
-  }, []);
 
   const deleteScene = useCallback((sceneId) => {
     setScenes((prev) => prev.filter((s) => s.id !== sceneId));
@@ -1156,18 +1225,47 @@ export const GridProvider = ({ children }) => {
       backgroundImageData: null,
       useBackgroundImage: false,
       effectPaths: [], // was missing — effects used to survive "Blank Canvas"
-      hiddenSceneIds: [],
     }));
+    appDebugStore.log({ category: 'scene-load', message: 'Blank Canvas — cleared all grid content' });
     toast.info('Canvas cleared');
   }, []);
+
+  const exportScenes = useCallback(() => {
+    const jsonStr = JSON.stringify(scenes, null, 2);
+    const totalEffects = scenes.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
+    const largeEffects = [];
+    scenes.forEach(s => {
+      (s.data?.effectPaths || []).forEach(e => {
+        const urlLen = (e.effectUrl || '').length;
+        if (urlLen > 500_000) largeEffects.push(`"${s.name}": ${(urlLen/1024/1024).toFixed(1)}MB effect (${e.category || e.shaderName || 'unknown'})`);
+      });
+    });
+    appDebugStore.log({
+      category: 'scene-export',
+      message: `Exported ${scenes.length} scene(s) to file`,
+      detail: `total effects across all scenes: ${totalEffects}, JSON size: ${(jsonStr.length/1024).toFixed(0)}KB${largeEffects.length ? ', large effects: ' + largeEffects.join('; ') : ''}`,
+    });
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `overgrid_scenes_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    toast.success(`Exported ${scenes.length} scene(s) to JSON file (${totalEffects} total effects)`);
+  }, [scenes]);
 
   const exportSingleScene = useCallback((sceneId) => {
     const scene = scenes.find(s => s.id === sceneId);
     if (!scene) return;
-    // Export as a single-item array so it uses the exact same format as
-    // exportScenes/importScenes — a one-scene file imports cleanly with the
-    // same "Import Scenes" button, no separate import path needed.
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify([scene], null, 2));
+    const effectCount = (scene.data?.effectPaths || []).length;
+    const jsonStr = JSON.stringify([scene], null, 2);
+    appDebugStore.log({
+      category: 'scene-export',
+      message: `Exported single scene "${scene.name}" to file`,
+      detail: `tokens: ${(scene.data?.placedCliparts||[]).length}, drawings: ${(scene.data?.drawingPaths||[]).length}, effects: ${effectCount}, JSON size: ${(jsonStr.length/1024).toFixed(0)}KB`,
+    });
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
     const safeName = scene.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -1175,27 +1273,23 @@ export const GridProvider = ({ children }) => {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    toast.success(`Exported "${scene.name}" to file`);
-  }, [scenes]);
-
-  const exportScenes = useCallback(() => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(scenes, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `overgrid_scenes_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    toast.success("Exported scenes to JSON file");
+    toast.success(`Exported "${scene.name}" (${effectCount} effect${effectCount === 1 ? '' : 's'}) to file`);
   }, [scenes]);
 
   const importScenes = useCallback((importedData) => {
     try {
       const parsed = typeof importedData === 'string' ? JSON.parse(importedData) : importedData;
       if (Array.isArray(parsed)) {
+        const totalEffects = parsed.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
+        appDebugStore.log({
+          category: 'scene-import',
+          message: `Imported ${parsed.length} scene(s) from file`,
+          detail: `total effects in imported file: ${totalEffects}${parsed.map(s => ` "${s.name}": ${(s.data?.effectPaths||[]).length} effects`).join(',')}`,
+        });
         setScenes((prev) => [...prev, ...parsed]);
-        toast.success(`Imported ${parsed.length} scene(s)`);
+        toast.success(`Imported ${parsed.length} scene(s) (${totalEffects} total effects)`);
       } else {
+        appDebugStore.log({ category: 'scene-import', message: 'Import failed — file was not a scene array', detail: `got type: ${typeof parsed}` });
         toast.error('Invalid scene format');
       }
     } catch (e) {
@@ -1204,18 +1298,22 @@ export const GridProvider = ({ children }) => {
   }, []);
 
   const addMaskPath = useCallback((path) => {
+    const tagged = { ...path, id: path.id || `mask_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
     setSettings((prev) => ({
       ...prev,
-      maskPaths: [...(prev.maskPaths || []), { ...path, sceneId: activeSceneId }]
+      maskPaths: [...(prev.maskPaths || []), tagged]
     }));
-  }, [activeSceneId]);
+    appDebugStore.log({ category: 'mask', message: 'Painted a fog of war stroke' });
+  }, []);
 
   const addMaskRect = useCallback((rect) => {
+    const tagged = { ...rect, id: rect.id || `maskrect_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
     setSettings((prev) => ({
       ...prev,
-      maskRects: [...(prev.maskRects || []), { ...rect, sceneId: activeSceneId }]
+      maskRects: [...(prev.maskRects || []), tagged]
     }));
-  }, [activeSceneId]);
+    appDebugStore.log({ category: 'mask', message: 'Added a fog of war rectangle' });
+  }, []);
 
   const clearMask = useCallback(() => {
     updateSettings({ maskPaths: [], maskRects: [] });
@@ -1654,11 +1752,12 @@ export const GridProvider = ({ children }) => {
     cancelLoadScene,
     toggleSceneActive,
     toggleSceneVisibility,
-    exportSingleScene,
+    hiddenItemKeys,
     deleteScene,
     duplicateScene,
     clearCanvasState,
     exportScenes,
+    exportSingleScene,
     importScenes,
     addBackgroundLayer,
     updateBackgroundLayer,
