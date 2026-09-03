@@ -307,8 +307,10 @@ export function FullscreenContent() {
         canvasSize={{ width: window.screen.width || 1920, height: window.screen.height || 1080 }}
       />
 
-      {/* Floating UI Overlays */}
-      {showControls && !settings.controlsDetached && (
+      {/* Controls are detached by default — the Controls window opens automatically
+          on app launch. This embedded panel only shows if the user explicitly
+          reattaches via the pill below. */}
+      {showControls && settings.controlsDetached === false && (
         <div className="fixed top-4 left-4 z-50 max-h-[90vh] overflow-y-auto" data-testid="fullscreen-controls"
           style={{ WebkitAppRegion: 'no-drag' }}>
           <div className="flex justify-end mb-1">
@@ -327,8 +329,10 @@ export function FullscreenContent() {
         </div>
       )}
 
-      {/* When controls are detached, show a small reattach pill instead of the full panel */}
-      {settings.controlsDetached && (
+      {/* Default state (or explicitly detached): show a small reattach pill.
+          Undefined/missing controlsDetached is treated as detached, matching
+          the Controls window auto-opened by Electron on startup. */}
+      {settings.controlsDetached !== false && (
         <button
           onClick={() => {
             window.electronAPI?.closeControlsWindow?.();
@@ -338,12 +342,12 @@ export function FullscreenContent() {
           style={{ WebkitAppRegion: 'no-drag' }}
           title="Controls are open in a separate window — click to bring them back here"
         >
-          ⛶ CONTROLS DETACHED — CLICK TO REATTACH
+          ⛶ Controls open in separate window — click to dock here
         </button>
       )}
 
       {/* Mini toggle to restore controls if hidden */}
-      {!showControls && !settings.controlsDetached && (
+      {!showControls && settings.controlsDetached === false && (
         <button
           onClick={() => setShowControls(true)}
           className="fixed bottom-4 left-4 z-50 bg-[#111214]/94 hover:bg-[#caa055] hover:text-[#111214] border border-[#caa055]/30 rounded-[4px] px-3 py-1.5 text-[10px] font-bold text-white transition-all shadow-lg font-mono tracking-widest cursor-pointer"
