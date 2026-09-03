@@ -167,7 +167,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [maskSaveName, setMaskSaveName] = useState('');
   const sceneImportInputRef = useRef(null);
   const [collapsedSections, setCollapsedSections] = useState({
-    effects: false,
+    effects: true,
     geometry: true,
     measure: true,
     ping: true,
@@ -590,29 +590,31 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
         {!isGuest && (
           <>
             {/* Resolution */}
-            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'resolution' ? 'hidden' : ''}`} id="section-resolution">
+                        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
               <div className="flex items-center gap-1 w-full">
               <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('resolution')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+              <button onClick={() => toggleSection('geometry')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                  <Monitor className="w-3.5 h-3.5 text-[#caa055]/80" />
-                  Resolution
+                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
+                  Grid Layout
                 </span>
-                {collapsedSections.resolution ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+                {collapsedSections.geometry ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
               </div>
               {!sectionFilter && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('resolution', 'Resolution'); }}
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('geometry', 'Grid Layout'); }}
                   className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Resolution into its own window"
+                  title="Tear off Grid Layout into its own window"
                 >
                   <MapPin className="w-3 h-3" />
                 </button>
               )}
             </div>
-              {!collapsedSections.resolution && (
+              {!collapsedSections.geometry && (
                 <div className="space-y-3 pt-1">
+                  {/* Resolution */}
+<div className="space-y-3 pt-1">
                   <div className="grid grid-cols-2 gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
                     <div className="space-y-1 text-left">
                       <Label className="text-[9px] uppercase tracking-wider text-slate-cool font-outfit font-semibold">Width (px)</Label>
@@ -695,34 +697,9 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     </div>
                   )}
                 </div>
-              )}
-              <Separator className="bg-[#caa055]/15" />
-            </div>
-
-            {/* Grid Layout */}
-            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
-              <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('geometry')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
-                  Grid Layout
-                </span>
-                {collapsedSections.geometry ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-              </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('geometry', 'Grid Layout'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Grid Layout into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-              {!collapsedSections.geometry && (
-                <div className="space-y-3.5 pt-1">
+                  <div className="border-t border-[#caa055]/10 pt-3">
+                    {/* Grid size/rows/columns */}
+<div className="space-y-3.5 pt-1">
                   {/* Grid line toggle */}
                   <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
                     <div className="flex items-center gap-2">
@@ -815,34 +792,10 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     )}
                   </div>
                 </div>
-              )}
-              <Separator className="bg-[#caa055]/15" />
-            </div>
-
-            {/* Grid Appearance */}
-            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'appearance' ? 'hidden' : ''}`} id="section-appearance">
-              <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('appearance')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
-                  Grid Appearance
-                </span>
-                {collapsedSections.appearance ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-              </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('appearance', 'Grid Appearance'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Grid Appearance into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-              {!collapsedSections.appearance && (
-                <div className="space-y-3 pt-1">
+                  </div>
+                  <div className="border-t border-[#caa055]/10 pt-3">
+                    {/* Grid appearance — color, opacity, line style */}
+<div className="space-y-3 pt-1">
                   <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
                     <Label className="text-[10px] text-slate-cool uppercase tracking-wider font-outfit font-semibold flex-1">Color</Label>
                     <Input
@@ -890,9 +843,56 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     />
                   </div>
                 </div>
+                  </div>
+                  {!isGuest && (
+                    <div className="border-t border-[#caa055]/10 pt-3">
+                      {/* Background color */}
+<div className="space-y-3 pt-1">
+                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  <Input
+                    type="color"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
+                    data-testid="bg-color-picker"
+                  />
+                  <Input
+                    type="text"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
+                    data-testid="bg-color-hex"
+                  />
+                </div>
+                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  {backgroundPresets.map((preset) => (
+                    <button
+                      key={preset.color}
+                      onClick={() => updateSettings({ backgroundColor: preset.color })}
+                      className={`w-7 h-7 rounded-[4px] border transition-all ${
+                        settings.backgroundColor === preset.color 
+                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
+                          : 'border-white/20 hover:border-white/40'
+                      }`}
+                      style={{ backgroundColor: preset.color }}
+                      title={preset.label}
+                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
+                    />
+                  ))}
+                </div>
+              </div>
+                    </div>
+                  )}
+                </div>
               )}
               <Separator className="bg-[#caa055]/15" />
             </div>
+
+            {/* Grid Layout */}
+            
+
+            {/* Grid Appearance */}
+            
 
             {/* Grid Mask */}
             <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'mask' ? 'hidden' : ''}`} id="section-mask">
@@ -1451,83 +1451,6 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
         </div>
 
         <Separator className="bg-[#caa055]/15" />
-
-        {/* Background Color */}
-        {!isGuest && (
-          <div className={`space-y-2 ${sectionFilter && sectionFilter !== 'bgcolor' ? 'hidden' : ''}`} id="section-bgcolor">
-            <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-              <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                <Palette className="w-3.5 h-3.5 text-[#caa055]/80" />
-                Background Color
-              </span>
-              <div className="flex items-center gap-1.5">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    updateSettings({ backgroundEnabled: !settings.backgroundEnabled });
-                  }}
-                  className={`h-6 w-6 rounded flex items-center justify-center transition-colors cursor-pointer ${settings.backgroundEnabled !== false ? 'text-[#caa055]' : 'text-slate-muted'}`}
-                  title={settings.backgroundEnabled !== false ? 'Hide background' : 'Show background'}
-                  data-testid="bg-toggle"
-                >
-                  {settings.backgroundEnabled !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </div>
-                {collapsedSections.bgcolor ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-              </div>
-            </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgcolor', 'Background Color'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Background Color into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-            {!collapsedSections.bgcolor && (
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Input
-                    type="color"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
-                    data-testid="bg-color-picker"
-                  />
-                  <Input
-                    type="text"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
-                    data-testid="bg-color-hex"
-                  />
-                </div>
-                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  {backgroundPresets.map((preset) => (
-                    <button
-                      key={preset.color}
-                      onClick={() => updateSettings({ backgroundColor: preset.color })}
-                      className={`w-7 h-7 rounded-[4px] border transition-all ${
-                        settings.backgroundColor === preset.color 
-                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
-                          : 'border-white/20 hover:border-white/40'
-                      }`}
-                      style={{ backgroundColor: preset.color }}
-                      title={preset.label}
-                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Token Library */}
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'clipart' ? 'hidden' : ''}`} id="section-clipart">
