@@ -154,7 +154,7 @@ export function SceneEditorPanel({ onUndock }) {
             className="w-full h-8 text-[11px] border-red-500/30 text-red-400 hover:bg-red-500/10 font-cinzel whitespace-nowrap"
             title="Clear active grid objects without deleting saved scenes"
           >
-            <RotateCcw className="w-3 h-3 mr-1 shrink-0" /> Blank Canvas
+            <RotateCcw className="w-3 h-3 mr-1" /> Blank Canvas
           </Button>
         </div>
       </div>
@@ -245,8 +245,9 @@ export function SceneEditorPanel({ onUndock }) {
                   {/* Top Row: Toggle Switch & Title */}
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center space-x-2 min-w-0 flex-1">
-                      {/* Visibility toggle — hides/shows this scene's items on the grid.
-                          Does NOT load or switch scenes; that's what the Load button below does. */}
+                      {/* Visibility toggle — hides/shows exactly what was on the
+                          grid when this scene was saved. Does NOT load or
+                          switch scenes; that's what the Load button below does. */}
                       <button
                         onClick={() => toggleSceneVisibility(scene.id)}
                         className={`p-1 rounded-full transition-colors flex-shrink-0 focus:outline-none ${
@@ -255,8 +256,8 @@ export function SceneEditorPanel({ onUndock }) {
                             : 'text-[#caa055] hover:text-[#d5b271]'
                         }`}
                         title={(settings.hiddenSceneIds || []).includes(scene.id)
-                          ? 'Hidden — click to show this scene\'s items on the grid'
-                          : 'Visible — click to hide this scene\'s items from the grid'}
+                          ? "Hidden — click to show this scene's items on the grid"
+                          : "Visible — click to hide this scene's items from the grid"}
                       >
                         {(settings.hiddenSceneIds || []).includes(scene.id)
                           ? <EyeOff className="w-4 h-4" />
