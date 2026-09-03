@@ -43,6 +43,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     clearMeasurements,
     openRadialMenu,
     addCustomClipart,
+    hiddenItemKeys,
   } = useGrid();
   
   // Session context (may not exist if not in SessionProvider)
@@ -672,8 +673,8 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
 
     ctx.clearRect(0, 0, width, height);
 
-    // Draw all local saved paths (skip any whose scene layer is hidden)
-    const paths = (settings.drawingPaths || []).filter(p => !(settings.hiddenSceneIds || []).includes(p.sceneId));
+    // Draw all local saved paths (skip any that belong to a hidden scene layer)
+    const paths = (settings.drawingPaths || []).filter(p => !hiddenItemKeys?.drawings?.has(p.id));
     paths.forEach(path => {
       if (path.points && path.points.length > 1) {
         ctx.strokeStyle = path.color || '#FF4444';
@@ -1083,8 +1084,8 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     }
 
     // Apply grid mask - erase grid where mask is painted (skip hidden scene layers)
-    const maskPaths = (settings.maskPaths || []).filter(p => !(settings.hiddenSceneIds || []).includes(p.sceneId));
-    const maskRects = (settings.maskRects || []).filter(r => !(settings.hiddenSceneIds || []).includes(r.sceneId));
+    const maskPaths = (settings.maskPaths || []).filter(p => !hiddenItemKeys?.maskPaths?.has(p.id));
+    const maskRects = (settings.maskRects || []).filter(r => !hiddenItemKeys?.maskRects?.has(r.id));
     if (maskPaths.length > 0 || maskRects.length > 0 || maskRectPreview) {
       ctx.save();
       ctx.globalCompositeOperation = 'destination-out';
@@ -1888,7 +1889,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       >
         {/* Local layers (host's own layers) — hidden if their scene layer is toggled off */}
         {(settings.backgroundLayers || [])
-          .filter(layer => !(settings.hiddenSceneIds || []).includes(layer.sceneId))
+          .filter(layer => !hiddenItemKeys?.backgrounds?.has(layer.id))
           .map((layer) => (
           <PlacedBackgroundImage
             key={layer.id}
@@ -1945,7 +1946,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
         data-testid="cliparts-layer"
       >
         {/* Local Placed Cliparts — hidden if their scene layer is toggled off */}
-        {settings.placedCliparts?.filter((clipart) => !(settings.hiddenSceneIds || []).includes(clipart.sceneId)).map((clipart) => {
+        {settings.placedCliparts?.filter((clipart) => !hiddenItemKeys?.cliparts?.has(clipart.instanceId)).map((clipart) => {
           const isSelected = (selectedClipartIds || []).includes(clipart.instanceId) || selectedClipartId === clipart.instanceId;
           const isPartMap = groupDragStartPositionsRef.current && groupDragStartPositionsRef.current[clipart.instanceId];
           const activeGroupOffset = isPartMap ? groupDragOffset : null;
