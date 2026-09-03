@@ -32,11 +32,14 @@ export function SceneEditorPanel({ onUndock }) {
     updateScene,
     loadScene,
     toggleSceneActive,
+    toggleSceneVisibility,
     deleteScene,
     duplicateScene,
     clearCanvasState,
     exportScenes,
+    exportSingleScene,
     importScenes,
+    captureCanvasData,
     settings,
   } = useGrid();
 
@@ -126,32 +129,32 @@ export function SceneEditorPanel({ onUndock }) {
           {activeScene ? activeScene.name : 'Current Workspace'}
         </p>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-col gap-1.5">
           {activeScene ? (
             <Button
               onClick={updateActiveScene}
               size="sm"
-              className="flex-1 h-7 text-[11px] bg-[#caa055] hover:bg-[#d5b271] text-black font-bold font-cinzel"
+              className="w-full h-8 text-[11px] bg-[#caa055] hover:bg-[#d5b271] text-black font-bold font-cinzel whitespace-nowrap"
             >
-              <Save className="w-3 h-3 mr-1" /> Overwrite Active Scene
+              <Save className="w-3 h-3 mr-1 shrink-0" /> Overwrite Active Scene
             </Button>
           ) : (
             <Button
               onClick={() => saveNewScene('New Scene')}
               size="sm"
-              className="flex-1 h-7 text-[11px] bg-[#caa055]/80 hover:bg-[#caa055] text-black font-bold font-cinzel"
+              className="w-full h-8 text-[11px] bg-[#caa055]/80 hover:bg-[#caa055] text-black font-bold font-cinzel whitespace-nowrap"
             >
-              <Save className="w-3 h-3 mr-1" /> Save Current Canvas
+              <Save className="w-3 h-3 mr-1 shrink-0" /> Save Current Canvas
             </Button>
           )}
           <Button
             onClick={clearCanvasState}
             variant="outline"
             size="sm"
-            className="h-7 text-[11px] border-red-500/30 text-red-400 hover:bg-red-500/10 font-cinzel"
+            className="w-full h-8 text-[11px] border-red-500/30 text-red-400 hover:bg-red-500/10 font-cinzel whitespace-nowrap"
             title="Clear active grid objects without deleting saved scenes"
           >
-            <RotateCcw className="w-3 h-3 mr-1" /> Blank Canvas
+            <RotateCcw className="w-3 h-3 mr-1 shrink-0" /> Blank Canvas
           </Button>
         </div>
       </div>
@@ -242,19 +245,22 @@ export function SceneEditorPanel({ onUndock }) {
                   {/* Top Row: Toggle Switch & Title */}
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center space-x-2 min-w-0 flex-1">
-                      {/* Toggle Switch */}
+                      {/* Visibility toggle — hides/shows this scene's items on the grid.
+                          Does NOT load or switch scenes; that's what the Load button below does. */}
                       <button
-                        onClick={() => toggleSceneActive(scene.id)}
-                        className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 focus:outline-none ${
-                          isActive ? 'bg-[#caa055]' : 'bg-slate-700'
+                        onClick={() => toggleSceneVisibility(scene.id)}
+                        className={`p-1 rounded-full transition-colors flex-shrink-0 focus:outline-none ${
+                          (settings.hiddenSceneIds || []).includes(scene.id)
+                            ? 'text-slate-600 hover:text-slate-400'
+                            : 'text-[#caa055] hover:text-[#d5b271]'
                         }`}
-                        title={isActive ? "Scene is ACTIVE on canvas (Click to turn OFF)" : "Click to load/turn ON scene"}
+                        title={(settings.hiddenSceneIds || []).includes(scene.id)
+                          ? 'Hidden — click to show this scene\'s items on the grid'
+                          : 'Visible — click to hide this scene\'s items from the grid'}
                       >
-                        <span
-                          className={`inline-block w-3 h-3 transform rounded-full bg-black transition-transform ${
-                            isActive ? 'translate-x-4' : 'translate-x-0.5'
-                          }`}
-                        />
+                        {(settings.hiddenSceneIds || []).includes(scene.id)
+                          ? <EyeOff className="w-4 h-4" />
+                          : <Eye className="w-4 h-4" />}
                       </button>
 
                       {/* Scene Name / Rename */}
@@ -346,7 +352,7 @@ export function SceneEditorPanel({ onUndock }) {
                         <Play className="w-3 h-3 mr-1" /> Load
                       </Button>
                       <Button
-                        onClick={() => updateScene(scene.id, { data: useGrid().captureCanvasData?.() || data })}
+                        onClick={() => updateScene(scene.id, { data: captureCanvasData() })}
                         variant="ghost"
                         size="sm"
                         className="h-6 px-2 text-[10px] text-slate-400 hover:bg-white/5 hover:text-slate-200"
@@ -357,6 +363,13 @@ export function SceneEditorPanel({ onUndock }) {
                     </div>
 
                     <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => exportSingleScene(scene.id)}
+                        className="p-1 text-slate-400 hover:text-[#caa055] hover:bg-white/5 rounded transition"
+                        title="Export just this scene to its own file"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => duplicateScene(scene.id)}
                         className="p-1 text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded transition"
