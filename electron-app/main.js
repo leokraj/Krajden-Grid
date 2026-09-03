@@ -247,6 +247,12 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     height,
     title,
     frame: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#0d0f12',
+      symbolColor: '#caa055',
+      height: 28,
+    },
     movable: true,
     resizable: true,
     alwaysOnTop: false,
@@ -466,6 +472,16 @@ app.whenReady().then(async () => {
   const initialUrl = localHostUrl ? `${localHostUrl}/fullscreen?electron=1` : 'http://127.0.0.1:3000/fullscreen?electron=1';
   
   createMainWindow(initialUrl);
+
+  // Controls are detached by default — open the Controls window automatically
+  // on startup so the grid window stays clean from the very first launch.
+  // Wait briefly for the main window's display bounds to be available.
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const bounds = mainWindow.getBounds();
+      createChildWindow('controls', 'Krajden Grid - Controls', 420, 800, bounds);
+    }
+  }, 400);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow(initialUrl);
