@@ -1568,7 +1568,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           debugInfoRef.current.push({ id: '__env__', type: 'ENVIRONMENT', status: 'diagnostic-error', errorDetail: envErr.message });
         }
 
-        effectPaths.forEach(ep => {
+        // Skip effects whose scene layer has been toggled off via the eye button
+        const visibleEffectPaths = effectPaths.filter(ep => !(settings.hiddenSceneIds || []).includes(ep.sceneId));
+        visibleEffectPaths.forEach(ep => {
           try {
             renderEffect(ep);
           } catch (err) {
