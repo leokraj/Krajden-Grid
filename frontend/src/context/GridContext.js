@@ -533,7 +533,7 @@ export const GridProvider = ({ children }) => {
       isYouTube: options.isYouTube || false,
       x: Math.round(window.innerWidth / 2),
       y: Math.round(window.innerHeight / 2),
-      scale: 300,
+      scale: options.initialScale || Math.max(window.innerWidth || 1920, 1920),
       rotation: 0,
       opacity: 100,
       visible: true
@@ -917,7 +917,7 @@ export const GridProvider = ({ children }) => {
       newScene,
     ]);
     setActiveSceneId(newScene.id);
-    toast.success(`Saved scene: "${sceneName}"`);
+    toast.success(`Saved scene: "${sceneName}" (${data.effectPaths.length} effect${data.effectPaths.length === 1 ? '' : 's'})`);
     return newScene;
   }, [captureCanvasData, scenes.length]);
 
@@ -939,7 +939,7 @@ export const GridProvider = ({ children }) => {
         return s;
       })
     );
-    toast.success('Active scene updated with current canvas changes.');
+    toast.success(`Active scene updated with current canvas changes (${data.effectPaths.length} effect${data.effectPaths.length === 1 ? '' : 's'}).`);
   }, [activeSceneId, captureCanvasData]);
 
   const updateScene = useCallback((id, updates) => {
@@ -948,7 +948,20 @@ export const GridProvider = ({ children }) => {
     );
   }, []);
 
+  // Scene loading now asks Replace vs Merge before touching the grid.
+  // `loadScene(sceneId)` just queues the request; `performSceneLoad` does the
+  // actual work once the user picks a mode via the confirmation prompt.
+  const [pendingSceneLoad, setPendingSceneLoad] = useState(null); // { sceneId } | null
+
   const loadScene = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+    setPendingSceneLoad({ sceneId });
+  }, [scenes]);
+
+  const cancelLoadScene = useCallback(() => setPendingSceneLoad(null), []);
+
+  const performSceneLoad = useCallback((sceneId, mode = 'replace') => {
     const scene = scenes.find((s) => s.id === sceneId);
     if (!scene) return;
 
@@ -961,6 +974,51 @@ export const GridProvider = ({ children }) => {
     setActiveSceneId(sceneId);
 
     const d = scene.data || {};
+
+    if (mode === 'merge') {
+      // Merge: append the incoming scene's content on top of what's already on
+      // the grid instead of replacing it. Grid-level appearance settings
+      // (color, size, background color, line thickness, opacity) are left
+      // untouched — merge only adds items, it never changes the look of the
+      // grid itself. Each merged item is tagged with sceneId so it can later
+      // be traced back to (and independently shown/hidden for) its source scene.
+      const tag = (arr) => (arr || []).map(item => ({ ...item, sceneId }));
+
+      if (d.measurements) {
+        setMeasurements((prev) => [...prev, ...tag(d.measurements)]);
+      }
+
+      setSettings((prev) => {
+        const nextSettings = {
+          ...prev,
+          placedCliparts: [...(prev.placedCliparts || []), ...tag(d.placedCliparts)],
+          drawingPaths: [...(prev.drawingPaths || []), ...tag(d.drawingPaths)],
+          maskPaths: [...(prev.maskPaths || []), ...tag(d.maskPaths)],
+          maskRects: [...(prev.maskRects || []), ...tag(d.maskRects)],
+          backgroundLayers: [...(prev.backgroundLayers || []), ...tag(d.backgroundLayers)],
+          effectPaths: [...(prev.effectPaths || []), ...tag(d.effectPaths)],
+        };
+        if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+          window.electronAPI.broadcast("settings-update", { settings: nextSettings });
+        }
+        return nextSettings;
+      });
+
+      if (d.pingsSnapshot) {
+        setPings((prev) => {
+          const merged = [...prev, ...tag(d.pingsSnapshot)];
+          try { localStorage.setItem('overgrid_pings', JSON.stringify(merged)); } catch(e) {}
+          return merged;
+        });
+      }
+
+      const mergedCount = (d.effectPaths || []).length;
+      toast.success(`Merged scene: "${scene.name}" (${mergedCount} effect${mergedCount === 1 ? '' : 's'} added)`);
+      setPendingSceneLoad(null);
+      return;
+    }
+
+    // Replace (default/original behavior) — full swap of grid content
     if (d.measurements) {
       setMeasurements(d.measurements);
     } else {
@@ -1003,7 +1061,9 @@ export const GridProvider = ({ children }) => {
       try { localStorage.setItem('overgrid_pings', JSON.stringify(d.pingsSnapshot)); } catch(e) {}
     }
 
-    toast.success(`Loaded scene: "${scene.name}"`);
+    const loadedEffectCount = (d.effectPaths || []).length;
+    toast.success(`Loaded scene: "${scene.name}" (${loadedEffectCount} effect${loadedEffectCount === 1 ? '' : 's'})`);
+    setPendingSceneLoad(null);
   }, [scenes]);
 
   const toggleSceneActive = useCallback((sceneId) => {
@@ -1549,6 +1609,9 @@ export const GridProvider = ({ children }) => {
     updateActiveScene,
     updateScene,
     loadScene,
+    pendingSceneLoad,
+    performSceneLoad,
+    cancelLoadScene,
     toggleSceneActive,
     deleteScene,
     duplicateScene,
