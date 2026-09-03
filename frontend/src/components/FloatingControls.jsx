@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import { useGrid } from '../context/GridContext';
+import { appDebugStore } from '../lib/debugStore';
 import SessionContext from '../context/SessionContext';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -166,8 +167,112 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [showCustomizationModal, setShowCustomizationModal] = useState(false);
   const [maskSaveName, setMaskSaveName] = useState('');
   const sceneImportInputRef = useRef(null);
+
+  // ── Global App Debug Log ────────────────────────────────────────────────
+  // Genuinely app-wide now — shows live effect render status AND a running
+  // history of scene save/load/export/import events from anywhere in the app.
+  const [appDebugOpen, setAppDebugOpen] = useState(false);
+  const [appDebugSnapshot, setAppDebugSnapshot] = useState({
+    renderStatus: appDebugStore.renderStatus,
+    eventLog: appDebugStore.eventLog,
+  });
+  const appDebugWindowRef = useRef(null);
+
+  useEffect(() => {
+    return appDebugStore.subscribe(setAppDebugSnapshot);
+  }, []);
+
+  const renderAppDebugHtml = useCallback((snapshot) => {
+    const esc = (s) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const statusColor = (status) =>
+      status === 'composited-ok' || status === 'found-pixels' ? '#4ade80' :
+      status === 'CRASHED' || status === 'media-error' ? '#f87171' :
+      status === 'unavailable' ? '#999' :
+      status === 'not-ready' ? '#facc15' :
+      status === 'info' ? '#60a5fa' : '#999';
+
+    const renderRows = (snapshot.renderStatus || []).map((d, i) => {
+      const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
+      const fieldRows = Object.entries(d)
+        .filter(([k]) => !['id', 'type', 'status'].includes(k))
+        .map(([k, v]) => `<div class="field">${esc(k)}: <span class="val">${esc(v)}</span></div>`)
+        .join('');
+      return `
+        <div class="entry ${isSpecial ? 'special' : ''}">
+          <div class="entry-head">
+            <span class="entry-title">${isSpecial ? esc(d.type) : `#${i+1} ${esc(d.type)}`}</span>
+            <span class="entry-status" style="color:${statusColor(d.status)}">${esc(d.status)}</span>
+          </div>
+          <div class="entry-body">${fieldRows}</div>
+        </div>`;
+    }).join('');
+
+    const logRows = (snapshot.eventLog || []).slice().reverse().map((e) => `
+      <div class="entry">
+        <div class="entry-head">
+          <span class="entry-title">${esc(e.category || 'event')}</span>
+          <span class="ts">${new Date(e.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="entry-body">
+          <div class="field">${esc(e.message || '')}</div>
+          ${e.detail ? `<div class="field val">${esc(e.detail)}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+    return `
+      <div class="header">
+        <span>🐛 APP DEBUG LOG</span>
+        <span class="ts">updated ${new Date().toLocaleTimeString()}</span>
+      </div>
+      <div class="section-title">Live Effect Render Status (${(snapshot.renderStatus||[]).length})</div>
+      ${(snapshot.renderStatus||[]).length === 0 ? '<div class="empty">No effects placed yet.</div>' : renderRows}
+      <div class="section-title">Event Log (${(snapshot.eventLog||[]).length})</div>
+      ${(snapshot.eventLog||[]).length === 0 ? '<div class="empty">No events logged yet — save, load, or export a scene to see entries here.</div>' : logRows}
+    `;
+  }, []);
+
+  const openAppDebugWindow = useCallback(() => {
+    if (appDebugWindowRef.current && !appDebugWindowRef.current.closed) {
+      appDebugWindowRef.current.focus();
+      return;
+    }
+    const win = window.open('', 'krajden_app_debug', 'width=560,height=800,resizable=yes');
+    if (!win) { return; }
+    win.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Krajden Grid — App Debug Log</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { margin:0; background:#0a0c0f; color:#e5e5e5; font-family: 'Courier New', monospace; font-size:11px; }
+        .header { position:sticky; top:0; background:#111214; border-bottom:1px solid rgba(202,160,85,0.3); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; color:#caa055; font-weight:bold; z-index: 2; }
+        .section-title { position:sticky; top:37px; background:#0d0f12; padding:6px 14px; color:#caa055; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; border-bottom:1px solid rgba(202,160,85,0.15); z-index:1; }
+        .ts { color:#666; font-weight:normal; font-size:9px; }
+        .empty { padding:16px; color:#666; text-align:center; }
+        .entry { border-bottom:1px solid rgba(255,255,255,0.08); padding:10px 14px; }
+        .entry.special { background:rgba(255,255,255,0.04); }
+        .entry-head { display:flex; justify-content:space-between; margin-bottom:4px; }
+        .entry-title { color:#ccc; font-weight:bold; }
+        .entry-body { color:#888; font-size:10px; line-height:1.6; }
+        .field { word-break:break-all; }
+        .val { color:#bbb; }
+      </style></head>
+      <body><div id="root"></div></body></html>
+    `);
+    win.document.getElementById('root').innerHTML = renderAppDebugHtml(appDebugSnapshot);
+    win.document.close();
+    appDebugWindowRef.current = win;
+  }, [appDebugSnapshot, renderAppDebugHtml]);
+
+  useEffect(() => {
+    const win = appDebugWindowRef.current;
+    if (win && !win.closed) {
+      const root = win.document.getElementById('root');
+      if (root) root.innerHTML = renderAppDebugHtml(appDebugSnapshot);
+    }
+  }, [appDebugSnapshot, renderAppDebugHtml]);
+
   const [collapsedSections, setCollapsedSections] = useState({
-    effects: true,
+    effects: false,
     geometry: true,
     measure: true,
     ping: true,
@@ -590,31 +695,29 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
         {!isGuest && (
           <>
             {/* Resolution */}
-                        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'resolution' ? 'hidden' : ''}`} id="section-resolution">
               <div className="flex items-center gap-1 w-full">
               <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('geometry')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+              <button onClick={() => toggleSection('resolution')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
-                  Grid Layout
+                  <Monitor className="w-3.5 h-3.5 text-[#caa055]/80" />
+                  Resolution
                 </span>
-                {collapsedSections.geometry ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+                {collapsedSections.resolution ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
               </div>
               {!sectionFilter && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('geometry', 'Grid Layout'); }}
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('resolution', 'Resolution'); }}
                   className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Grid Layout into its own window"
+                  title="Tear off Resolution into its own window"
                 >
                   <MapPin className="w-3 h-3" />
                 </button>
               )}
             </div>
-              {!collapsedSections.geometry && (
+              {!collapsedSections.resolution && (
                 <div className="space-y-3 pt-1">
-                  {/* Resolution */}
-<div className="space-y-3 pt-1">
                   <div className="grid grid-cols-2 gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
                     <div className="space-y-1 text-left">
                       <Label className="text-[9px] uppercase tracking-wider text-slate-cool font-outfit font-semibold">Width (px)</Label>
@@ -697,9 +800,34 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     </div>
                   )}
                 </div>
-                  <div className="border-t border-[#caa055]/10 pt-3">
-                    {/* Grid size/rows/columns */}
-<div className="space-y-3.5 pt-1">
+              )}
+              <Separator className="bg-[#caa055]/15" />
+            </div>
+
+            {/* Grid Layout */}
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('geometry')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
+                  Grid Layout
+                </span>
+                {collapsedSections.geometry ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('geometry', 'Grid Layout'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Grid Layout into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+              {!collapsedSections.geometry && (
+                <div className="space-y-3.5 pt-1">
                   {/* Grid line toggle */}
                   <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
                     <div className="flex items-center gap-2">
@@ -792,10 +920,34 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     )}
                   </div>
                 </div>
-                  </div>
-                  <div className="border-t border-[#caa055]/10 pt-3">
-                    {/* Grid appearance — color, opacity, line style */}
-<div className="space-y-3 pt-1">
+              )}
+              <Separator className="bg-[#caa055]/15" />
+            </div>
+
+            {/* Grid Appearance */}
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'appearance' ? 'hidden' : ''}`} id="section-appearance">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('appearance')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                  <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
+                  Grid Appearance
+                </span>
+                {collapsedSections.appearance ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('appearance', 'Grid Appearance'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Grid Appearance into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+              {!collapsedSections.appearance && (
+                <div className="space-y-3 pt-1">
                   <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
                     <Label className="text-[10px] text-slate-cool uppercase tracking-wider font-outfit font-semibold flex-1">Color</Label>
                     <Input
@@ -843,56 +995,9 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                     />
                   </div>
                 </div>
-                  </div>
-                  {!isGuest && (
-                    <div className="border-t border-[#caa055]/10 pt-3">
-                      {/* Background color */}
-<div className="space-y-3 pt-1">
-                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Input
-                    type="color"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
-                    data-testid="bg-color-picker"
-                  />
-                  <Input
-                    type="text"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
-                    data-testid="bg-color-hex"
-                  />
-                </div>
-                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  {backgroundPresets.map((preset) => (
-                    <button
-                      key={preset.color}
-                      onClick={() => updateSettings({ backgroundColor: preset.color })}
-                      className={`w-7 h-7 rounded-[4px] border transition-all ${
-                        settings.backgroundColor === preset.color 
-                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
-                          : 'border-white/20 hover:border-white/40'
-                      }`}
-                      style={{ backgroundColor: preset.color }}
-                      title={preset.label}
-                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
-                    />
-                  ))}
-                </div>
-              </div>
-                    </div>
-                  )}
-                </div>
               )}
               <Separator className="bg-[#caa055]/15" />
             </div>
-
-            {/* Grid Layout */}
-            
-
-            {/* Grid Appearance */}
-            
 
             {/* Grid Mask */}
             <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'mask' ? 'hidden' : ''}`} id="section-mask">
@@ -1452,6 +1557,83 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
+        {/* Background Color */}
+        {!isGuest && (
+          <div className={`space-y-2 ${sectionFilter && sectionFilter !== 'bgcolor' ? 'hidden' : ''}`} id="section-bgcolor">
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                <Palette className="w-3.5 h-3.5 text-[#caa055]/80" />
+                Background Color
+              </span>
+              <div className="flex items-center gap-1.5">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateSettings({ backgroundEnabled: !settings.backgroundEnabled });
+                  }}
+                  className={`h-6 w-6 rounded flex items-center justify-center transition-colors cursor-pointer ${settings.backgroundEnabled !== false ? 'text-[#caa055]' : 'text-slate-muted'}`}
+                  title={settings.backgroundEnabled !== false ? 'Hide background' : 'Show background'}
+                  data-testid="bg-toggle"
+                >
+                  {settings.backgroundEnabled !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </div>
+                {collapsedSections.bgcolor ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </div>
+            </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgcolor', 'Background Color'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Background Color into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {!collapsedSections.bgcolor && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  <Input
+                    type="color"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
+                    data-testid="bg-color-picker"
+                  />
+                  <Input
+                    type="text"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
+                    data-testid="bg-color-hex"
+                  />
+                </div>
+                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  {backgroundPresets.map((preset) => (
+                    <button
+                      key={preset.color}
+                      onClick={() => updateSettings({ backgroundColor: preset.color })}
+                      className={`w-7 h-7 rounded-[4px] border transition-all ${
+                        settings.backgroundColor === preset.color 
+                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
+                          : 'border-white/20 hover:border-white/40'
+                      }`}
+                      style={{ backgroundColor: preset.color }}
+                      title={preset.label}
+                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Token Library */}
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'clipart' ? 'hidden' : ''}`} id="section-clipart">
           <div className="flex items-center gap-1 w-full">
@@ -1941,6 +2123,105 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
           <RotateCcw className="w-3.5 h-3.5 mr-2" />
           Reset to Defaults
         </Button>
+
+        {/* ── Global App Debug Log ─────────────────────────────────────────────
+             Always visible at the bottom of the menu, regardless of which
+             section is open. Shows live effect render status plus a running
+             history of scene save/load/export/import events from anywhere
+             in the app. */}
+        <div className="mt-4 pt-3 border-t border-white/10">
+          <div className="flex gap-1">
+            <button
+              onClick={() => setAppDebugOpen(o => !o)}
+              className="flex-1 flex items-center justify-between px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono transition-all"
+            >
+              <span>🐛 App Debug Log</span>
+              <span>{appDebugOpen ? '▲' : '▼'}</span>
+            </button>
+            <button
+              onClick={openAppDebugWindow}
+              className="px-2 py-1.5 rounded bg-black/40 border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/10 text-[10px] font-mono"
+              title="Pop out the debug log into its own window"
+            >
+              📌 Tear Off
+            </button>
+            {(appDebugSnapshot.eventLog.length > 0 || appDebugSnapshot.renderStatus.length > 0) && (
+              <button
+                onClick={() => {
+                  const text = JSON.stringify(appDebugSnapshot, null, 2);
+                  navigator.clipboard?.writeText(text).catch(() => {});
+                }}
+                className="px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono"
+                title="Copy full debug JSON to clipboard"
+              >
+                📋
+              </button>
+            )}
+          </div>
+
+          {appDebugOpen && (
+            <div className="mt-2 max-h-[320px] overflow-y-auto bg-black/60 border border-white/10 rounded-lg p-2 text-[9px] font-mono space-y-3">
+              <div>
+                <div className="text-[#caa055] font-bold uppercase tracking-wider mb-1">
+                  Live Effect Render Status ({appDebugSnapshot.renderStatus.length})
+                </div>
+                {appDebugSnapshot.renderStatus.length === 0 && (
+                  <div className="text-white/40">No effects placed yet.</div>
+                )}
+                {appDebugSnapshot.renderStatus.map((d, i) => {
+                  const statusColor =
+                    d.status === 'composited-ok' || d.status === 'found-pixels' ? 'text-green-400' :
+                    d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
+                    d.status === 'unavailable' ? 'text-white/40' :
+                    d.status === 'not-ready' ? 'text-yellow-400' :
+                    d.status === 'info' ? 'text-blue-400' :
+                    'text-white/60';
+                  const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
+                  return (
+                    <div key={d.id || i} className={`border-b border-white/10 py-1.5 last:border-0 ${isSpecial ? 'bg-white/5 -mx-2 px-2 rounded' : ''}`}>
+                      <div className="flex items-center justify-between">
+                        <span className={isSpecial ? 'text-[#caa055] font-bold' : 'text-white/80'}>
+                          {isSpecial ? d.type : `#${i+1} ${d.type}`}
+                        </span>
+                        <span className={statusColor}>{d.status}</span>
+                      </div>
+                      <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
+                        {d.category && <div>category: {d.category}</div>}
+                        {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
+                        {d.readyState !== undefined && d.readyState !== null && <div>readyState: {d.readyState}</div>}
+                        {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
+                        {d.note && <div className="text-white/50 italic">{d.note}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[#caa055] font-bold uppercase tracking-wider">
+                    Event Log ({appDebugSnapshot.eventLog.length})
+                  </span>
+                  {appDebugSnapshot.eventLog.length > 0 && (
+                    <button onClick={() => appDebugStore.clearLog()} className="text-white/40 hover:text-white/70 text-[8px]">clear</button>
+                  )}
+                </div>
+                {appDebugSnapshot.eventLog.length === 0 && (
+                  <div className="text-white/40">No events logged yet — save, load, or export a scene to see entries here.</div>
+                )}
+                {appDebugSnapshot.eventLog.slice().reverse().map((e, i) => (
+                  <div key={i} className="border-b border-white/10 py-1.5 last:border-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/80">{e.category}</span>
+                      <span className="text-white/30 text-[8px]">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="text-white/50 text-[8px] mt-0.5">{e.message}</div>
+                    {e.detail && <div className="text-white/35 text-[8px] mt-0.5 break-all">{e.detail}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
 
