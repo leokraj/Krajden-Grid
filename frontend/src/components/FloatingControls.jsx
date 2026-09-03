@@ -38,6 +38,7 @@ import {
   Image,
   Trash2,
   Upload,
+  Download,
   Eraser,
   RotateCw,
   Grid2X2,
@@ -85,6 +86,12 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     clearPings,
     showClipartLibrary,
     setShowClipartLibrary,
+    exportScenes,
+    importScenes,
+    pendingSceneLoad,
+    performSceneLoad,
+    cancelLoadScene,
+    scenes,
   } = useGrid();
   
   // Session context for clipart sync and VTT tools
@@ -158,6 +165,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [showScenePanel, setShowScenePanel] = useState(false);
   const [showCustomizationModal, setShowCustomizationModal] = useState(false);
   const [maskSaveName, setMaskSaveName] = useState('');
+  const sceneImportInputRef = useRef(null);
   const [collapsedSections, setCollapsedSections] = useState({
     effects: false,
     geometry: true,
@@ -464,6 +472,43 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
   return (
     <>
+    {/* Replace vs Merge confirmation — shown whenever a scene load is requested */}
+    {pendingSceneLoad && (() => {
+      const scene = scenes?.find(s => s.id === pendingSceneLoad.sceneId);
+      return (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#111214] border border-[#caa055]/30 rounded-lg shadow-2xl p-5 w-[340px]">
+            <h3 className="text-sm font-bold text-[#caa055] font-cinzel mb-1">
+              Load "{scene?.name || 'Scene'}"
+            </h3>
+            <p className="text-[11px] text-gray-400 mb-4">
+              Replace clears the grid and loads this scene fresh. Merge adds this scene's tokens, maps, and effects on top of what's already there.
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={() => performSceneLoad(pendingSceneLoad.sceneId, 'replace')}
+                className="w-full h-8 text-xs bg-[#caa055] text-black hover:bg-[#d5b271] font-cinzel"
+              >
+                Replace Grid
+              </Button>
+              <Button
+                onClick={() => performSceneLoad(pendingSceneLoad.sceneId, 'merge')}
+                variant="ghost"
+                className="w-full h-8 text-xs text-[#caa055] hover:bg-[#caa055]/10 border border-[#caa055]/30 font-cinzel"
+              >
+                Merge with Current Grid
+              </Button>
+              <button
+                onClick={cancelLoadScene}
+                className="text-[10px] text-gray-500 hover:text-gray-300 mt-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
     <div
       className={isElectronWindow 
         ? "rounded-[6px] shadow-2xl w-full h-screen overflow-hidden border border-[#caa055]/20 bg-[#111214]" 
@@ -1785,6 +1830,39 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
             </div>
           {!collapsedSections.scenes && (
             <div className="space-y-2 pt-1">
+              {/* Export/Import all scenes to/from a JSON file — backs up or moves scenes across installs */}
+              <div className="flex gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => exportScenes()}
+                  className="flex-1 h-7 text-[9px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel border border-[#caa055]/20"
+                >
+                  <Download className="w-3 h-3 mr-1" /> Export All Scenes
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => sceneImportInputRef.current?.click()}
+                  className="flex-1 h-7 text-[9px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel border border-[#caa055]/20"
+                >
+                  <Upload className="w-3 h-3 mr-1" /> Import Scenes
+                </Button>
+                <input
+                  ref={sceneImportInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => importScenes(ev.target.result);
+                    reader.readAsText(file);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
               {undockedPanels.scenes ? (
                 <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3 text-center">
                   <p className="text-[10px] text-slate-muted font-outfit">
