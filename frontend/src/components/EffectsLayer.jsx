@@ -304,6 +304,8 @@ function buildRibbonGeometry(points, type, strokeWidth, repeatCount, widthVariat
   };
 }
 
+let _ribbonTex = null; // cached WebGL texture object, reused across frames
+
 // Render ribbon with video texture
 export function renderRibbonWithVideo(ctx, media, points, type, strokeWidth, opacity, repeatCount, widthVariation, edgeFade, cW, cH) {
   const r = getRibbonGL(cW, cH);
@@ -342,20 +344,39 @@ export function renderRibbonWithVideo(ctx, media, points, type, strokeWidth, opa
   gl.uniform2f(gl.getUniformLocation(progTex, 'u_res'), cW, cH);
   gl.uniform1f(gl.getUniformLocation(progTex, 'u_opacity'), opacity);
 
-  // Upload video/image as texture
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  // Upload video/image as texture — reuse one texture object across frames
+  // (creating/deleting a new GL texture every frame is wasteful and can stall).
+  if (!_ribbonTex) {
+    _ribbonTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, _ribbonTex);
+    // CLAMP_TO_EDGE on both axes — required because video frames are almost
+    // always non-power-of-two, and WebGL1 treats NPOT + REPEAT/MIRRORED_REPEAT
+    // as an "incomplete" texture (silently renders fully transparent, no error
+    // thrown). We don't need hardware REPEAT anyway — the fragment shader
+    // already wraps U manually via fract(v_uv.x).
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  } else {
+    gl.bindTexture(gl.TEXTURE_2D, _ribbonTex);
+  }
+
+  // Flip Y on upload — WebGL texture space has origin bottom-left, but
+  // canvas/video frames have origin top-left. Without this the video
+  // renders upside-down relative to the ribbon geometry.
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
   try {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, media);
-  } catch(_) { gl.deleteTexture(tex); return false; }
+  } catch(_) {
+    return false;
+  } finally {
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); // reset for other GL users
+  }
 
   gl.uniform1i(gl.getUniformLocation(progTex, 'u_tex'), 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, geom.count);
-  gl.deleteTexture(tex);
 
   // Apply edge fade via canvas blur if needed
   ctx.save();
@@ -795,6 +816,37 @@ const SHADER_FRAGS = {
       gl_FragColor=vec4(c*a,a);
     }`,
 
+  // SPOTLIGHT CONE — directional beam matching classic stage/torch cone shapes.
+  // u_coneAngle: half-angle of the cone in radians. u_softness: edge falloff
+  // (0 = hard edge, 1 = very soft). u_rotation: rotates the cone direction.
+  spotlight_cone: `precision mediump float;
+    uniform float u_time; uniform vec2 u_res; uniform vec3 u_lightColor;
+    uniform float u_coneAngle; uniform float u_softness; uniform float u_rotation;
+    varying vec2 v_uv;
+    void main(){
+      // Origin at top-center, cone opens downward by default (rotation adjusts direction)
+      vec2 uv=v_uv-vec2(0.5,0.0);
+      uv.x*=u_res.x/max(u_res.y,1.);
+      float rot=u_rotation;
+      vec2 ruv=vec2(uv.x*cos(rot)-uv.y*sin(rot), uv.x*sin(rot)+uv.y*cos(rot));
+      float dist=length(ruv);
+      float angle=atan(ruv.x, max(ruv.y,0.0001));
+      float coneEdge=u_coneAngle;
+      float soft=max(u_softness,0.02);
+      // Cone mask: inside the angular spread, softened at the edges
+      float angMask=1.0-smoothstep(coneEdge*(1.0-soft), coneEdge*(1.0+soft), abs(angle));
+      // Falloff along the beam length
+      float lenFalloff=smoothstep(1.4,0.0,dist);
+      // Subtle flicker for torch-like warmth
+      float flicker=0.96+0.04*sin(u_time*3.3)*sin(u_time*1.7+1.0);
+      float beam=angMask*lenFalloff*flicker;
+      // Bright core near the origin
+      float core=smoothstep(0.25,0.0,dist)*0.5;
+      vec3 c=mix(u_lightColor*0.35,u_lightColor,clamp(beam+core,0.,1.));
+      float a=clamp(beam+core,0.,1.);
+      gl_FragColor=vec4(c,a);
+    }`,
+
   // SCENIC LIGHT — warm circular glow, configurable color via u_color
   scenic_light: `precision mediump float;
     uniform float u_time; uniform vec2 u_res; uniform vec3 u_lightColor;
@@ -859,12 +911,12 @@ function getWebGLRenderer(shaderName) {
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res'), lightColor: gl.getUniformLocation(prog,'u_lightColor') };
+  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res'), lightColor: gl.getUniformLocation(prog,'u_lightColor'), coneAngle: gl.getUniformLocation(prog,'u_coneAngle'), softness: gl.getUniformLocation(prog,'u_softness'), rotation: gl.getUniformLocation(prog,'u_rotation') };
   _glCache[shaderName] = { gl, canvas, prog, buf, loc, t0: Date.now() };
   return _glCache[shaderName];
 }
 
-export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blendMode, lightColor) {
+export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blendMode, lightColor, lightParams) {
   const r = getWebGLRenderer(shaderName);
   if (!r) return;
   const { gl, canvas, prog, buf, loc, t0 } = r;
@@ -877,13 +929,17 @@ export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blend
   gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, 0, 0);
   gl.uniform1f(loc.time, (Date.now()-t0)/1000);
   gl.uniform2f(loc.res, w, h);
-  // Light color uniform (for scenic_light shader)
+  // Light color uniform (for scenic_light / spotlight_cone shaders)
   if (loc.lightColor && lightColor) {
     const [lr, lg, lb] = lightColor;
     gl.uniform3f(loc.lightColor, lr, lg, lb);
   } else if (loc.lightColor) {
     gl.uniform3f(loc.lightColor, 1.0, 0.85, 0.4); // default warm torch
   }
+  // Spotlight cone params — harmless no-op for shaders that don't declare these uniforms
+  if (loc.coneAngle) gl.uniform1f(loc.coneAngle, (lightParams?.coneAngle ?? 30) * Math.PI / 180);
+  if (loc.softness)  gl.uniform1f(loc.softness, lightParams?.softness ?? 0.4);
+  if (loc.rotation)  gl.uniform1f(loc.rotation, (lightParams?.rotation ?? 0) * Math.PI / 180);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
@@ -917,6 +973,11 @@ export const BUILTIN_EFFECT_PRESETS = [
   { id:'shader_acid_stream',   name:'Acid Stream',   shaderName:'acid_stream',   category:'flow', tags:['acid','toxic','stream'],         description:'Neon green corrosive flow',        isShader:true,isPreset:true,previewColor:'#84cc16',emoji:'☣️' },
   // SCENIC LIGHT — click to place a circular light source
   { id:'scenic_light', name:'Scenic Light', shaderName:'scenic_light', category:'area', tags:['light','torch','glow','ambient'], description:'Placeable circular light — adjustable color and radius', isShader:true, isPreset:true, previewColor:'#fde68a', emoji:'🕯️', isLight:true },
+  { id:'spot_narrow', name:'Narrow Spot', shaderName:'spotlight_cone', category:'area', tags:['light','spot','beam','narrow'], description:'Tight focused beam — flashlight or spotlight', isShader:true, isPreset:true, previewColor:'#fff5d6', emoji:'🔦', isLight:true, coneAngle:12, softness:0.15 },
+  { id:'spot_wide', name:'Wide Spot', shaderName:'spotlight_cone', category:'area', tags:['light','spot','beam','wide'], description:'Broad soft beam — stage light or window glow', isShader:true, isPreset:true, previewColor:'#fff5d6', emoji:'💡', isLight:true, coneAngle:45, softness:0.5 },
+  { id:'spot_soft_wash', name:'Soft Wash', shaderName:'spotlight_cone', category:'area', tags:['light','spot','soft','wash'], description:'Very soft wide wash — ambient fill light', isShader:true, isPreset:true, previewColor:'#fff5d6', emoji:'🌤️', isLight:true, coneAngle:60, softness:0.85 },
+  { id:'spot_hard_beam', name:'Hard Beam', shaderName:'spotlight_cone', category:'area', tags:['light','spot','hard','sharp'], description:'Crisp hard-edged beam — theatrical spotlight', isShader:true, isPreset:true, previewColor:'#fff5d6', emoji:'🎯', isLight:true, coneAngle:20, softness:0.05 },
+  { id:'spot_directional', name:'Directional Downlight', shaderName:'spotlight_cone', category:'area', tags:['light','spot','ceiling','downlight'], description:'Straight-down cone — ceiling light or moonbeam', isShader:true, isPreset:true, previewColor:'#e0e8ff', emoji:'🕯️', isLight:true, coneAngle:30, softness:0.3 },
 ];
 
 
@@ -1266,7 +1327,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           tmp.width = cW; tmp.height = cH;
           const tc = tmp.getContext('2d');
           renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, 'normal',
-            lightColor ? hexToRgb(lightColor) : null);
+            lightColor ? hexToRgb(lightColor) : null,
+            { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation });
           tc.globalCompositeOperation = 'destination-in';
           tc.drawImage(mask, 0, 0);
 
@@ -1295,7 +1357,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           bw=Math.max(...xs)-Math.min(...xs)+sw; bh=Math.max(...ys)-Math.min(...ys)+sw;
         }
         renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, bm,
-          lightColor ? hexToRgb(lightColor) : null);
+          lightColor ? hexToRgb(lightColor) : null,
+          { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation });
         tc.globalCompositeOperation = 'destination-in';
         tc.drawImage(mask, 0, 0);
 
@@ -1722,15 +1785,20 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // AREA MODE: drag to paint
     setIsDrawing(true);
 
-    // Scenic light — single click places a circular glow
-    if (activeEffectId === 'scenic_light') {
+    // Scenic/spotlight lights — single click places the light, carrying over
+    // that preset's shader and default beam parameters (cone angle, softness)
+    if (activePreset?.isLight) {
       const r = brushSize * 1.5;
       addEffectPath({
         type: 'marquee',
         rect: { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 },
         effectUrl: null, effectId: activeEffectId,
-        isShader: true, shaderName: 'scenic_light', isLight: true,
-        lightColor: '#ffcc44', opacity, blendMode: 'lighter',
+        isShader: true, shaderName: activePreset.shaderName, isLight: true,
+        lightColor: '#ffcc44',
+        coneAngle: activePreset.coneAngle ?? 30,
+        softness: activePreset.softness ?? 0.4,
+        rotation: 0,
+        opacity, blendMode: 'lighter',
       });
       setIsDrawing(false);
       return;
@@ -2880,13 +2948,44 @@ export function EffectsControlPanel({ onClose }) {
                           ))}
                         </select>
                       </div>
-                      {/* Scenic light color picker */}
+                      {/* Scenic light color + beam shape controls */}
                       {ep.isLight && (
-                        <div>
-                          <span className="text-[8px] text-white/50 uppercase tracking-wider block mb-0.5">Light Color</span>
-                          <input type="color" value={ep.lightColor || '#ffcc44'}
-                            onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
-                            className="w-full h-6 rounded cursor-pointer border-0" />
+                        <div className="space-y-2">
+                          <div>
+                            <span className="text-[8px] text-white/50 uppercase tracking-wider block mb-0.5">Light Color</span>
+                            <input type="color" value={ep.lightColor || '#ffcc44'}
+                              onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
+                              className="w-full h-6 rounded cursor-pointer border-0" />
+                          </div>
+                          {ep.shaderName === 'spotlight_cone' && (<>
+                            <div>
+                              <div className="flex justify-between mb-0.5">
+                                <span className="text-[8px] text-white/50 uppercase tracking-wider">Cone Angle</span>
+                                <span className="text-[8px] text-white/40 font-mono">{ep.coneAngle ?? 30}°</span>
+                              </div>
+                              <input type="range" min="5" max="80" step="1" value={ep.coneAngle ?? 30}
+                                onChange={e => updateEffectPath(ep.id, { coneAngle: parseInt(e.target.value) })}
+                                className="w-full h-1 accent-[#caa055]" />
+                            </div>
+                            <div>
+                              <div className="flex justify-between mb-0.5">
+                                <span className="text-[8px] text-white/50 uppercase tracking-wider">Edge Softness</span>
+                                <span className="text-[8px] text-white/40 font-mono">{Math.round((ep.softness ?? 0.4) * 100)}%</span>
+                              </div>
+                              <input type="range" min="0" max="1" step="0.05" value={ep.softness ?? 0.4}
+                                onChange={e => updateEffectPath(ep.id, { softness: parseFloat(e.target.value) })}
+                                className="w-full h-1 accent-[#caa055]" />
+                            </div>
+                            <div>
+                              <div className="flex justify-between mb-0.5">
+                                <span className="text-[8px] text-white/50 uppercase tracking-wider">Rotation</span>
+                                <span className="text-[8px] text-white/40 font-mono">{ep.rotation ?? 0}°</span>
+                              </div>
+                              <input type="range" min="0" max="360" step="5" value={ep.rotation ?? 0}
+                                onChange={e => updateEffectPath(ep.id, { rotation: parseInt(e.target.value) })}
+                                className="w-full h-1 accent-[#caa055]" />
+                            </div>
+                          </>)}
                         </div>
                       )}
                     </div>
