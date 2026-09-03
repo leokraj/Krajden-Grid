@@ -231,9 +231,17 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
   if (senderBounds) {
     const senderDisplay = screen.getDisplayMatching(senderBounds);
     const { x, y, width: dw, height: dh } = senderDisplay.workArea;
-    // Center the child window on that display
-    winX = x + Math.round((dw - width) / 2);
-    winY = y + Math.round((dh - height) / 2);
+    if (mode === 'controls') {
+      // The main Controls panel opens flush against the left edge of the
+      // display by default, so the grid stays clear on the right/center.
+      winX = x + 12;
+      winY = y + Math.round((dh - height) / 2);
+    } else {
+      // Other torn-off panels (Effects, Tokens, Maps, individual sections)
+      // still center on the display — they're opened intentionally mid-session.
+      winX = x + Math.round((dw - width) / 2);
+      winY = y + Math.round((dh - height) / 2);
+    }
   } else {
     const primary = screen.getPrimaryDisplay().workArea;
     winX = primary.x + Math.round((primary.width - width) / 2);
