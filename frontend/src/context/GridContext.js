@@ -464,10 +464,10 @@ export const GridProvider = ({ children }) => {
   const addDrawingPath = useCallback((path) => {
     setSettings((prev) => ({
       ...prev,
-      drawingPaths: [...(prev.drawingPaths || []), path]
+      drawingPaths: [...(prev.drawingPaths || []), { ...path, sceneId: activeSceneId }]
     }));
     setUndoStack([]);
-  }, []);
+  }, [activeSceneId]);
 
   const clearDrawings = useCallback(() => {
     updateSettings({ drawingPaths: [] });
@@ -536,7 +536,8 @@ export const GridProvider = ({ children }) => {
       scale: options.initialScale || Math.max(window.innerWidth || 1920, 1920),
       rotation: 0,
       opacity: 100,
-      visible: true
+      visible: true,
+      sceneId: activeSceneId,
     };
 
     setSettings((prev) => {
@@ -549,7 +550,7 @@ export const GridProvider = ({ children }) => {
     });
 
     return newLayer.id;
-  }, []);
+  }, [activeSceneId]);
 
   const updateBackgroundLayer = useCallback((id, updates) => {
     setSettings((prev) => {
@@ -647,7 +648,8 @@ export const GridProvider = ({ children }) => {
       x: clipart.x || 100,
       y: clipart.y || 100,
       scale: clipart.scale || 50,
-      rotation: clipart.rotation || 0
+      rotation: clipart.rotation || 0,
+      sceneId: activeSceneId,
     };
     setSettings((prev) => {
       const nextPlaced = [...(prev.placedCliparts || []), newPlaced];
@@ -660,7 +662,7 @@ export const GridProvider = ({ children }) => {
       };
     });
     return newPlaced.instanceId;
-  }, []);
+  }, [activeSceneId]);
 
   const updatePlacedClipart = useCallback((instanceId, updates) => {
     setSettings((prev) => {
@@ -746,9 +748,10 @@ export const GridProvider = ({ children }) => {
       effectPaths: [...(prev.effectPaths || []), {
         ...effectPath,
         id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
+        sceneId: effectPath.sceneId ?? activeSceneId,
       }],
     }));
-  }, []);
+  }, [activeSceneId]);
 
   const updateEffectPath = useCallback((id, updates) => {
     setSettings((prev) => ({
@@ -951,6 +954,7 @@ export const GridProvider = ({ children }) => {
   // Scene loading now asks Replace vs Merge before touching the grid.
   // `loadScene(sceneId)` just queues the request; `performSceneLoad` does the
   // actual work once the user picks a mode via the confirmation prompt.
+  const SCENE_MERGE_OPTION = 'Merge with Current Grid';
   const [pendingSceneLoad, setPendingSceneLoad] = useState(null); // { sceneId } | null
 
   const loadScene = useCallback((sceneId) => {
@@ -1097,6 +1101,23 @@ export const GridProvider = ({ children }) => {
     }
   }, [scenes, activeSceneId, loadScene]);
 
+  // Pure layer-visibility toggle — hides/shows everything tagged with this
+  // scene's id (tokens, drawings, maps, effects, masks) without touching
+  // what's loaded or triggering the Replace/Merge prompt. This is the "eye"
+  // button — a Photoshop-style layer visibility toggle, not a scene switch.
+  const toggleSceneVisibility = useCallback((sceneId) => {
+    setSettings((prev) => {
+      const hidden = prev.hiddenSceneIds || [];
+      const isHidden = hidden.includes(sceneId);
+      const nextHidden = isHidden ? hidden.filter(id => id !== sceneId) : [...hidden, sceneId];
+      const nextSettings = { ...prev, hiddenSceneIds: nextHidden };
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { hiddenSceneIds: nextHidden } });
+      }
+      return nextSettings;
+    });
+  }, []);
+
   const deleteScene = useCallback((sceneId) => {
     setScenes((prev) => prev.filter((s) => s.id !== sceneId));
     if (activeSceneId === sceneId) {
@@ -1134,9 +1155,28 @@ export const GridProvider = ({ children }) => {
       backgroundImage: null,
       backgroundImageData: null,
       useBackgroundImage: false,
+      effectPaths: [], // was missing — effects used to survive "Blank Canvas"
+      hiddenSceneIds: [],
     }));
     toast.info('Canvas cleared');
   }, []);
+
+  const exportSingleScene = useCallback((sceneId) => {
+    const scene = scenes.find(s => s.id === sceneId);
+    if (!scene) return;
+    // Export as a single-item array so it uses the exact same format as
+    // exportScenes/importScenes — a one-scene file imports cleanly with the
+    // same "Import Scenes" button, no separate import path needed.
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify([scene], null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    const safeName = scene.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    downloadAnchor.setAttribute("download", `krajden_scene_${safeName}_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    toast.success(`Exported "${scene.name}" to file`);
+  }, [scenes]);
 
   const exportScenes = useCallback(() => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(scenes, null, 2));
@@ -1166,16 +1206,16 @@ export const GridProvider = ({ children }) => {
   const addMaskPath = useCallback((path) => {
     setSettings((prev) => ({
       ...prev,
-      maskPaths: [...(prev.maskPaths || []), path]
+      maskPaths: [...(prev.maskPaths || []), { ...path, sceneId: activeSceneId }]
     }));
-  }, []);
+  }, [activeSceneId]);
 
   const addMaskRect = useCallback((rect) => {
     setSettings((prev) => ({
       ...prev,
-      maskRects: [...(prev.maskRects || []), rect]
+      maskRects: [...(prev.maskRects || []), { ...rect, sceneId: activeSceneId }]
     }));
-  }, []);
+  }, [activeSceneId]);
 
   const clearMask = useCallback(() => {
     updateSettings({ maskPaths: [], maskRects: [] });
@@ -1613,6 +1653,8 @@ export const GridProvider = ({ children }) => {
     performSceneLoad,
     cancelLoadScene,
     toggleSceneActive,
+    toggleSceneVisibility,
+    exportSingleScene,
     deleteScene,
     duplicateScene,
     clearCanvasState,
@@ -1658,7 +1700,9 @@ export const GridProvider = ({ children }) => {
     updateRadialConfig,
     resetRadialConfig,
     showClipartLibrary,
-    setShowClipartLibrary
+    setShowClipartLibrary,
+    sceneMergeOption: SCENE_MERGE_OPTION,
+    openSectionWindow: (section, title) => window?.electronAPI?.openSectionWindow?.(section, title)
   };
 
   return (
