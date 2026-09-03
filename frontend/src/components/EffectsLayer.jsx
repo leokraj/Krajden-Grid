@@ -18,6 +18,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useGrid } from '../context/GridContext';
 import { subscribeEffects, saveEffectToFirebase, deleteEffectFromFirebase } from '../lib/firebase';
+import { appDebugStore } from '../lib/debugStore';
 
 // ── Local Effect Storage (IndexedDB via localStorage for large files) ────────
 // Stores effects locally — no size limit, no server, works offline.
@@ -982,21 +983,9 @@ export const BUILTIN_EFFECT_PRESETS = [
 
 
 
-// ── Shared Debug Store ──────────────────────────────────────────────────────
-// EffectsDrawingOverlay (canvas) writes to this; EffectsControlPanel (sidebar) reads it.
-// Plain module-level object + listener pattern since these are separate React trees.
-const effectsDebugStore = {
-  info: [],
-  listeners: new Set(),
-  set(info) {
-    this.info = info;
-    this.listeners.forEach(fn => fn(info));
-  },
-  subscribe(fn) {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  },
-};
+// Debug status is now tracked in the shared appDebugStore (../lib/debugStore)
+// so it can show scene save/load/export events alongside effect render status
+// in one global panel, instead of a private per-file store.
 
 function hexToRgb(hex) {
   const r = parseInt(hex.slice(1,3),16)/255;
@@ -1044,6 +1033,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     addEffectPath,
     removeEffectPath,
     updateEffectPath,
+    hiddenItemKeys,
   } = useGrid();
 
   // ── Self-measured canvas size ─────────────────────────────────────────────
@@ -1160,11 +1150,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           const errCode = v.error ? v.error.code : 'unknown';
           const errMsg = v.error ? v.error.message : 'no error detail available';
           console.warn('[EffectsLayer] Video failed to load:', url, `code ${errCode}: ${errMsg}`);
-          effectsDebugStore.set([
-            ...effectsDebugStore.info.filter(d => d.effectUrl !== url?.slice(0, 60) + '...'),
+          appDebugStore.setRenderStatus([
+            ...appDebugStore.renderStatus.filter(d => d.effectUrl !== url?.slice(0, 60) + '...'),
             { id: 'media-mgr-' + url.slice(-20), type: 'media-manager', status: 'media-error',
               effectUrl: url.slice(0, 60) + '...', errorDetail: `code ${errCode}: ${errMsg}` },
           ]);
+          appDebugStore.log({ category: 'effect-media-error', message: `Video failed to load`, detail: `code ${errCode}: ${errMsg}` });
         });
         v.load();
         mediaRef.current.set(url, v);
@@ -1569,7 +1560,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         }
 
         // Skip effects whose scene layer has been toggled off via the eye button
-        const visibleEffectPaths = effectPaths.filter(ep => !(settings.hiddenSceneIds || []).includes(ep.sceneId));
+        const visibleEffectPaths = effectPaths.filter(ep => !hiddenItemKeys?.effects?.has(ep.id));
         visibleEffectPaths.forEach(ep => {
           try {
             renderEffect(ep);
@@ -1700,7 +1691,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   useEffect(() => {
     if (!effectsEnabled) return;
     const interval = setInterval(() => {
-      effectsDebugStore.set([...debugInfoRef.current]);
+      appDebugStore.setRenderStatus([...debugInfoRef.current]);
     }, 500);
     return () => clearInterval(interval);
   }, [effectsEnabled]);
@@ -2100,93 +2091,11 @@ export function EffectsControlPanel({ onClose }) {
   const userId = getLocalUserId();
   const effectPaths = settings.effectPaths || [];
 
-  // Debug panel — subscribes to the shared store written by EffectsDrawingOverlay
-  const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [openGroups, setOpenGroups] = useState({ river: true, area: true, static: true, light: true });
   const toggleGroup = (g) => setOpenGroups(prev => ({ ...prev, [g]: !prev[g] }));
-  const [debugInfo, setDebugInfo] = useState(effectsDebugStore.info);
-  const debugWindowRef = useRef(null);
 
   // Renders the debug info list as an HTML string for the popped-out window
-  const renderDebugHtml = useCallback((info) => {
-    const esc = (s) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const rows = info.map((d, i) => {
-      const statusColor =
-        d.status === 'composited-ok' || d.status === 'found-pixels' ? '#4ade80' :
-        d.status === 'CRASHED' || d.status === 'media-error' ? '#f87171' :
-                d.status === 'unavailable' ? '#999' :
-        d.status === 'not-ready' ? '#facc15' :
-        d.status === 'info' ? '#60a5fa' : '#999';
-      const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
-      const fieldRows = Object.entries(d)
-        .filter(([k]) => !['id', 'type', 'status'].includes(k))
-        .map(([k, v]) => `<div class="field">${esc(k)}: <span class="val">${esc(v)}</span></div>`)
-        .join('');
-      return `
-        <div class="entry ${isSpecial ? 'special' : ''}">
-          <div class="entry-head">
-            <span class="entry-title">${isSpecial ? esc(d.type) : `#${i+1} ${esc(d.type)}`}</span>
-            <span class="entry-status" style="color:${statusColor}">${esc(d.status)}</span>
-          </div>
-          <div class="entry-body">${fieldRows}</div>
-        </div>`;
-    }).join('');
-
-    return `
-      <div class="header">
-        <span>🐛 EFFECT RENDER DEBUG (${info.length})</span>
-        <span class="ts">updated ${new Date().toLocaleTimeString()}</span>
-      </div>
-      ${info.length === 0 ? '<div class="empty">No effects placed yet.</div>' : rows}
-    `;
-  }, []);
-
-  // Opens (or focuses) a real detached OS window showing live debug info
-  const openDebugWindow = useCallback(() => {
-    if (debugWindowRef.current && !debugWindowRef.current.closed) {
-      debugWindowRef.current.focus();
-      return;
-    }
-    const win = window.open('', 'krajden_debug', 'width=520,height=760,resizable=yes');
-    if (!win) { toast.error('Popup blocked — allow popups for this app'); return; }
-    win.document.write(`
-      <!DOCTYPE html>
-      <html><head><title>Krajden Grid — Effect Debug</title>
-      <style>
-        * { box-sizing: border-box; }
-        body { margin:0; background:#0a0c0f; color:#e5e5e5; font-family: 'Courier New', monospace; font-size:11px; }
-        .header { position:sticky; top:0; background:#111214; border-bottom:1px solid rgba(202,160,85,0.3); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; color:#caa055; font-weight:bold; }
-        .ts { color:#666; font-weight:normal; font-size:9px; }
-        .empty { padding:20px; color:#666; text-align:center; }
-        .entry { border-bottom:1px solid rgba(255,255,255,0.08); padding:10px 14px; }
-        .entry.special { background:rgba(255,255,255,0.04); }
-        .entry-head { display:flex; justify-content:space-between; margin-bottom:4px; }
-        .entry-title { color:#ccc; font-weight:bold; }
-        .entry-body { color:#888; font-size:10px; line-height:1.6; }
-        .field { word-break:break-all; }
-        .val { color:#bbb; }
-      </style></head>
-      <body><div id="root"></div></body></html>
-    `);
-    win.document.getElementById('root').innerHTML = renderDebugHtml(debugInfo);
-    win.document.close();
-    debugWindowRef.current = win;
-  }, [debugInfo, renderDebugHtml]);
-
-  // Keep the popped-out window's content in sync whenever debug info updates
-  useEffect(() => {
-    const win = debugWindowRef.current;
-    if (win && !win.closed) {
-      const root = win.document.getElementById('root');
-      if (root) root.innerHTML = renderDebugHtml(debugInfo);
-    }
-  }, [debugInfo, renderDebugHtml]);
-
-  useEffect(() => {
-    return effectsDebugStore.subscribe(setDebugInfo);
-  }, []);
-
   // Active Tool & Settings
   const effectsEnabled = !!settings.effectsEnabled;
   const activeEffectUrl = settings.activeEffectUrl || BUILTIN_EFFECT_PRESETS[0]?.url;
@@ -2999,102 +2908,6 @@ export function EffectsControlPanel({ onClose }) {
         </div>
       )}
 
-      {/* ── Debug Panel (sidebar) ────────────────────────────────────────────── */}
-      <div className="mt-4 pt-3 border-t border-white/10">
-        <div className="flex gap-1">
-          <button
-            onClick={() => setDebugOpen(o => !o)}
-            className="flex-1 flex items-center justify-between px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono transition-all"
-          >
-            <span>🐛 Effect Render Debug</span>
-            <span>{debugOpen ? '▲' : '▼'}</span>
-          </button>
-          <button
-            onClick={openDebugWindow}
-            className="px-2 py-1.5 rounded bg-black/40 border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/10 text-[10px] font-mono"
-            title="Pop out debug panel into its own window"
-          >
-            📌 Tear Off
-          </button>
-          {debugInfo.length > 0 && (
-            <button
-              onClick={() => {
-                const text = JSON.stringify(debugInfo, null, 2);
-                navigator.clipboard?.writeText(text).then(
-                  () => toast.success('Debug info copied to clipboard'),
-                  () => toast.error('Copy failed — clipboard unavailable')
-                );
-              }}
-              className="px-2 py-1.5 rounded bg-black/40 border border-white/10 text-white/50 hover:text-[#caa055] hover:border-[#caa055]/30 text-[10px] font-mono"
-              title="Copy full debug JSON to clipboard"
-            >
-              📋
-            </button>
-          )}
-        </div>
-
-        {debugOpen && (
-          <div className="mt-2 max-h-[300px] overflow-y-auto bg-black/60 border border-white/10 rounded-lg p-2 text-[9px] font-mono">
-            {debugInfo.length === 0 && (
-              <div className="text-white/40">No effects placed yet, or debug data not flushed.</div>
-            )}
-            {debugInfo.map((d, i) => {
-              const statusColor =
-                d.status === 'composited-ok' || d.status === 'found-pixels' ? 'text-green-400' :
-                d.status === 'CRASHED' || d.status === 'media-error' ? 'text-red-400' :
-                d.status === 'unavailable' ? 'text-white/40' :
-                d.status === 'not-ready' ? 'text-yellow-400' :
-                d.status === 'info' ? 'text-blue-400' :
-                'text-white/60';
-              const isSpecial = d.type === 'ENVIRONMENT' || d.type === 'FULL_CANVAS_SCAN';
-              return (
-                <div key={d.id || i} className={`border-b border-white/10 py-1.5 last:border-0 ${isSpecial ? 'bg-white/5 -mx-2 px-2 rounded' : ''}`}>
-                  <div className="flex items-center justify-between">
-                    <span className={isSpecial ? 'text-[#caa055] font-bold' : 'text-white/80'}>
-                      {isSpecial ? d.type : `#${i+1} ${d.type}`}
-                    </span>
-                    <span className={statusColor}>{d.status}</span>
-                  </div>
-                  <div className="text-white/40 text-[8px] mt-0.5 space-y-0.5">
-                    {/* Per-effect fields */}
-                    {d.isShader !== undefined && <div>isShader: {String(d.isShader)} {d.shaderName ? `(${d.shaderName})` : ''}</div>}
-                    {d.category && <div>category: {d.category}</div>}
-                    {d.effectUrl && <div className="truncate">url: {d.effectUrl}</div>}
-                    {d.readyState !== undefined && d.readyState !== null && <div>readyState: {d.readyState}</div>}
-                    {d.videoWidth !== undefined && d.videoWidth !== null && <div>dimensions: {d.videoWidth}×{d.videoHeight || '?'}</div>}
-                    {d.naturalWidth !== undefined && d.naturalWidth !== null && <div>naturalWidth: {d.naturalWidth}</div>}
-                    {d.complete !== undefined && d.complete !== null && <div>img.complete: {String(d.complete)}</div>}
-                    {d.createdInline !== undefined && <div>createdInline: {String(d.createdInline)}</div>}
-                    {d.canvasSize && <div>canvasSize: {d.canvasSize}</div>}
-                    {d.tileSize && <div>tileSize: {d.tileSize}</div>}
-                    {d.opacity !== undefined && <div>opacity: {d.opacity}</div>}
-                    {d.samplePixel && <div className={d.samplePixel.includes(',0)') ? 'text-red-400' : 'text-green-400'}>samplePixel: {d.samplePixel}</div>}
-                    {/* ENVIRONMENT fields */}
-                    {d.canvasWH && <div>canvas element W×H: {d.canvasWH}</div>}
-                    {d.canvasClientWH && <div>canvas rendered size: {d.canvasClientWH}</div>}
-                    {d.containerClientWH && <div>container rendered size: {d.containerClientWH}</div>}
-                    {d.canvasCssDisplay && <div>canvas CSS display: {d.canvasCssDisplay}</div>}
-                    {d.canvasCssOpacity && <div>canvas CSS opacity: {d.canvasCssOpacity}</div>}
-                    {d.canvasCssVisibility && <div>canvas CSS visibility: {d.canvasCssVisibility}</div>}
-                    {d.canvasCssZIndex && <div>canvas CSS z-index: {d.canvasCssZIndex}</div>}
-                    {d.containerCssZIndex && <div>container CSS z-index: {d.containerCssZIndex}</div>}
-                    {d.containerCssPointerEvents && <div>container pointer-events: {d.containerCssPointerEvents}</div>}
-                    {d.devicePixelRatio !== undefined && <div>devicePixelRatio: {d.devicePixelRatio}</div>}
-                    {d.effectsEnabledFlag !== undefined && <div>effectsEnabled: {String(d.effectsEnabledFlag)}</div>}
-                    {d.effectPathCount !== undefined && <div>total effect paths: {d.effectPathCount}</div>}
-                    {d.mainCanvasMidPixel && <div>canvas center pixel (pre-draw): {d.mainCanvasMidPixel}</div>}
-                    {/* FULL_CANVAS_SCAN fields */}
-                    {d.nonTransparentPoints && <div className={d.status === 'ALL_TRANSPARENT' ? 'text-red-400' : 'text-green-400'}>non-transparent grid points: {d.nonTransparentPoints}</div>}
-                    {d.firstNonTransparent && <div>first non-transparent pixel: {d.firstNonTransparent}</div>}
-                    {d.errorDetail && <div className="text-red-400">error: {d.errorDetail}</div>}
-                    {d.note && <div className="text-white/50 italic">{d.note}</div>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
