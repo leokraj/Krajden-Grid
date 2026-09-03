@@ -430,7 +430,11 @@ export const GridProvider = ({ children }) => {
     });
   }, []);
 
-  // Listen for localStorage changes to sync cliparts across child windows
+  // Listen for localStorage changes to sync cliparts and scenes across child windows.
+  // Without this, a scene saved/toggled in the Controls window never reaches
+  // the Grid window's `scenes` state — meaning the eye toggle's visibility
+  // filter (which needs each hidden scene's saved item ids) silently has
+  // nothing to match against and hides nothing.
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key === 'overgrid_clipart_library') {
@@ -442,6 +446,16 @@ export const GridProvider = ({ children }) => {
           }
         } catch (err) {
           console.error('Failed to parse storage update:', err);
+        }
+      } else if (e.key === 'overgrid_scenes') {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setScenes(parsed);
+            appDebugStore.log({ category: 'sync', message: 'Synced scenes from another window', detail: `${parsed.length} scene(s)` });
+          }
+        } catch (err) {
+          console.error('Failed to parse scenes storage update:', err);
         }
       }
     };
