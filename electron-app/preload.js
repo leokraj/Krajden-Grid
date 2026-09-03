@@ -53,5 +53,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   closeControlsWindow: () => {
     ipcRenderer.send('close-controls-window');
+  },
+
+  openSectionWindow: (sectionId, label) => {
+    ipcRenderer.send('open-section-window', sectionId, label);
   }
 });
