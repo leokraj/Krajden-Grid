@@ -220,7 +220,7 @@ function createMainWindow(targetUrl) {
   });
 }
 
-function createChildWindow(mode, title, width = 450, height = 650, senderBounds = null) {
+function createChildWindow(mode, title, width = 450, height = 650, senderBounds = null, extraQuery = '') {
   if (childWindows[mode] && !childWindows[mode].isDestroyed()) {
     childWindows[mode].focus();
     return;
@@ -267,7 +267,7 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
 
   // Extract base domain to target the sub-routes in the SPA
   const baseUrl = currentAppUrl.split('/fullscreen')[0];
-  const modeUrl = `${baseUrl}/fullscreen?electron=1&mode=${mode}`;
+  const modeUrl = `${baseUrl}/fullscreen?electron=1&mode=${mode}${extraQuery}`;
   win.loadURL(modeUrl);
 
   childWindows[mode] = win;
@@ -460,6 +460,17 @@ ipcMain.on('open-controls-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
   createChildWindow('controls', 'Krajden Grid - Controls', 420, 800, bounds);
+});
+
+// Tear off a single controls section into its own window. Keyed uniquely per
+// section (mode: `section-<id>`) so multiple different sections can each have
+// their own open window simultaneously.
+ipcMain.on('open-section-window', (event, sectionId, label) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  const mode = `section-${sectionId}`;
+  const title = `Krajden Grid - ${label || sectionId}`;
+  createChildWindow(mode, title, 380, 560, bounds, `&section=${encodeURIComponent(sectionId)}&label=${encodeURIComponent(label || sectionId)}`);
 });
 
 ipcMain.on('close-controls-window', () => {
