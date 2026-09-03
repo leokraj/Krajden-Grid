@@ -58,7 +58,7 @@ import {
   Film,
 } from 'lucide-react';
 
-export const FloatingControls = ({ onClose }) => {
+export const FloatingControls = ({ onClose, sectionFilter }) => {
   const { 
     settings, 
     updateSettings, 
@@ -174,6 +174,7 @@ export const FloatingControls = ({ onClose }) => {
     dice: true,
     initiative: true,
     session: true,
+    ...(sectionFilter ? { [sectionFilter]: false } : {}),
   });
   const [undockedPanels, setUndockedPanels] = useState({
     layers: false,
@@ -544,7 +545,9 @@ export const FloatingControls = ({ onClose }) => {
         {!isGuest && (
           <>
             {/* Resolution */}
-            <div className="space-y-3" id="section-resolution">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'resolution' ? 'hidden' : ''}`} id="section-resolution">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
               <button onClick={() => toggleSection('resolution')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <Monitor className="w-3.5 h-3.5 text-[#caa055]/80" />
@@ -552,6 +555,17 @@ export const FloatingControls = ({ onClose }) => {
                 </span>
                 {collapsedSections.resolution ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('resolution', 'Resolution'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Resolution into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
               {!collapsedSections.resolution && (
                 <div className="space-y-3 pt-1">
                   <div className="grid grid-cols-2 gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
@@ -641,7 +655,9 @@ export const FloatingControls = ({ onClose }) => {
             </div>
 
             {/* Grid Layout */}
-            <div className="space-y-3" id="section-geometry">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
               <button onClick={() => toggleSection('geometry')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
@@ -649,6 +665,17 @@ export const FloatingControls = ({ onClose }) => {
                 </span>
                 {collapsedSections.geometry ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('geometry', 'Grid Layout'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Grid Layout into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
               {!collapsedSections.geometry && (
                 <div className="space-y-3.5 pt-1">
                   {/* Grid line toggle */}
@@ -748,7 +775,9 @@ export const FloatingControls = ({ onClose }) => {
             </div>
 
             {/* Grid Appearance */}
-            <div className="space-y-3" id="section-appearance">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'appearance' ? 'hidden' : ''}`} id="section-appearance">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
               <button onClick={() => toggleSection('appearance')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
@@ -756,6 +785,17 @@ export const FloatingControls = ({ onClose }) => {
                 </span>
                 {collapsedSections.appearance ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('appearance', 'Grid Appearance'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Grid Appearance into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
               {!collapsedSections.appearance && (
                 <div className="space-y-3 pt-1">
                   <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
@@ -810,7 +850,9 @@ export const FloatingControls = ({ onClose }) => {
             </div>
 
             {/* Grid Mask */}
-            <div className="space-y-3" id="section-mask">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'mask' ? 'hidden' : ''}`} id="section-mask">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
               <button onClick={() => toggleSection('mask')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <Grid3X3 className="w-3.5 h-3.5 text-[#caa055]/80" />
@@ -818,6 +860,17 @@ export const FloatingControls = ({ onClose }) => {
                 </span>
                 {collapsedSections.mask ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('mask', 'Grid Mask'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Grid Mask into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
               {!collapsedSections.mask && (
                 <div className="space-y-3 pt-1">
                   {/* Mask Mode Toggle */}
@@ -953,7 +1006,9 @@ export const FloatingControls = ({ onClose }) => {
             </div>
 
             {/* Effects Tool */}
-            <div className="space-y-3" id="section-effects">
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'effects' ? 'hidden' : ''}`} id="section-effects">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
               <button onClick={() => toggleSection('effects')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <span className="text-base leading-none">✨</span>
@@ -961,6 +1016,17 @@ export const FloatingControls = ({ onClose }) => {
                 </span>
                 {collapsedSections.effects ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('effects', 'Effects Tool'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Effects Tool into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
               {!collapsedSections.effects && (
                 <EffectsControlPanel />
               )}
@@ -970,8 +1036,10 @@ export const FloatingControls = ({ onClose }) => {
         )}
 
         {/* Measure Tools */}
-        <div className="space-y-3" id="section-measure">
-          <button onClick={() => toggleSection('measure')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'measure' ? 'hidden' : ''}`} id="section-measure">
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('measure')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Ruler className="w-3.5 h-3.5 text-[#caa055]/80" />
               Measure Tool
@@ -981,6 +1049,17 @@ export const FloatingControls = ({ onClose }) => {
               {collapsedSections.measure ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
             </div>
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('measure', 'Measure Tool'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Measure Tool into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.measure && (
             <div className="space-y-3 pt-1">
               <div className="grid grid-cols-4 gap-1">
@@ -1077,8 +1156,10 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Map Beacons & Pings Section */}
-        <div className="space-y-3" id="section-ping">
-          <button onClick={() => toggleSection('ping')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'ping' ? 'hidden' : ''}`} id="section-ping">
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('ping')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Radio className={`w-3.5 h-3.5 text-[#caa055]/80 ${settings.pingMode ? 'animate-pulse' : ''}`} />
               Map Beacons & Pings
@@ -1088,6 +1169,17 @@ export const FloatingControls = ({ onClose }) => {
               {collapsedSections.ping ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
             </div>
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('ping', 'Map Beacons & Pings'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Map Beacons & Pings into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.ping && (
             <div className="space-y-3 pt-1">
               <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
@@ -1182,14 +1274,27 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Drawing Mode */}
-        <div className="space-y-3" id="section-draw">
-          <button onClick={() => toggleSection('draw')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'draw' ? 'hidden' : ''}`} id="section-draw">
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('draw')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Pencil className="w-3.5 h-3.5 text-[#caa055]/80" />
               Drawing Mode
             </span>
             {collapsedSections.draw ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('draw', 'Drawing Mode'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Drawing Mode into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.draw && (
             <div className="space-y-3 pt-1">
               <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
@@ -1304,8 +1409,10 @@ export const FloatingControls = ({ onClose }) => {
 
         {/* Background Color */}
         {!isGuest && (
-          <div className="space-y-2" id="section-bgcolor">
-            <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+          <div className={`space-y-2 ${sectionFilter && sectionFilter !== 'bgcolor' ? 'hidden' : ''}`} id="section-bgcolor">
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
               <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                 <Palette className="w-3.5 h-3.5 text-[#caa055]/80" />
                 Background Color
@@ -1327,6 +1434,17 @@ export const FloatingControls = ({ onClose }) => {
                 {collapsedSections.bgcolor ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </div>
             </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgcolor', 'Background Color'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Background Color into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
             {!collapsedSections.bgcolor && (
               <div className="space-y-3 pt-1">
                 <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
@@ -1367,14 +1485,27 @@ export const FloatingControls = ({ onClose }) => {
         )}
 
         {/* Token Library */}
-        <div className="space-y-3" id="section-clipart">
-          <button onClick={() => toggleSection('clipart')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'clipart' ? 'hidden' : ''}`} id="section-clipart">
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('clipart')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Sticker className="w-3.5 h-3.5 text-[#caa055]/80" />
               Token Library
             </span>
             {collapsedSections.clipart ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('clipart', 'Token Library'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Token Library into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.clipart && (
             <div className="space-y-3.5 pt-1">
               {undockedPanels.clipart ? (
@@ -1520,15 +1651,28 @@ export const FloatingControls = ({ onClose }) => {
 
         {/* Map Importer */}
         {!isGuest && (
-        <div className="space-y-3" id="section-bgimage">
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'bgimage' ? 'hidden' : ''}`} id="section-bgimage">
           <div className="flex items-center justify-between w-full border-b border-[#caa055]/12 pb-2 mt-1">
-            <button onClick={() => toggleSection('bgimage')} className="flex items-center gap-2 text-left flex-1 bg-transparent hover:opacity-90 transition-opacity">
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('bgimage')} className="flex items-center gap-2 text-left flex-1 bg-transparent hover:opacity-90 transition-opacity">
               <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                 <Image className="w-3.5 h-3.5 text-[#caa055]/80" />
                 Map Importer
               </span>
               {collapsedSections.bgimage ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
             </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgimage', 'Map Importer'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Map Importer into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
             {(settings.backgroundLayers || []).length > 0 && (
               <button
                 onClick={toggleBgLayersLocked}
@@ -1618,14 +1762,27 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Scene Editor & Manager */}
-        <div id="section-scenes" className="space-y-3">
-          <button onClick={() => toggleSection('scenes')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div id="section-scenes" className={`space-y-3 ${sectionFilter && sectionFilter !== 'scenes' ? 'hidden' : ''}`}>
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('scenes')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Film className="w-3.5 h-3.5 text-[#caa055]/80" />
               Scene Editor & Scenes
             </span>
             {collapsedSections.scenes ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('scenes', 'Scene Editor & Scenes'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Scene Editor & Scenes into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.scenes && (
             <div className="space-y-2 pt-1">
               {undockedPanels.scenes ? (
@@ -1657,14 +1814,27 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Dice Roller */}
-        <div id="section-dice" className="space-y-3">
-          <button onClick={() => toggleSection('dice')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div id="section-dice" className={`space-y-3 ${sectionFilter && sectionFilter !== 'dice' ? 'hidden' : ''}`}>
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('dice')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Dices className="w-3.5 h-3.5 text-[#caa055]/80" />
               Virtual Dice Roller
             </span>
             {collapsedSections.dice ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('dice', 'Virtual Dice Roller'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Virtual Dice Roller into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.dice && (
             <div className="pt-1">
               <DiceRollerPanel
@@ -1681,14 +1851,27 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Initiative Tracker */}
-        <div id="section-initiative" className="space-y-3">
-          <button onClick={() => toggleSection('initiative')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div id="section-initiative" className={`space-y-3 ${sectionFilter && sectionFilter !== 'initiative' ? 'hidden' : ''}`}>
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('initiative')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Sword className="w-3.5 h-3.5 text-[#caa055]/80" />
               Initiative & Turn order
             </span>
             {collapsedSections.initiative ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('initiative', 'Initiative & Turn Order'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Initiative & Turn Order into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.initiative && (
             <div className="pt-1">
               <InitiativeTrackerPanel
@@ -1705,14 +1888,27 @@ export const FloatingControls = ({ onClose }) => {
         <Separator className="bg-[#caa055]/15" />
 
         {/* Collaborative Session */}
-        <div id="section-session" className="space-y-3">
-          <button onClick={() => toggleSection('session')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+        <div id="section-session" className={`space-y-3 ${sectionFilter && sectionFilter !== 'session' ? 'hidden' : ''}`}>
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('session')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
               <Globe className="w-3.5 h-3.5 text-[#caa055]/80" />
               Collaborative Session
             </span>
             {collapsedSections.session ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('session', 'Collaborative Session'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Collaborative Session into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           {!collapsedSections.session && (
             <div className="pt-1">
               <SessionControls />
