@@ -25,6 +25,8 @@ export function FullscreenContent() {
   // Parse mode and electron status from URL search parameters / electron API
   const queryParams = new URLSearchParams(window.location.search);
   const mode = queryParams.get('mode');
+  const sectionFilter = queryParams.get('section');
+  const sectionLabel = queryParams.get('label');
   const isElectron = !!(window.electronAPI?.isElectron || queryParams.get('electron') === '1');
 
   // Body background configuration
@@ -123,7 +125,7 @@ export function FullscreenContent() {
     );
   }
 
-  if (mode === 'controls') {
+  if (mode === 'controls' || sectionFilter) {
     return (
       <div className="fixed inset-0 bg-transparent text-white flex flex-col h-screen w-screen select-none p-1.5 animate-in fade-in duration-200" data-testid="fullscreen-controls-mode">
         <div className="flex-1 bg-[#0d0d0f] rounded-2xl border border-white/15 overflow-hidden shadow-2xl flex flex-col p-4">
@@ -132,7 +134,9 @@ export function FullscreenContent() {
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } : undefined}
           >
             <div className="flex items-center gap-1.5 select-none">
-              <span className="text-xs font-semibold text-white">🎛 Krajden Grid Controls</span>
+              <span className="text-xs font-semibold text-white">
+                {sectionFilter ? `📌 ${sectionLabel || sectionFilter}` : '🎛 Krajden Grid Controls'}
+              </span>
             </div>
             <button
               onClick={() => window.close()}
@@ -143,7 +147,7 @@ export function FullscreenContent() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
-            <FloatingControls onClose={() => window.close()} />
+            <FloatingControls onClose={() => window.close()} sectionFilter={sectionFilter} />
           </div>
         </div>
         <Toaster position="top-right" />
