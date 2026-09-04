@@ -125,12 +125,13 @@ export const FLOW_EFFECTS = new Set([
   'shader_lava_river', 'shader_mud_river', 'shader_water_river', 'shader_blood_stream', 'shader_acid_stream',
 ]);
 export const AREA_EFFECTS = new Set([
-  'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke',
-  'blood_splatter', 'acid_splatter', 'arcane',
+  'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke', 'arcane',
   'shader_fire', 'shader_ice', 'shader_lightning', 'shader_poison',
-  'shader_fog', 'shader_firefly', 'shader_wind', 'shader_smoke',
-  'shader_blood_splatter', 'shader_acid_splatter', 'shader_arcane',
+  'shader_fog', 'shader_firefly', 'shader_wind', 'shader_smoke', 'shader_arcane',
 ]);
+// NOTE: blood_splatter_small/large and acid_splatter are 'static' category
+// effects (placed once, no tiling/animation) — they're intentionally not in
+// AREA_EFFECTS, which is for animated fill-a-region shader effects.
 
 export function getEffectMode(effect) {
   if (!effect) return 'area';
@@ -963,7 +964,16 @@ export const BUILTIN_EFFECT_PRESETS = [
   { id:'shader_firefly',        name:'Fireflies',      shaderName:'firefly',        category:'area',  tags:['firefly','magic','fey','arcane'], description:'Multicolor glowing orbs — gold, blue, green', isShader:true,isPreset:true,previewColor:'#fbbf24',emoji:'✨' },
   { id:'shader_wind',           name:'Wind & Rain',    shaderName:'wind',           category:'area',  tags:['wind','rain','storm'],            description:'Diagonal rain streaks with wind lines',        isShader:true,isPreset:true,previewColor:'#bfdbfe',emoji:'💨' },
   { id:'shader_smoke',          name:'Smoke',          shaderName:'smoke',          category:'area',  tags:['smoke','cloud','dark'],           description:'Dense dark rolling smoke',                    isShader:true,isPreset:true,previewColor:'#6b7280',emoji:'💨' },
-  { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:null, url: null, category:'area', tags:['blood','combat','splatter'], description:'Dark red paint splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'blood', previewColor:'#dc2626', emoji:'🩸' },
+  { id:'blood_splatter_small', name:'Blood Splatter Small', shaderName:null,
+    url:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1',
+    imageUrl:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1',
+    category:'static', tags:['blood','combat','splatter','small'], description:'Scattered small blood spatter droplets',
+    isShader:false, isPreset:true, previewColor:'#dc2626', emoji:'🩸' },
+  { id:'blood_splatter_large', name:'Blood Splatter Large', shaderName:null,
+    url:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd',
+    imageUrl:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd',
+    category:'static', tags:['blood','combat','splatter','large'], description:'Single large dramatic blood splat',
+    isShader:false, isPreset:true, previewColor:'#dc2626', emoji:'🩸' },
   { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:null, url: null, category:'area', tags:['acid','toxic','splatter'],  description:'Neon green corrosive splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'acid',  previewColor:'#84cc16', emoji:'🟢' },
   { id:'shader_arcane',         name:'Arcane Portal',  shaderName:'arcane',         category:'area',  tags:['arcane','magic','portal'],        description:'Swirling purple-cyan portal energy',          isShader:true,isPreset:true,previewColor:'#8b5cf6',emoji:'🔮' },
   // FLOW effects — drawn along a path (click to place points, double-click to finish)
@@ -2726,8 +2736,8 @@ export function EffectsControlPanel({ onClose }) {
           const groups = [
             { key: 'river', label: '🌊 Rivers', match: (e) => e.category === 'flow' },
             { key: 'light', label: '🕯️ Lights', match: (e) => e.isLight },
-            { key: 'static', label: '🩸 Static', match: (e) => e.isStaticSvg },
-            { key: 'area', label: '🔥 Area Effects', match: (e) => e.category !== 'flow' && !e.isLight && !e.isStaticSvg },
+            { key: 'static', label: '🩸 Static', match: (e) => e.isStaticSvg || e.category === 'static' },
+            { key: 'area', label: '🔥 Area Effects', match: (e) => e.category !== 'flow' && e.category !== 'static' && !e.isLight && !e.isStaticSvg },
           ];
 
           return (
