@@ -999,6 +999,36 @@ function isVideoUrl(url) {
   return url.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(url);
 }
 
+// Classifies an effect's media as video/gif/image. The `category` field on
+// vault effects can mean two different things depending on where the effect
+// came from: an explicit type ('video'/'animated'/'image'/'static') from the
+// desktop app's own upload flow, OR a THEME tag ('fire'/'water'/'nature'/etc)
+// from the admin panel's category dropdown. Because of that ambiguity, this
+// never trusts an unrecognized category string alone — it always falls back
+// to checking the actual URL/data-URI for a real file extension, and only
+// defaults to "video" when there's a genuine video-shaped clue. An unknown,
+// extensionless URL defaults to image — a broken <img> is a much smaller
+// failure than trying to load a static PNG as if it were a <video>.
+function classifyEffectMedia(category, url) {
+  const u = url || '';
+  // Explicit, unambiguous types always win, regardless of URL shape.
+  if (category === 'image' || category === 'static') return { isVideo: false, isGif: false };
+  if (category === 'video') return { isVideo: true, isGif: false };
+  if (category === 'animated') return { isVideo: true, isGif: true };
+
+  // No explicit/trustworthy type — infer from the URL or data-URI itself.
+  if (u.startsWith('data:video/')) return { isVideo: true, isGif: false };
+  if (u.startsWith('data:image/gif')) return { isVideo: true, isGif: true };
+  if (u.startsWith('data:image/')) return { isVideo: false, isGif: false };
+  if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) return { isVideo: true, isGif: false };
+  if (/\.gif(\?|$)/i.test(u)) return { isVideo: true, isGif: true };
+  if (/\.(png|jpe?g|webp|svg)(\?|$)/i.test(u)) return { isVideo: false, isGif: false };
+
+  // Genuinely no clue at all (e.g. an extensionless Storage URL) — default
+  // to image, the safer failure mode.
+  return { isVideo: false, isGif: false };
+}
+
 function getLocalUserId() {
   try {
     let id = localStorage.getItem('krajden_user_id');
@@ -1097,39 +1127,26 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Media element management ──────────────────────────────────────────────
   useEffect(() => {
-    // Build a map of url -> category so we can detect video type properly
+    // Build a map of url -> category so classifyEffectMedia can detect type properly
     const neededMap = new Map();
     effectPaths.forEach(ep => {
       if (!ep.effectUrl) return;
-      // Try to find category from the effect definition if not on the path
-      let cat = ep.category;
-      if (!cat) {
-        // Look up from active effect settings if this is the active effect
-        if (ep.effectUrl === activeEffectUrl) cat = settings.activeEffectCategory;
-        // Default: treat Firebase Storage URLs with unknown category as video
-        if (!cat && ep.effectUrl.includes('firebasestorage')) cat = 'video';
-        if (!cat) cat = 'image';
-      }
+      // Pass through whatever category is actually known — no guessing here.
+      // classifyEffectMedia() is the single source of truth for video/gif/image
+      // detection and already falls back to real URL/extension clues safely.
+      const cat = ep.category || (ep.effectUrl === activeEffectUrl ? settings.activeEffectCategory : '') || '';
       neededMap.set(ep.effectUrl, cat);
     });
     if (activeEffectUrl) {
-      const activeCat = settings.activeEffectCategory || 
-        (activeEffectUrl.includes('firebasestorage') ? 'video' : 'image');
-      neededMap.set(activeEffectUrl, activeCat);
+      neededMap.set(activeEffectUrl, settings.activeEffectCategory || '');
     }
 
     neededMap.forEach((category, url) => {
       if (mediaRef.current.has(url)) return;
 
-      // Detect video: check category field first, then URL patterns
-      const isVid = category === 'video'
-        || category === 'animated'  // treat animated (GIF) same as video for canvas
-        || url.startsWith('data:video/')
-        || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)
-        || (url.includes('firebasestorage') && category !== 'image');
-      const isGif = category === 'animated'
-        || url.startsWith('data:image/gif')
-        || /\.gif(\?|$)/i.test(url);
+      // Detect video/gif/image using the shared classifier — never trusts an
+      // unrecognized category string, always falls back to real URL clues.
+      const { isVideo: isVid, isGif } = classifyEffectMedia(category, url);
 
       if (isVid) {
         const v = document.createElement('video');
@@ -1372,12 +1389,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       let createdInline = false;
       if (!media) {
         createdInline = true;
-        // Determine if video based on URL and category
-        const cat = effect.category || '';
-        const isVidUrl = cat === 'video' || cat === 'animated'
-          || url.startsWith('data:video/')
-          || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url)
-          || url.includes('firebasestorage');
+        const { isVideo: isVidUrl } = classifyEffectMedia(effect.category || '', url);
         if (isVidUrl) {
           const v = document.createElement('video');
           // No crossOrigin — see note in media manager useEffect above
@@ -2630,11 +2642,7 @@ export function EffectsControlPanel({ onClose }) {
         {(() => {
           const renderCard = (eff) => {
             const isSelected = settings.activeEffectId === eff.id;
-            const isVideo = !eff.isShader && (
-              eff.category === 'video' ||
-              isVideoUrl(eff.url || eff.imageUrl) ||
-              (eff.url || eff.imageUrl || '').includes('firebasestorage')
-            );
+            const isVideo = !eff.isShader && classifyEffectMedia(eff.category, eff.url || eff.imageUrl).isVideo;
 
             return (
               <div
