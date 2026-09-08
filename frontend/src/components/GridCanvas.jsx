@@ -43,6 +43,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     clearMeasurements,
     openRadialMenu,
     addCustomClipart,
+    addBackgroundLayer,
     hiddenItemKeys,
   } = useGrid();
   
@@ -498,7 +499,16 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       clipart = window.__draggedClipartItem;
     }
     if (!clipart) return;
-    
+
+    // Maps are tagged isMap:true at drag-start (see BackgroundLayersPanel.jsx)
+    // and must go through addBackgroundLayer — the same function double-click
+    // uses — so a dragged map gets the same correct default scale (~1920px,
+    // adjustable up to 5000px) instead of being treated as a small token.
+    if (clipart.isMap) {
+      addBackgroundLayer(clipart.url, clipart.name);
+      return;
+    }
+
     try {
       const url = clipart.imageUrl || clipart.url || clipart.imageData || clipart.image_data || clipart.src || '';
       const newClipart = {
@@ -520,7 +530,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     } catch (err) {
       console.error('Error dropping clipart:', err);
     }
-  }, [addPlacedClipart, sessionCode, broadcastAddClipart, addCustomClipart]);
+  }, [addPlacedClipart, sessionCode, broadcastAddClipart, addCustomClipart, addBackgroundLayer]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
