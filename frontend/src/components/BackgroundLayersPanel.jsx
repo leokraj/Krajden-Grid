@@ -670,6 +670,18 @@ export function BackgroundLayersPanel({ onUndock }) {
               {filteredMaps.map((map) => (
                 <div
                   key={map.id}
+                  draggable
+                  onDragStart={(e) => {
+                    // Marked isMap:true so GridCanvas.jsx's drop handler routes
+                    // this to addBackgroundLayer (full map scaling, up to
+                    // 5000px) instead of the token/clipart placement path.
+                    e.dataTransfer.setData('application/json', JSON.stringify({
+                      isMap: true,
+                      url: map.url,
+                      name: map.name,
+                    }));
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
                   onClick={() => {
                     addBackgroundLayer(map.url, map.name);
                     toast.success(`Loaded "${map.name}" onto tabletop grid!`);
@@ -682,6 +694,7 @@ export function BackgroundLayersPanel({ onUndock }) {
                       src={map.url}
                       alt={map.name}
                       referrerPolicy="no-referrer"
+                      draggable={false}
                       onError={(e) => {
                         e.target.onerror = null;
                         e.target.src = getFallbackMapSvg(map.name);
