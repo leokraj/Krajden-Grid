@@ -125,13 +125,12 @@ export const FLOW_EFFECTS = new Set([
   'shader_lava_river', 'shader_mud_river', 'shader_water_river', 'shader_blood_stream', 'shader_acid_stream',
 ]);
 export const AREA_EFFECTS = new Set([
-  'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke', 'arcane',
+  'fire', 'fog', 'poison', 'ice', 'lightning', 'firefly', 'wind', 'smoke',
+  'blood_splatter', 'acid_splatter', 'arcane',
   'shader_fire', 'shader_ice', 'shader_lightning', 'shader_poison',
-  'shader_fog', 'shader_firefly', 'shader_wind', 'shader_smoke', 'shader_arcane',
+  'shader_fog', 'shader_firefly', 'shader_wind', 'shader_smoke',
+  'shader_blood_splatter', 'shader_acid_splatter', 'shader_arcane',
 ]);
-// NOTE: blood_splatter_small/large and acid_splatter are 'static' category
-// effects (placed once, no tiling/animation) — they're intentionally not in
-// AREA_EFFECTS, which is for animated fill-a-region shader effects.
 
 export function getEffectMode(effect) {
   if (!effect) return 'area';
@@ -964,16 +963,7 @@ export const BUILTIN_EFFECT_PRESETS = [
   { id:'shader_firefly',        name:'Fireflies',      shaderName:'firefly',        category:'area',  tags:['firefly','magic','fey','arcane'], description:'Multicolor glowing orbs — gold, blue, green', isShader:true,isPreset:true,previewColor:'#fbbf24',emoji:'✨' },
   { id:'shader_wind',           name:'Wind & Rain',    shaderName:'wind',           category:'area',  tags:['wind','rain','storm'],            description:'Diagonal rain streaks with wind lines',        isShader:true,isPreset:true,previewColor:'#bfdbfe',emoji:'💨' },
   { id:'shader_smoke',          name:'Smoke',          shaderName:'smoke',          category:'area',  tags:['smoke','cloud','dark'],           description:'Dense dark rolling smoke',                    isShader:true,isPreset:true,previewColor:'#6b7280',emoji:'💨' },
-  { id:'blood_splatter_small', name:'Blood Splatter Small', shaderName:null,
-    url:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1',
-    imageUrl:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1',
-    category:'static', tags:['blood','combat','splatter','small'], description:'Scattered small blood spatter droplets',
-    isShader:false, isPreset:true, previewColor:'#dc2626', emoji:'🩸' },
-  { id:'blood_splatter_large', name:'Blood Splatter Large', shaderName:null,
-    url:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd',
-    imageUrl:'https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd',
-    category:'static', tags:['blood','combat','splatter','large'], description:'Single large dramatic blood splat',
-    isShader:false, isPreset:true, previewColor:'#dc2626', emoji:'🩸' },
+  { id:'shader_blood_splatter', name:'Blood Splatter', shaderName:null, url: null, category:'area', tags:['blood','combat','splatter'], description:'Dark red paint splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'blood', previewColor:'#dc2626', emoji:'🩸' },
   { id:'shader_acid_splatter',  name:'Acid Splatter',  shaderName:null, url: null, category:'area', tags:['acid','toxic','splatter'],  description:'Neon green corrosive splats', isShader:false, isPreset:true, isStaticSvg:true, svgKey:'acid',  previewColor:'#84cc16', emoji:'🟢' },
   { id:'shader_arcane',         name:'Arcane Portal',  shaderName:'arcane',         category:'area',  tags:['arcane','magic','portal'],        description:'Swirling purple-cyan portal energy',          isShader:true,isPreset:true,previewColor:'#8b5cf6',emoji:'🔮' },
   // FLOW effects — drawn along a path (click to place points, double-click to finish)
@@ -1775,18 +1765,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       return false;
     });
 
-    // SELECT TOOL: click to select placed effect for editing
-    if (effectTool === 'select') {
+    // Click-to-select: a plain click directly on an existing effect selects
+    // it, the same way clicking a token or map already works — no dedicated
+    // "Select" tool or Ctrl+click required. Excluded for the eraser tool,
+    // since its whole job is clicking on effects to erase them — treating
+    // that click as a selection instead would make erasing impossible.
+    if (effectTool !== 'eraser') {
       const hit = hitTest(pt);
-      updateSettings({ selectedEffectPathId: hit?.id || null });
-      return;
-    }
-
-    // CTRL+CLICK: select in any mode without switching tools
-    if (e.ctrlKey || e.metaKey) {
-      const hit = hitTest(pt);
-      updateSettings({ selectedEffectPathId: hit?.id || null });
-      return;
+      if (hit) {
+        updateSettings({ selectedEffectPathId: hit.id });
+        return;
+      }
+      // Clicked empty space with something selected — deselect before
+      // proceeding to the tool's normal painting behavior below.
+      if (settings.selectedEffectPathId) {
+        updateSettings({ selectedEffectPathId: null });
+      }
     }
 
     // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
@@ -1898,9 +1892,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   // ── Cursor ────────────────────────────────────────────────────────────────
   const cursorStyle = !effectsEnabled    ? 'default'
-    : !hasActiveEffect && effectTool !== 'select' && effectTool !== 'eraser' ? 'not-allowed'
+    : !hasActiveEffect && effectTool !== 'eraser' ? 'not-allowed'
     : effectMode === 'flow'               ? 'crosshair'
-    : effectTool === 'select'             ? 'pointer'
     : effectTool === 'eraser'             ? 'cell'
     : effectTool === 'marquee'            ? 'crosshair'
     : 'none';
@@ -1921,6 +1914,13 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={() => setMousePos(null)}
+        onContextMenu={(e) => {
+          // Right-click exits Effects Painting Mode entirely — a quick escape
+          // hatch instead of hunting for the toggle in the panel. Suppress
+          // the browser's default context menu since it has no use here.
+          e.preventDefault();
+          if (effectsEnabled) updateSettings({ effectsEnabled: false });
+        }}
         onTouchStart={handleMouseDown}
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
@@ -1934,7 +1934,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       )}
 
       {/* No effect selected warning */}
-      {effectsEnabled && !hasActiveEffect && effectTool !== 'select' && (
+      {effectsEnabled && !hasActiveEffect && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-xs font-mono pointer-events-none" style={{ zIndex: 20 }}>
           Select an effect from the panel first
         </div>
@@ -2376,7 +2376,6 @@ export function EffectsControlPanel({ onClose }) {
         </Label>
         <div className="grid grid-cols-4 gap-1 p-1 bg-black/50 border border-white/10 rounded-lg">
           {[
-            { id: 'select', label: 'Select', icon: '🎯', desc: 'Click to Select & Edit' },
             { id: 'brush', label: 'Brush', icon: '🖌️', desc: 'Freehand Paint' },
             { id: 'marquee', label: 'Marquee', icon: '🔲', desc: 'Box Window' },
             { id: 'bezier', label: 'Bezier', icon: '〰️', desc: 'Curved Path' },
@@ -2736,8 +2735,8 @@ export function EffectsControlPanel({ onClose }) {
           const groups = [
             { key: 'river', label: '🌊 Rivers', match: (e) => e.category === 'flow' },
             { key: 'light', label: '🕯️ Lights', match: (e) => e.isLight },
-            { key: 'static', label: '🩸 Static', match: (e) => e.isStaticSvg || e.category === 'static' },
-            { key: 'area', label: '🔥 Area Effects', match: (e) => e.category !== 'flow' && e.category !== 'static' && !e.isLight && !e.isStaticSvg },
+            { key: 'static', label: '🩸 Static', match: (e) => e.isStaticSvg },
+            { key: 'area', label: '🔥 Area Effects', match: (e) => e.category !== 'flow' && !e.isLight && !e.isStaticSvg },
           ];
 
           return (
