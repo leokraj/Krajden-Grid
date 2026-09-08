@@ -1821,7 +1821,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     }
   }, [effectsEnabled, effectMode, effectTool, flowPoints, hasActiveEffect,
       activeEffectUrl, activeEffectId, activeShader, brushSize, opacity,
-      tile, tileScale, blendMode, getCoords, addEffectPath]);
+      tile, tileScale, blendMode, getCoords, addEffectPath,
+      effectPaths, settings.selectedEffectPathId, updateSettings]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing) return;
