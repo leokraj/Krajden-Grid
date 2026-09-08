@@ -16,6 +16,12 @@ export const PlacedBackgroundImage = ({
   const dragStartRef = useRef({ x: 0, y: 0 });
   const layerStartRef = useRef({ x: 0, y: 0 });
 
+  // Where the controls panel appears — set to wherever the user actually
+  // clicked to select this layer, so adjusting a huge (e.g. 5000px) map
+  // never means hunting across the screen for a panel anchored to the
+  // layer's center, which can be far outside the visible viewport.
+  const [clickOffset, setClickOffset] = useState(null);
+
   // Slider local adjust states for high performance (no lag)
   const [localScale, setLocalScale] = useState(layer.scale ?? 300);
   const [localRotation, setLocalRotation] = useState(layer.rotation ?? 0);
@@ -35,6 +41,12 @@ export const PlacedBackgroundImage = ({
   useEffect(() => {
     valuesRef.current = { scale: localScale, rotation: localRotation, opacity: localOpacity };
   }, [localScale, localRotation, localOpacity]);
+
+  // Clear the recorded click position on deselect, so a fresh selection
+  // (whether by click or some other means) starts from a clean state.
+  useEffect(() => {
+    if (!isSelected) setClickOffset(null);
+  }, [isSelected]);
 
   // Sync local states when not actively adjusting
   useEffect(() => {
@@ -83,6 +95,15 @@ export const PlacedBackgroundImage = ({
       e.preventDefault();
     }
     e.stopPropagation();
+
+    // Record where the click happened, relative to the layer's own local
+    // origin (the containerRef div, which sits exactly at layer.x/layer.y).
+    // getBoundingClientRect() already accounts for any canvas pan/zoom, so
+    // this stays accurate regardless of view state.
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setClickOffset({ x: clientX - rect.left, y: clientY - rect.top });
+    }
 
     onSelect();
     setIsDragging(true);
@@ -224,11 +245,25 @@ export const PlacedBackgroundImage = ({
       {isSelected && canEdit && (
         <div
           className="absolute flex items-center gap-4 bg-black/95 rounded-xl px-4 py-2.5 shadow-2xl border border-white/20 whitespace-nowrap z-50 control-handle"
-          style={{
-            bottom: `${handleBottomOffset}px`,
-            left: '0px',
-            transform: 'translateX(-50%)',
-          }}
+          style={
+            clickOffset
+              ? {
+                  // Anchored to exactly where the user clicked to select this
+                  // layer — bottom-center of the panel sits at that point, so
+                  // it always appears right above the cursor regardless of
+                  // how large the map is or where its center happens to be.
+                  left: `${clickOffset.x}px`,
+                  top: `${clickOffset.y}px`,
+                  transform: 'translate(-50%, calc(-100% - 16px))',
+                }
+              : {
+                  // Fallback for selections that didn't originate from a
+                  // direct click on the layer (e.g. programmatic selection).
+                  bottom: `${handleBottomOffset}px`,
+                  left: '0px',
+                  transform: 'translateX(-50%)',
+                }
+          }
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onMouseMove={(e) => e.stopPropagation()}
