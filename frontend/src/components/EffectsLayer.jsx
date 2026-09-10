@@ -832,7 +832,7 @@ const SHADER_FRAGS = {
       float rot=u_rotation;
       vec2 ruv=vec2(uv.x*cos(rot)-uv.y*sin(rot), uv.x*sin(rot)+uv.y*cos(rot));
       float dist=length(ruv);
-      float angle=atan(ruv.x, max(ruv.y,0.0001));
+      float angle=atan(ruv.x, ruv.y);
       float coneEdge=u_coneAngle;
       float soft=max(u_softness,0.02);
       // Cone mask: inside the angular spread, softened at the edges
@@ -1827,7 +1827,17 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       const pt = { x: ptX, y: ptY };
 
       const hit = findHit(pt);
-      if (!hit) return;
+      if (!hit) {
+        // Clicked empty space with something selected — deselect, regardless
+        // of Painting Mode state. This is the reliable path for "click away
+        // to deselect after right-click confirms a light's config" — the
+        // canvas's own deselect logic only runs while Painting Mode is on,
+        // which isn't guaranteed at this point.
+        if (selectedIdRef.current) {
+          updateSettings({ selectedEffectPathId: null });
+        }
+        return;
+      }
 
       // Don't hijack painting: if a paint tool would otherwise use this
       // exact click to draw (Painting Mode on, a preset active, not the
