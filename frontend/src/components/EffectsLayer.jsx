@@ -1756,6 +1756,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // `document` isn't affected by that: it always fires first, regardless of
   // which element ends up as the actual target.
   const dragEffectRef = useRef(null); // { id, startX, startY, origRect, origPoints }
+  const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
   // right-click confirms and exits config mode (without also exiting
@@ -1915,11 +1916,25 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       updateEffectPath(targetId, { flickerSpeed: next });
     };
 
+    // Confirming config mode via right-click needs to be document-level too
+    // — the floating property panel that appears above a just-placed light
+    // sits directly where you'd naturally right-click to confirm, and being
+    // a higher z-index element without its own contextmenu handler, it was
+    // silently swallowing the click before it ever reached the canvas.
+    const handleContextMenuConfirm = (e) => {
+      if (!configuringLightIdRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setConfiguringLightId(null);
+    };
+
     document.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     document.addEventListener('mousedown', handleMiddleDown, true);
+    document.addEventListener('contextmenu', handleContextMenuConfirm, true);
     return () => {
       document.removeEventListener('wheel', handleWheel, { capture: true });
       document.removeEventListener('mousedown', handleMiddleDown, true);
+      document.removeEventListener('contextmenu', handleContextMenuConfirm, true);
     };
   }, [updateEffectPath]);
 
@@ -1927,6 +1942,23 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const handleMouseMove = useCallback((e) => {
     const pt = getCoords(e);
     setMousePos(pt);
+
+    // Rotating a just-placed light by dragging — aim it like a spotlight.
+    // Takes priority over everything else while active.
+    if (placingLightRotateRef.current) {
+      const { id, apexX, apexY } = placingLightRotateRef.current;
+      const dx = pt.x - apexX;
+      const dy = pt.y - apexY;
+      // Only start rotating once the drag has moved a few pixels — avoids
+      // snapping to a jittery angle from near-zero-length initial movement.
+      if (Math.hypot(dx, dy) > 6) {
+        // atan2 measured from "straight down" (the cone's default direction)
+        const angleRad = Math.atan2(dx, dy);
+        updateEffectPath(id, { rotation: Math.round((angleRad * 180 / Math.PI) * 10) / 10 });
+      }
+      return;
+    }
+
     if (!isDrawing) return;
 
     if (effectTool === 'marquee') {
@@ -1948,7 +1980,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         return [...prev, pt];
       });
     }
-  }, [isDrawing, effectTool, brushSize, effectPaths, getCoords, updateSettings]);
+  }, [isDrawing, effectTool, brushSize, effectPaths, getCoords, updateSettings, updateEffectPath]);
 
   const handleMouseDown = useCallback((e) => {
     if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
@@ -2011,7 +2043,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       // onContextMenu handler below).
       updateSettings({ selectedEffectPathId: newId });
       setConfiguringLightId(newId);
-      setIsDrawing(false);
+      // If the mouse is still held down and moves before release, that
+      // drag rotates the light — aiming it like a real spotlight. The
+      // apex (click point) is the pivot; angle is measured from there.
+      placingLightRotateRef.current = { id: newId, apexX: pt.x, apexY: pt.y };
+      setIsDrawing(true);
       return;
     }
     if (effectTool === 'marquee') {
@@ -2027,6 +2063,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
 
   const handleMouseUp = useCallback(() => {
+    if (placingLightRotateRef.current) {
+      placingLightRotateRef.current = null;
+      setIsDrawing(false);
+      return;
+    }
     if (!isDrawing) return;
     setIsDrawing(false);
 
@@ -2119,15 +2160,11 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         onMouseLeave={() => setMousePos(null)}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (configuringLightId) {
-            // Confirm and exit light config mode — this right-click was
-            // meant to finish adjusting the light just placed, not to
-            // exit Painting Mode entirely (so you can keep placing more).
-            setConfiguringLightId(null);
-            return;
-          }
-          // Otherwise: right-click exits Effects Painting Mode entirely —
-          // a quick escape hatch instead of hunting for the toggle in the panel.
+          // Config-mode confirm is handled by the document-level listener
+          // above (more reliable — not blocked by the floating property
+          // panel that sits over the just-placed light). This just handles
+          // the plain "exit Painting Mode" case.
+          if (configuringLightId) return;
           if (effectsEnabled) updateSettings({ effectsEnabled: false });
         }}
         onTouchStart={handleMouseDown}
@@ -3100,6 +3137,24 @@ export function EffectsControlPanel({ onClose }) {
                             <input type="color" value={ep.lightColor || '#ffcc44'}
                               onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
                               className="w-full h-6 rounded cursor-pointer border-0" />
+                          </div>
+                          <div>
+                            <div className="flex justify-between mb-0.5">
+                              <span className="text-[8px] text-white/50 uppercase tracking-wider">Width (X)</span>
+                              <span className="text-[8px] text-white/40 font-mono">{Math.round(ep.rect?.width ?? 100)}px</span>
+                            </div>
+                            <input type="range" min="20" max="1500" step="5" value={ep.rect?.width ?? 100}
+                              onChange={e => updateEffectPath(ep.id, { rect: { ...ep.rect, width: parseInt(e.target.value) } })}
+                              className="w-full h-1 accent-[#caa055]" />
+                          </div>
+                          <div>
+                            <div className="flex justify-between mb-0.5">
+                              <span className="text-[8px] text-white/50 uppercase tracking-wider">Height (Y)</span>
+                              <span className="text-[8px] text-white/40 font-mono">{Math.round(ep.rect?.height ?? 100)}px</span>
+                            </div>
+                            <input type="range" min="20" max="1500" step="5" value={ep.rect?.height ?? 100}
+                              onChange={e => updateEffectPath(ep.id, { rect: { ...ep.rect, height: parseInt(e.target.value) } })}
+                              className="w-full h-1 accent-[#caa055]" />
                           </div>
                           <div>
                             <div className="flex justify-between mb-0.5">
