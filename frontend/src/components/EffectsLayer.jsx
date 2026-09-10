@@ -1720,6 +1720,63 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
   }, [cW, cH]);
 
+  // Click-to-select effects even when Painting Mode is OFF. This can't live
+  // in the canvas's own onMouseDown — when effectsEnabled is false the
+  // overlay has pointerEvents:'none' so it never becomes the click target at
+  // all, and clicks pass straight through to whatever's underneath (tokens,
+  // maps). A capture-phase listener on `document` isn't affected by that:
+  // it always fires first, regardless of which element ends up as the
+  // actual target. On a hit, we select the effect and stop the event so it
+  // doesn't also select/drag whatever's beneath; on a miss, we don't touch
+  // it and the click continues through normally.
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+      const clientY = e.touches?.[0]?.clientY ?? e.clientY;
+      // Ignore clicks outside the grid area entirely
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return;
+      const scaleX = cW / rect.width;
+      const scaleY = cH / rect.height;
+      const pt = { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+
+      const currentEffectPaths = settings.effectPaths || [];
+      const hit = [...currentEffectPaths].reverse().find(ep => {
+        if (ep.type === 'marquee' && ep.rect) {
+          return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
+              && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
+        }
+        if (ep.points) {
+          const w = (ep.width || 60) / 2 + 10;
+          return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
+        }
+        return false;
+      });
+
+      if (hit) {
+        // Don't hijack painting: if a paint tool would otherwise use this
+        // exact click to draw (Painting Mode on, a preset active, not the
+        // eraser), let the canvas's own handler take it as normal — this
+        // listener only steps in for selection when nothing else would.
+        const paintingWouldHandleThis = effectsEnabled && hasActiveEffect && effectTool !== 'eraser';
+        if (!paintingWouldHandleThis) {
+          e.preventDefault();
+          e.stopPropagation();
+          updateSettings({ selectedEffectPathId: hit.id });
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleGlobalClick, true);
+    document.addEventListener('touchstart', handleGlobalClick, true);
+    return () => {
+      document.removeEventListener('mousedown', handleGlobalClick, true);
+      document.removeEventListener('touchstart', handleGlobalClick, true);
+    };
+  }, [cW, cH, settings.effectPaths, effectsEnabled, hasActiveEffect, effectTool, updateSettings]);
+
   // ── Mouse handlers ────────────────────────────────────────────────────────
   const handleMouseMove = useCallback((e) => {
     const pt = getCoords(e);
@@ -1752,35 +1809,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     e.preventDefault();
     const pt = getCoords(e);
 
-    // Helper: hit test all placed effects
-    const hitTest = (pt) => [...effectPaths].reverse().find(ep => {
-      if (ep.type === 'marquee' && ep.rect) {
-        return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
-            && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
-      }
-      if (ep.points) {
-        const w = (ep.width || 60) / 2 + 10; // small tolerance
-        return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
-      }
-      return false;
-    });
-
-    // Click-to-select: a plain click directly on an existing effect selects
-    // it, the same way clicking a token or map already works — no dedicated
-    // "Select" tool or Ctrl+click required. Excluded for the eraser tool,
-    // since its whole job is clicking on effects to erase them — treating
-    // that click as a selection instead would make erasing impossible.
-    if (effectTool !== 'eraser') {
-      const hit = hitTest(pt);
-      if (hit) {
-        updateSettings({ selectedEffectPathId: hit.id });
-        return;
-      }
-      // Clicked empty space with something selected — deselect before
-      // proceeding to the tool's normal painting behavior below.
-      if (settings.selectedEffectPathId) {
-        updateSettings({ selectedEffectPathId: null });
-      }
+    // Selecting an existing effect is handled globally now (see the
+    // document-level listener above, which works even when Painting Mode
+    // is off). By the time we get here, either nothing was hit, or the
+    // click was deliberately deferred to painting because a preset is
+    // armed and ready. Either way: if something was selected and we're
+    // about to paint, clear the selection first.
+    if (effectTool !== 'eraser' && settings.selectedEffectPathId) {
+      updateSettings({ selectedEffectPathId: null });
     }
 
     // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
