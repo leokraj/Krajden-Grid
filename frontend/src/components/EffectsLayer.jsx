@@ -1655,8 +1655,19 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         }
       }
 
-      // Brush cursor ring
-      if (effectsEnabled && mousePos && effectMode === 'area' && effectTool !== 'marquee') {
+      // Brush cursor ring — shows the current width for both area painting
+      // (brush/bezier) AND flow/river drawing, since rivers also use
+      // brushSize to set their stroke width. Previously only shown in area
+      // mode, so river presets (Lava River, Water River, etc.) never got
+      // this size feedback even though they use the exact same value.
+      // Note: effectTool is irrelevant once in flow mode (flow always uses
+      // click-drag regardless of the brush/marquee/bezier selection), so the
+      // marquee exclusion only applies to area mode.
+      const showBrushRing = effectsEnabled && mousePos && (
+        (effectMode === 'area' && effectTool !== 'marquee') ||
+        effectMode === 'flow'
+      );
+      if (showBrushRing) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(mousePos.x, mousePos.y, brushSize / 2, 0, Math.PI * 2);
