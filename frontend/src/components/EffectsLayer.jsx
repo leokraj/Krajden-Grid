@@ -823,6 +823,7 @@ const SHADER_FRAGS = {
   spotlight_cone: `precision mediump float;
     uniform float u_time; uniform vec2 u_res; uniform vec3 u_lightColor;
     uniform float u_coneAngle; uniform float u_softness; uniform float u_rotation;
+    uniform float u_flickerSpeed; // 0 = none, 1 = slow, 2 = fast
     varying vec2 v_uv;
     void main(){
       // Origin at top-center, cone opens downward by default (rotation adjusts direction)
@@ -838,11 +839,24 @@ const SHADER_FRAGS = {
       float angMask=1.0-smoothstep(coneEdge*(1.0-soft), coneEdge*(1.0+soft), abs(angle));
       // Falloff along the beam length
       float lenFalloff=smoothstep(1.4,0.0,dist);
-      // Subtle flicker for torch-like warmth
-      float flicker=0.96+0.04*sin(u_time*3.3)*sin(u_time*1.7+1.0);
-      float beam=angMask*lenFalloff*flicker;
+      // Soft fade toward the rendered texture's own edges, so the light never
+      // shows a hard rectangular cutoff regardless of cone angle/softness —
+      // independent of angMask/lenFalloff, this only fades the outer 8% of
+      // the UV rectangle on every side.
+      float edgeFade = smoothstep(0.0,0.08,v_uv.x) * smoothstep(1.0,0.92,v_uv.x)
+                      * smoothstep(0.0,0.08,v_uv.y) * smoothstep(1.0,0.92,v_uv.y);
+      // Randomized, organic flicker — layered sine waves at incommensurate
+      // frequencies approximate candlelight-style jitter rather than a clean
+      // pulse. Speed 0 disables it entirely; speed 2 ("fast") still stays
+      // well short of a strobe by capping amplitude and frequency.
+      float baseSpeed = u_flickerSpeed > 1.5 ? 2.2 : 1.0; // fast vs slow time-scale
+      float t = u_time * baseSpeed;
+      float flickerNoise = sin(t*2.3)*0.5 + sin(t*5.1+1.7)*0.3 + sin(t*11.3+4.2)*0.2;
+      float flickerAmt = u_flickerSpeed > 0.5 ? (u_flickerSpeed > 1.5 ? 0.16 : 0.08) : 0.0;
+      float flicker = 1.0 + flickerNoise * flickerAmt;
+      float beam=angMask*lenFalloff*flicker*edgeFade;
       // Bright core near the origin
-      float core=smoothstep(0.25,0.0,dist)*0.5;
+      float core=smoothstep(0.25,0.0,dist)*0.5*edgeFade;
       vec3 c=mix(u_lightColor*0.35,u_lightColor,clamp(beam+core,0.,1.));
       float a=clamp(beam+core,0.,1.);
       gl_FragColor=vec4(c,a);
@@ -912,7 +926,7 @@ function getWebGLRenderer(shaderName) {
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res'), lightColor: gl.getUniformLocation(prog,'u_lightColor'), coneAngle: gl.getUniformLocation(prog,'u_coneAngle'), softness: gl.getUniformLocation(prog,'u_softness'), rotation: gl.getUniformLocation(prog,'u_rotation') };
+  const loc = { pos: gl.getAttribLocation(prog,'a_pos'), time: gl.getUniformLocation(prog,'u_time'), res: gl.getUniformLocation(prog,'u_res'), lightColor: gl.getUniformLocation(prog,'u_lightColor'), coneAngle: gl.getUniformLocation(prog,'u_coneAngle'), softness: gl.getUniformLocation(prog,'u_softness'), rotation: gl.getUniformLocation(prog,'u_rotation'), flickerSpeed: gl.getUniformLocation(prog,'u_flickerSpeed') };
   _glCache[shaderName] = { gl, canvas, prog, buf, loc, t0: Date.now() };
   return _glCache[shaderName];
 }
@@ -941,6 +955,9 @@ export function renderShaderToCanvas(ctx, shaderName, x, y, w, h, opacity, blend
   if (loc.coneAngle) gl.uniform1f(loc.coneAngle, (lightParams?.coneAngle ?? 30) * Math.PI / 180);
   if (loc.softness)  gl.uniform1f(loc.softness, lightParams?.softness ?? 0.4);
   if (loc.rotation)  gl.uniform1f(loc.rotation, (lightParams?.rotation ?? 0) * Math.PI / 180);
+  // flickerSpeed: 0 = none, 1 = slow, 2 = fast. Defaults to slow (matches
+  // the original always-on subtle torch flicker these presets had before).
+  if (loc.flickerSpeed) gl.uniform1f(loc.flickerSpeed, lightParams?.flickerSpeed ?? 1);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
@@ -1336,7 +1353,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           const tc = tmp.getContext('2d');
           renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, 'normal',
             lightColor ? hexToRgb(lightColor) : null,
-            { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation });
+            { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation, flickerSpeed: effect.flickerSpeed });
           tc.globalCompositeOperation = 'destination-in';
           tc.drawImage(mask, 0, 0);
 
@@ -1366,7 +1383,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         }
         renderShaderToCanvas(tc, shaderName, bx, by, Math.max(1,bw), Math.max(1,bh), 1, bm,
           lightColor ? hexToRgb(lightColor) : null,
-          { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation });
+          { coneAngle: effect.coneAngle, softness: effect.softness, rotation: effect.rotation, flickerSpeed: effect.flickerSpeed });
         tc.globalCompositeOperation = 'destination-in';
         tc.drawImage(mask, 0, 0);
 
@@ -1731,31 +1748,34 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
   }, [cW, cH]);
 
-  // Click-to-select effects even when Painting Mode is OFF. This can't live
-  // in the canvas's own onMouseDown — when effectsEnabled is false the
-  // overlay has pointerEvents:'none' so it never becomes the click target at
-  // all, and clicks pass straight through to whatever's underneath (tokens,
-  // maps). A capture-phase listener on `document` isn't affected by that:
-  // it always fires first, regardless of which element ends up as the
-  // actual target. On a hit, we select the effect and stop the event so it
-  // doesn't also select/drag whatever's beneath; on a miss, we don't touch
-  // it and the click continues through normally.
+  // Click-to-select effects even when Painting Mode is OFF, AND drag-to-move
+  // once selected. Neither can live in the canvas's own onMouseDown — when
+  // effectsEnabled is false the overlay has pointerEvents:'none' so it never
+  // becomes the click target at all, and clicks/drags pass straight through
+  // to whatever's underneath (tokens, maps). A capture-phase listener on
+  // `document` isn't affected by that: it always fires first, regardless of
+  // which element ends up as the actual target.
+  const dragEffectRef = useRef(null); // { id, startX, startY, origRect, origPoints }
+  const effectPathsRef = useRef(settings.effectPaths || []);
+  const selectedIdRef = useRef(settings.selectedEffectPathId);
+  useEffect(() => { effectPathsRef.current = settings.effectPaths || []; }, [settings.effectPaths]);
+  useEffect(() => { selectedIdRef.current = settings.selectedEffectPathId; }, [settings.selectedEffectPathId]);
+
   useEffect(() => {
-    const handleGlobalClick = (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
+    const toLocalPt = (e) => {
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
       const clientX = e.touches?.[0]?.clientX ?? e.clientX;
       const clientY = e.touches?.[0]?.clientY ?? e.clientY;
-      // Ignore clicks outside the grid area entirely
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return;
       const scaleX = cW / rect.width;
       const scaleY = cH / rect.height;
-      const pt = { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+      return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY, clientX, clientY, rect };
+    };
 
-      const currentEffectPaths = settings.effectPaths || [];
-      const hit = [...currentEffectPaths].reverse().find(ep => {
+    const findHit = (pt) => {
+      const currentEffectPaths = effectPathsRef.current;
+      return [...currentEffectPaths].reverse().find(ep => {
         if (ep.type === 'marquee' && ep.rect) {
           return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
               && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
@@ -1766,27 +1786,127 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         }
         return false;
       });
+    };
 
-      if (hit) {
-        // Don't hijack painting: if a paint tool would otherwise use this
-        // exact click to draw (Painting Mode on, a preset active, not the
-        // eraser), let the canvas's own handler take it as normal — this
-        // listener only steps in for selection when nothing else would.
-        const paintingWouldHandleThis = effectsEnabled && hasActiveEffect && effectTool !== 'eraser';
-        if (!paintingWouldHandleThis) {
-          e.preventDefault();
-          e.stopPropagation();
-          updateSettings({ selectedEffectPathId: hit.id });
-        }
+    const handleDragMove = (e) => {
+      const drag = dragEffectRef.current;
+      if (!drag) return;
+      const local = toLocalPt(e);
+      if (!local) return;
+      const dx = local.x - drag.startX;
+      const dy = local.y - drag.startY;
+      if (drag.origRect) {
+        updateEffectPath(drag.id, { rect: { ...drag.origRect, x: drag.origRect.x + dx, y: drag.origRect.y + dy } });
+      } else if (drag.origPoints) {
+        updateEffectPath(drag.id, { points: drag.origPoints.map(p => ({ x: p.x + dx, y: p.y + dy })) });
       }
     };
+    const handleDragEnd = () => {
+      dragEffectRef.current = null;
+      document.removeEventListener('mousemove', handleDragMove, true);
+      document.removeEventListener('mouseup', handleDragEnd, true);
+      document.removeEventListener('touchmove', handleDragMove, true);
+      document.removeEventListener('touchend', handleDragEnd, true);
+    };
+
+    const handleGlobalClick = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      const local = toLocalPt(e);
+      if (!local) return;
+      const { rect, clientX, clientY, x: ptX, y: ptY } = local;
+      // Ignore clicks outside the grid area entirely
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return;
+      const pt = { x: ptX, y: ptY };
+
+      const hit = findHit(pt);
+      if (!hit) return;
+
+      // Don't hijack painting: if a paint tool would otherwise use this
+      // exact click to draw (Painting Mode on, a preset active, not the
+      // eraser), let the canvas's own handler take it as normal — this
+      // listener only steps in for selection/dragging when nothing else would.
+      const paintingWouldHandleThis = effectsEnabled && hasActiveEffect && effectTool !== 'eraser';
+      if (paintingWouldHandleThis) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (selectedIdRef.current === hit.id) {
+        // Already selected — start dragging it instead of re-selecting.
+        dragEffectRef.current = {
+          id: hit.id,
+          startX: pt.x,
+          startY: pt.y,
+          origRect: hit.rect ? { ...hit.rect } : null,
+          origPoints: hit.points ? hit.points.map(p => ({ ...p })) : null,
+        };
+        document.addEventListener('mousemove', handleDragMove, true);
+        document.addEventListener('mouseup', handleDragEnd, true);
+        document.addEventListener('touchmove', handleDragMove, true);
+        document.addEventListener('touchend', handleDragEnd, true);
+      } else {
+        updateSettings({ selectedEffectPathId: hit.id });
+      }
+    };
+
     document.addEventListener('mousedown', handleGlobalClick, true);
     document.addEventListener('touchstart', handleGlobalClick, true);
     return () => {
       document.removeEventListener('mousedown', handleGlobalClick, true);
       document.removeEventListener('touchstart', handleGlobalClick, true);
+      document.removeEventListener('mousemove', handleDragMove, true);
+      document.removeEventListener('mouseup', handleDragEnd, true);
+      document.removeEventListener('touchmove', handleDragMove, true);
+      document.removeEventListener('touchend', handleDragEnd, true);
     };
-  }, [cW, cH, settings.effectPaths, effectsEnabled, hasActiveEffect, effectTool, updateSettings]);
+    // Deliberately NOT depending on settings.effectPaths or
+    // settings.selectedEffectPathId — both change continuously during a
+    // drag (each move calls updateEffectPath), and depending on them here
+    // would tear down and never re-attach the drag listeners after the
+    // very first pixel of movement. Fresh values are read via refs instead.
+  }, [cW, cH, effectsEnabled, hasActiveEffect, effectTool, updateSettings, updateEffectPath]);
+
+  // Middle-mouse scroll cycles through a preset color palette, and a middle
+  // mouse click cycles flicker speed (none → slow → fast → none) — both
+  // only act on the currently selected effect, and only when it's a light.
+  // Works regardless of Painting Mode, same as select/drag above.
+  useEffect(() => {
+    const LIGHT_COLOR_PALETTE = ['#ffcc44', '#ffffff', '#66ccff', '#ff4444', '#66ff66', '#cc66ff', '#ff9933'];
+
+    const handleWheel = (e) => {
+      const selId = selectedIdRef.current;
+      if (!selId) return;
+      const ep = effectPathsRef.current.find(p => p.id === selId);
+      if (!ep || !ep.isLight) return;
+      e.preventDefault();
+      const currentColor = ep.lightColor || '#ffcc44';
+      const idx = LIGHT_COLOR_PALETTE.indexOf(currentColor);
+      const step = e.deltaY > 0 ? 1 : -1;
+      const nextIdx = ((idx === -1 ? 0 : idx) + step + LIGHT_COLOR_PALETTE.length) % LIGHT_COLOR_PALETTE.length;
+      updateEffectPath(selId, { lightColor: LIGHT_COLOR_PALETTE[nextIdx] });
+    };
+
+    const handleMiddleDown = (e) => {
+      if (e.button !== 1) return;
+      const selId = selectedIdRef.current;
+      if (!selId) return;
+      const ep = effectPathsRef.current.find(p => p.id === selId);
+      if (!ep || !ep.isLight) return;
+      // Suppress the browser's default middle-click autoscroll behavior
+      // whenever we're about to cycle a light's flicker speed instead.
+      e.preventDefault();
+      const current = ep.flickerSpeed ?? 1;
+      const next = (current + 1) % 3; // 0 = none, 1 = slow, 2 = fast, loops
+      updateEffectPath(selId, { flickerSpeed: next });
+    };
+
+    document.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    document.addEventListener('mousedown', handleMiddleDown, true);
+    return () => {
+      document.removeEventListener('wheel', handleWheel, { capture: true });
+      document.removeEventListener('mousedown', handleMiddleDown, true);
+    };
+  }, [updateEffectPath]);
 
   // ── Mouse handlers ────────────────────────────────────────────────────────
   const handleMouseMove = useCallback((e) => {
@@ -1845,15 +1965,25 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // that preset's shader and default beam parameters (cone angle, softness)
     if (activePreset?.isLight) {
       const r = brushSize * 1.5;
+      const isCone = activePreset.shaderName === 'spotlight_cone';
+      // The spotlight_cone shader's apex is at the top-center of its
+      // rendered rectangle (UV 0.5, 0.0) — so for cone lights, the click
+      // point should be the TOP of the rect, not its center, otherwise the
+      // beam's actual tip ends up above where you clicked. Radial lights
+      // (scenic_light) are omnidirectional, so they stay centered as before.
+      const rect = isCone
+        ? { x: pt.x - r, y: pt.y, width: r * 2, height: r * 2 }
+        : { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 };
       addEffectPath({
         type: 'marquee',
-        rect: { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 },
+        rect,
         effectUrl: null, effectId: activeEffectId,
         isShader: true, shaderName: activePreset.shaderName, isLight: true,
         lightColor: '#ffcc44',
         coneAngle: activePreset.coneAngle ?? 30,
         softness: activePreset.softness ?? 0.4,
         rotation: 0,
+        flickerSpeed: 1, // starts on slow flicker, matching the previous always-on subtle flicker
         opacity, blendMode: 'lighter',
       });
       setIsDrawing(false);
@@ -2932,6 +3062,31 @@ export function EffectsControlPanel({ onClose }) {
                             <input type="color" value={ep.lightColor || '#ffcc44'}
                               onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
                               className="w-full h-6 rounded cursor-pointer border-0" />
+                          </div>
+                          <div>
+                            <div className="flex justify-between mb-0.5">
+                              <span className="text-[8px] text-white/50 uppercase tracking-wider">Flicker</span>
+                              <span className="text-[8px] text-white/40 font-mono">
+                                {['None', 'Slow', 'Fast'][ep.flickerSpeed ?? 1]}
+                              </span>
+                            </div>
+                            <div className="flex gap-1">
+                              {[0, 1, 2].map(speed => (
+                                <button key={speed}
+                                  onClick={() => updateEffectPath(ep.id, { flickerSpeed: speed })}
+                                  className={`flex-1 text-[8px] py-1 rounded border transition-colors ${
+                                    (ep.flickerSpeed ?? 1) === speed
+                                      ? 'bg-[#caa055]/20 border-[#caa055] text-[#caa055]'
+                                      : 'bg-black/40 border-white/10 text-white/40 hover:text-white/70'
+                                  }`}
+                                >
+                                  {['None', 'Slow', 'Fast'][speed]}
+                                </button>
+                              ))}
+                            </div>
+                            <span className="text-[7px] text-white/30 italic block mt-0.5">
+                              Tip: middle-click a selected light to cycle this
+                            </span>
                           </div>
                           {ep.shaderName === 'spotlight_cone' && (<>
                             <div>
