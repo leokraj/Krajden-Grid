@@ -1756,6 +1756,13 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // `document` isn't affected by that: it always fires first, regardless of
   // which element ends up as the actual target.
   const dragEffectRef = useRef(null); // { id, startX, startY, origRect, origPoints }
+  // Light config mode: right after placing a light, it's "armed" for quick
+  // adjustment — scroll cycles color, middle-click cycles flicker speed,
+  // right-click confirms and exits config mode (without also exiting
+  // Painting Mode, unlike a normal right-click).
+  const [configuringLightId, setConfiguringLightId] = useState(null);
+  const configuringLightIdRef = useRef(null);
+  useEffect(() => { configuringLightIdRef.current = configuringLightId; }, [configuringLightId]);
   const effectPathsRef = useRef(settings.effectPaths || []);
   const selectedIdRef = useRef(settings.selectedEffectPathId);
   useEffect(() => { effectPathsRef.current = settings.effectPaths || []; }, [settings.effectPaths]);
@@ -1846,6 +1853,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         document.addEventListener('touchend', handleDragEnd, true);
       } else {
         updateSettings({ selectedEffectPathId: hit.id });
+        if (configuringLightIdRef.current && configuringLightIdRef.current !== hit.id) {
+          setConfiguringLightId(null);
+        }
       }
     };
 
@@ -1874,30 +1884,35 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     const LIGHT_COLOR_PALETTE = ['#ffcc44', '#ffffff', '#66ccff', '#ff4444', '#66ff66', '#cc66ff', '#ff9933'];
 
     const handleWheel = (e) => {
-      const selId = selectedIdRef.current;
-      if (!selId) return;
-      const ep = effectPathsRef.current.find(p => p.id === selId);
+      const targetId = configuringLightIdRef.current || selectedIdRef.current;
+      if (!targetId) return;
+      const ep = effectPathsRef.current.find(p => p.id === targetId);
       if (!ep || !ep.isLight) return;
+      // Stop this scroll from also reaching the canvas's own brush-size
+      // wheel listener — without this, adjusting a light's color also
+      // changed the brush size at the same time.
       e.preventDefault();
+      e.stopPropagation();
       const currentColor = ep.lightColor || '#ffcc44';
       const idx = LIGHT_COLOR_PALETTE.indexOf(currentColor);
       const step = e.deltaY > 0 ? 1 : -1;
       const nextIdx = ((idx === -1 ? 0 : idx) + step + LIGHT_COLOR_PALETTE.length) % LIGHT_COLOR_PALETTE.length;
-      updateEffectPath(selId, { lightColor: LIGHT_COLOR_PALETTE[nextIdx] });
+      updateEffectPath(targetId, { lightColor: LIGHT_COLOR_PALETTE[nextIdx] });
     };
 
     const handleMiddleDown = (e) => {
       if (e.button !== 1) return;
-      const selId = selectedIdRef.current;
-      if (!selId) return;
-      const ep = effectPathsRef.current.find(p => p.id === selId);
+      const targetId = configuringLightIdRef.current || selectedIdRef.current;
+      if (!targetId) return;
+      const ep = effectPathsRef.current.find(p => p.id === targetId);
       if (!ep || !ep.isLight) return;
       // Suppress the browser's default middle-click autoscroll behavior
       // whenever we're about to cycle a light's flicker speed instead.
       e.preventDefault();
+      e.stopPropagation();
       const current = ep.flickerSpeed ?? 1;
       const next = (current + 1) % 3; // 0 = none, 1 = slow, 2 = fast, loops
-      updateEffectPath(selId, { flickerSpeed: next });
+      updateEffectPath(targetId, { flickerSpeed: next });
     };
 
     document.addEventListener('wheel', handleWheel, { passive: false, capture: true });
@@ -1949,6 +1964,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (effectTool !== 'eraser' && settings.selectedEffectPathId) {
       updateSettings({ selectedEffectPathId: null });
     }
+    if (configuringLightId) setConfiguringLightId(null);
 
     // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
     // Scroll wheel changes width while drawing
@@ -1966,15 +1982,18 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (activePreset?.isLight) {
       const r = brushSize * 1.5;
       const isCone = activePreset.shaderName === 'spotlight_cone';
-      // The spotlight_cone shader's apex is at the top-center of its
-      // rendered rectangle (UV 0.5, 0.0) — so for cone lights, the click
-      // point should be the TOP of the rect, not its center, otherwise the
-      // beam's actual tip ends up above where you clicked. Radial lights
-      // (scenic_light) are omnidirectional, so they stay centered as before.
+      // The spotlight_cone shader's apex renders at the BOTTOM edge of its
+      // rectangle in canvas space (confirmed by testing — the shader's UV
+      // v=0 maps to the bottom, not the top, of the drawn rect). So the
+      // click point should be the rect's bottom edge, with the rect
+      // extending upward from there. Radial lights (scenic_light) are
+      // omnidirectional, so they stay centered on the click as before.
       const rect = isCone
-        ? { x: pt.x - r, y: pt.y, width: r * 2, height: r * 2 }
+        ? { x: pt.x - r, y: pt.y - r * 2, width: r * 2, height: r * 2 }
         : { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 };
+      const newId = `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`;
       addEffectPath({
+        id: newId,
         type: 'marquee',
         rect,
         effectUrl: null, effectId: activeEffectId,
@@ -1986,6 +2005,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         flickerSpeed: 1, // starts on slow flicker, matching the previous always-on subtle flicker
         opacity, blendMode: 'lighter',
       });
+      // Enter light config mode: scroll wheel cycles color, middle-click
+      // cycles flicker speed, right-click confirms and exits config mode
+      // (without also exiting Painting Mode — see the canvas's
+      // onContextMenu handler below).
+      updateSettings({ selectedEffectPathId: newId });
+      setConfiguringLightId(newId);
       setIsDrawing(false);
       return;
     }
@@ -1999,7 +2024,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   }, [effectsEnabled, effectMode, effectTool, flowPoints, hasActiveEffect,
       activeEffectUrl, activeEffectId, activeShader, brushSize, opacity,
       tile, tileScale, blendMode, getCoords, addEffectPath,
-      effectPaths, settings.selectedEffectPathId, updateSettings]);
+      effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing) return;
@@ -2093,16 +2118,29 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         onMouseUp={handleMouseUp}
         onMouseLeave={() => setMousePos(null)}
         onContextMenu={(e) => {
-          // Right-click exits Effects Painting Mode entirely — a quick escape
-          // hatch instead of hunting for the toggle in the panel. Suppress
-          // the browser's default context menu since it has no use here.
           e.preventDefault();
+          if (configuringLightId) {
+            // Confirm and exit light config mode — this right-click was
+            // meant to finish adjusting the light just placed, not to
+            // exit Painting Mode entirely (so you can keep placing more).
+            setConfiguringLightId(null);
+            return;
+          }
+          // Otherwise: right-click exits Effects Painting Mode entirely —
+          // a quick escape hatch instead of hunting for the toggle in the panel.
           if (effectsEnabled) updateSettings({ effectsEnabled: false });
         }}
         onTouchStart={handleMouseDown}
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
       />
+
+      {/* Light config mode: shows right after placing a light */}
+      {configuringLightId && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-[9px] font-mono pointer-events-none" style={{ zIndex: 20 }}>
+          💡 Scroll to change color · Middle-click to cycle flicker · Right-click to confirm
+        </div>
+      )}
 
       {/* Flow mode: drag hint + scroll wheel tip */}
       {effectsEnabled && effectMode === 'flow' && (
