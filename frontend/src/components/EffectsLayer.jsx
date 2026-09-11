@@ -826,8 +826,12 @@ const SHADER_FRAGS = {
     uniform float u_flickerSpeed; // 0 = none, 1 = slow, 2 = fast
     varying vec2 v_uv;
     void main(){
-      // Origin at top-center, cone opens downward by default (rotation adjusts direction)
-      vec2 uv=v_uv-vec2(0.5,0.0);
+      // Origin at the rectangle's center — critical for rotation: an
+      // off-center apex meant the beam could extend past the fixed
+      // rectangle's edges once rotated away from its default direction,
+      // getting clipped. Centering it lets the beam sweep the full 360°
+      // without ever leaving the rendered area, regardless of rotation.
+      vec2 uv=v_uv-vec2(0.5,0.5);
       uv.x*=u_res.x/max(u_res.y,1.);
       float rot=u_rotation;
       vec2 ruv=vec2(uv.x*cos(rot)-uv.y*sin(rot), uv.x*sin(rot)+uv.y*cos(rot));
@@ -1819,6 +1823,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     const handleGlobalClick = (e) => {
       if (e.button !== undefined && e.button !== 0) return;
+      // Clicks on UI chrome (the floating property bar, its sliders and
+      // buttons — anything marked .control-handle) must never be treated as
+      // canvas hit-tests. React's own e.stopPropagation() on those elements
+      // does NOT stop this listener — it's a native document-level capture
+      // listener, which always runs before React's synthetic event system
+      // even processes the click. Without this check, clicking Delete (or
+      // any slider) on an already-selected effect's bar was being hijacked
+      // as a drag-start instead of reaching the button's own onClick.
+      if (e.target && e.target.closest && e.target.closest('.control-handle')) return;
       const local = toLocalPt(e);
       if (!local) return;
       const { rect, clientX, clientY, x: ptX, y: ptY } = local;
@@ -1895,6 +1908,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     const LIGHT_COLOR_PALETTE = ['#ffcc44', '#ffffff', '#66ccff', '#ff4444', '#66ff66', '#cc66ff', '#ff9933'];
 
     const handleWheel = (e) => {
+      if (e.target && e.target.closest && e.target.closest('.control-handle')) return;
       const targetId = configuringLightIdRef.current || selectedIdRef.current;
       if (!targetId) return;
       const ep = effectPathsRef.current.find(p => p.id === targetId);
@@ -1913,6 +1927,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     const handleMiddleDown = (e) => {
       if (e.button !== 1) return;
+      if (e.target && e.target.closest && e.target.closest('.control-handle')) return;
       const targetId = configuringLightIdRef.current || selectedIdRef.current;
       if (!targetId) return;
       const ep = effectPathsRef.current.find(p => p.id === targetId);
@@ -2022,17 +2037,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // Scenic/spotlight lights — single click places the light, carrying over
     // that preset's shader and default beam parameters (cone angle, softness)
     if (activePreset?.isLight) {
-      const r = brushSize * 1.5;
       const isCone = activePreset.shaderName === 'spotlight_cone';
-      // The spotlight_cone shader's apex renders at the BOTTOM edge of its
-      // rectangle in canvas space (confirmed by testing — the shader's UV
-      // v=0 maps to the bottom, not the top, of the drawn rect). So the
-      // click point should be the rect's bottom edge, with the rect
-      // extending upward from there. Radial lights (scenic_light) are
-      // omnidirectional, so they stay centered on the click as before.
-      const rect = isCone
-        ? { x: pt.x - r, y: pt.y - r * 2, width: r * 2, height: r * 2 }
-        : { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 };
+      // The shader's apex is now centered in its rectangle (not at an edge),
+      // so both light types place the same way: rect centered on the click.
+      // Cone lights get a larger default rect than radial ones, since the
+      // apex-to-edge reach is now half of what it was with an edge-anchored
+      // apex — this keeps the visible beam length comparable to before.
+      const r = brushSize * (isCone ? 3 : 1.5);
+      const rect = { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2 };
       const newId = `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`;
       addEffectPath({
         id: newId,
@@ -2227,7 +2239,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
         return (
           <div
-            className="absolute flex items-center gap-2 bg-black/95 rounded-xl px-3 py-2 shadow-2xl border border-white/20 whitespace-nowrap"
+            className="control-handle absolute flex items-center gap-2 bg-black/95 rounded-xl px-3 py-2 shadow-2xl border border-white/20 whitespace-nowrap"
             style={{
               left: barX,
               top: barY,
@@ -2238,6 +2250,45 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             }}
             onMouseDown={e => e.stopPropagation()}
           >
+            {/* Light-specific controls — shown here since this floating bar
+                is what actually appears immediately on selection, not the
+                sidebar list further down */}
+            {ep.isLight && (<>
+              <div className="w-px h-5 bg-white/20" />
+              <input type="color" value={ep.lightColor || '#ffcc44'}
+                onChange={e => updateEffectPath(ep.id, { lightColor: e.target.value })}
+                className="w-6 h-6 rounded cursor-pointer border-0" title="Light color" />
+              <div className="w-px h-5 bg-white/20" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-white/50">rotation</span>
+                <input type="range" min="0" max="360" step="5" value={ep.rotation ?? 0}
+                  onChange={e => updateEffectPath(ep.id, { rotation: parseInt(e.target.value) })}
+                  className="w-16 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                />
+                <span className="text-[9px] text-[#caa055] font-mono w-7">{ep.rotation ?? 0}°</span>
+              </div>
+              {ep.shaderName === 'spotlight_cone' && (<>
+                <div className="w-px h-5 bg-white/20" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-white/50">cone</span>
+                  <input type="range" min="5" max="80" step="1" value={ep.coneAngle ?? 30}
+                    onChange={e => updateEffectPath(ep.id, { coneAngle: parseInt(e.target.value) })}
+                    className="w-14 h-1.5 rounded-full appearance-none cursor-pointer accent-[#caa055]"
+                  />
+                  <span className="text-[9px] text-[#caa055] font-mono w-7">{ep.coneAngle ?? 30}°</span>
+                </div>
+              </>)}
+              <div className="w-px h-5 bg-white/20" />
+              <select value={ep.flickerSpeed ?? 1}
+                onChange={e => updateEffectPath(ep.id, { flickerSpeed: parseInt(e.target.value) })}
+                className="bg-black/60 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white cursor-pointer"
+                title="Flicker speed">
+                <option value={0}>No flicker</option>
+                <option value={1}>Slow flicker</option>
+                <option value={2}>Fast flicker</option>
+              </select>
+            </>)}
+
             {/* Opacity — all effects */}
             <div className="flex items-center gap-1.5">
               <span className="text-[9px] text-white/50">opacity</span>
