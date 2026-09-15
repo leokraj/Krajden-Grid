@@ -483,10 +483,13 @@ export const GridProvider = ({ children }) => {
 
   const addDrawingPath = useCallback((path) => {
     const tagged = { ...path, id: path.id || `draw_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
-    setSettings((prev) => ({
-      ...prev,
-      drawingPaths: [...(prev.drawingPaths || []), tagged]
-    }));
+    setSettings((prev) => {
+      const nextPaths = [...(prev.drawingPaths || []), tagged];
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { drawingPaths: nextPaths } });
+      }
+      return { ...prev, drawingPaths: nextPaths };
+    });
     setUndoStack([]);
     appDebugStore.log({ category: 'drawing', message: 'Drew a stroke', detail: `points: ${(path.points || []).length}, color: ${path.color || 'default'}` });
   }, []);
@@ -773,42 +776,63 @@ export const GridProvider = ({ children }) => {
 
   // ── Effects tool ───────────────────────────────────────────────────────────
   const addEffectPath = useCallback((effectPath) => {
-    setSettings((prev) => ({
-      ...prev,
-      effectPaths: [...(prev.effectPaths || []), {
+    setSettings((prev) => {
+      const newPath = {
         ...effectPath,
         id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
-      }],
-    }));
+      };
+      const nextPaths = [...(prev.effectPaths || []), newPath];
+      // This broadcast was missing entirely — effects added in the Grid
+      // window never reached other windows' settings.effectPaths at all,
+      // which is why the Scene Editor (living in the detached Controls
+      // window) always captured 0 effects even with effects visibly on
+      // the grid: it was reading its own, never-updated local copy.
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: nextPaths } });
+      }
+      return { ...prev, effectPaths: nextPaths };
+    });
   }, []);
 
   const updateEffectPath = useCallback((id, updates) => {
-    setSettings((prev) => ({
-      ...prev,
-      effectPaths: (prev.effectPaths || []).map((e) => e.id === id ? { ...e, ...updates } : e),
-    }));
+    setSettings((prev) => {
+      const nextPaths = (prev.effectPaths || []).map((e) => e.id === id ? { ...e, ...updates } : e);
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: nextPaths } });
+      }
+      return { ...prev, effectPaths: nextPaths };
+    });
   }, []);
 
   const removeEffectPath = useCallback((id) => {
-    setSettings((prev) => ({
-      ...prev,
-      effectPaths: (prev.effectPaths || []).filter((e) => e.id !== id),
-    }));
+    setSettings((prev) => {
+      const nextPaths = (prev.effectPaths || []).filter((e) => e.id !== id);
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: nextPaths } });
+      }
+      return { ...prev, effectPaths: nextPaths };
+    });
   }, []);
 
   const undoLastEffectPath = useCallback(() => {
     setSettings((prev) => {
       const paths = prev.effectPaths || [];
       if (paths.length === 0) return prev;
-      return {
-        ...prev,
-        effectPaths: paths.slice(0, paths.length - 1),
-      };
+      const nextPaths = paths.slice(0, paths.length - 1);
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: nextPaths } });
+      }
+      return { ...prev, effectPaths: nextPaths };
     });
   }, []);
 
   const clearEffectPaths = useCallback(() => {
-    setSettings((prev) => ({ ...prev, effectPaths: [] }));
+    setSettings((prev) => {
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: [] } });
+      }
+      return { ...prev, effectPaths: [] };
+    });
   }, []);
 
   const groupSelectedCliparts = useCallback(() => {
@@ -1313,19 +1337,25 @@ export const GridProvider = ({ children }) => {
 
   const addMaskPath = useCallback((path) => {
     const tagged = { ...path, id: path.id || `mask_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
-    setSettings((prev) => ({
-      ...prev,
-      maskPaths: [...(prev.maskPaths || []), tagged]
-    }));
+    setSettings((prev) => {
+      const nextPaths = [...(prev.maskPaths || []), tagged];
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { maskPaths: nextPaths } });
+      }
+      return { ...prev, maskPaths: nextPaths };
+    });
     appDebugStore.log({ category: 'mask', message: 'Painted a fog of war stroke' });
   }, []);
 
   const addMaskRect = useCallback((rect) => {
     const tagged = { ...rect, id: rect.id || `maskrect_${Date.now()}_${Math.random().toString(36).substring(2,7)}` };
-    setSettings((prev) => ({
-      ...prev,
-      maskRects: [...(prev.maskRects || []), tagged]
-    }));
+    setSettings((prev) => {
+      const nextRects = [...(prev.maskRects || []), tagged];
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: { maskRects: nextRects } });
+      }
+      return { ...prev, maskRects: nextRects };
+    });
     appDebugStore.log({ category: 'mask', message: 'Added a fog of war rectangle' });
   }, []);
 
