@@ -1725,10 +1725,16 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     rafRef.current = requestAnimationFrame(render);
     return () => { alive = false; cancelAnimationFrame(rafRef.current); };
+    // hiddenItemKeys was missing here entirely — the render loop's closure
+    // over it was frozen at mount time and never refreshed, so toggling a
+    // scene's visibility correctly changed the underlying data but the
+    // actual per-frame rendering never picked it up, making effects appear
+    // to never hide no matter how many times the eye was toggled.
   }, [effectPaths, isDrawing, currentStroke, marqueeStart, marqueeCurrent,
       activeEffectUrl, activeShader, effectMode, effectTool, brushSize,
       opacity, tile, tileScale, blendMode, hasActiveEffect, effectsEnabled,
-      mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape]);
+      mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape,
+      hiddenItemKeys]);
 
 
   // Flush debug info to the shared store periodically (not every frame — too expensive)
