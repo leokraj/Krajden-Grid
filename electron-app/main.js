@@ -263,7 +263,12 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     },
     movable: true,
     resizable: true,
-    alwaysOnTop: false,
+    // The main grid window has no always-on-top setting, so without this,
+    // clicking into the grid to place a token or draw would bring it to
+    // the front and bury the Controls/Effects/Tokens/Maps windows behind
+    // it — annoying since these are meant to work like tool palettes that
+    // stay accessible while you interact with the grid.
+    alwaysOnTop: true,
     hasShadow: true,
     backgroundColor: '#0d0f12',
     webPreferences: {
