@@ -5,7 +5,6 @@ import {
   Film,
   Plus,
   Save,
-  Play,
   Copy,
   Trash2,
   Edit2,
@@ -268,22 +267,17 @@ export function SceneEditorPanel({ onUndock }) {
                     </span>
                   )}
 
-                  {/* Compact icon actions — always visible: Load, Save Here.
-                      Everything else tucked into the ⋮ menu to keep the row
-                      to a single compact line, Photoshop-layer style. */}
+                  {/* Compact icon actions — click the name to load (no
+                      separate Play button needed). The floppy disk exports
+                      just this layer to its own file. Everything else
+                      (rename, overwrite, duplicate, delete) lives in ⋮ to
+                      keep the row to one compact line. */}
                   {!isEditing && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
-                        onClick={() => loadScene(scene.id)}
+                        onClick={() => exportSingleScene(scene.id)}
                         className="p-1 text-slate-500 hover:text-[#caa055] hover:bg-white/5 rounded transition"
-                        title="Load this scene onto the grid"
-                      >
-                        <Play className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => updateScene(scene.id, { data: captureCanvasData() })}
-                        className="p-1 text-slate-500 hover:text-[#caa055] hover:bg-white/5 rounded transition"
-                        title="Overwrite this scene with the current canvas"
+                        title="Save this layer to its own file"
                       >
                         <Save className="w-3 h-3" />
                       </button>
@@ -298,7 +292,7 @@ export function SceneEditorPanel({ onUndock }) {
                         {isMenuOpen && (
                           <div
                             ref={menuRef}
-                            className="absolute right-0 top-full mt-1 w-36 bg-[#111214] border border-white/10 rounded-md shadow-2xl z-50 py-1 text-[10px]"
+                            className="absolute right-0 top-full mt-1 w-40 bg-[#111214] border border-white/10 rounded-md shadow-2xl z-50 py-1 text-[10px]"
                           >
                             <button
                               onClick={() => { handleStartRename(scene); }}
@@ -307,10 +301,10 @@ export function SceneEditorPanel({ onUndock }) {
                               <Edit2 className="w-3 h-3" /> Rename
                             </button>
                             <button
-                              onClick={() => { exportSingleScene(scene.id); setOpenMenuId(null); }}
+                              onClick={() => { updateScene(scene.id, { data: captureCanvasData() }); setOpenMenuId(null); }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-slate-300 hover:bg-white/5 hover:text-white transition"
                             >
-                              <Download className="w-3 h-3" /> Export to file
+                              <RotateCcw className="w-3 h-3" /> Overwrite with current canvas
                             </button>
                             <button
                               onClick={() => { duplicateScene(scene.id); setOpenMenuId(null); }}
