@@ -1842,32 +1842,14 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
             <div className="space-y-3 pt-1">
               {undockedPanels.layers ? (
                 <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (window.electronAPI?.openLayersWindow) {
-                        window.electronAPI.openLayersWindow();
-                      } else {
-                        setShowLayersPanel(prev => !prev);
-                      }
-                    }}
-                    className="w-full h-9 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
-                    data-testid="open-layers-btn"
-                  >
-                    <Image className="w-3.5 h-3.5 mr-2" />
-                    {showLayersPanel ? 'Hide Floating Importer' : 'Show Floating Importer'}
-                  </Button>
                   <p className="text-[10px] text-slate-muted text-center font-outfit">
-                    Map Importer window is currently undocked.
+                    Map Importer is open in its own window.
                   </p>
                   <div className="flex justify-center">
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setUndockedPanels(prev => ({ ...prev, layers: false }));
-                        setShowLayersPanel(true);
-                      }}
+                      onClick={() => setUndockedPanels(prev => ({ ...prev, layers: false }))}
                       className="h-7 text-[10px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel"
                     >
                       <Minimize2 className="w-3 h-3 mr-1" /> Dock Map Importer
@@ -1875,33 +1857,15 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (window.electronAPI?.openLayersWindow) {
-                        window.electronAPI.openLayersWindow();
-                        setUndockedPanels(prev => ({ ...prev, layers: true }));
-                      } else {
-                        setShowLayersPanel(prev => !prev);
-                      }
-                    }}
-                    className="w-full h-9 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
-                    data-testid="open-layers-btn"
-                  >
-                    <Image className="w-3.5 h-3.5 mr-2" />
-                    {showLayersPanel ? 'Close Map Importer' : 'Open Map Importer'}
-                  </Button>
-                  <p className="text-[10px] text-slate-muted text-center font-outfit">
-                    {(settings.backgroundLayers || []).length}/5 layers · PNG transparency supported
-                  </p>
-
-                  {/* Inline layers panel for web mode */}
-                  {showLayersPanel && !window.electronAPI?.isElectron && (
-                    <div className="border border-[#caa055]/20 rounded-[4px] overflow-hidden mt-2">
-                      <BackgroundLayersPanel onUndock={() => setUndockedPanels(prev => ({ ...prev, layers: true }))} />
-                    </div>
-                  )}
+                <div className="border border-[#caa055]/20 rounded-[4px] overflow-hidden">
+                  <BackgroundLayersPanel onUndock={() => {
+                    if (window.electronAPI?.openLayersWindow) {
+                      window.electronAPI.openLayersWindow();
+                    } else {
+                      setShowLayersPanel(true);
+                    }
+                    setUndockedPanels(prev => ({ ...prev, layers: true }));
+                  }} />
                 </div>
               )}
             </div>
