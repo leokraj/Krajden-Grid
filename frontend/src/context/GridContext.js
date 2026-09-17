@@ -1354,10 +1354,17 @@ export const GridProvider = ({ children }) => {
   }, []);
 
   const exportScenes = useCallback(() => {
-    const jsonStr = JSON.stringify(scenes, null, 2);
-    const totalEffects = scenes.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
+    // Refresh the active scene's data with a fresh capture before exporting
+    // — without this, exporting right after drawing something (without an
+    // explicit "Overwrite" first) would silently export stale, previously-
+    // saved data instead of what's actually on the grid right now.
+    const scenesToExport = scenes.map(s =>
+      s.id === activeSceneId ? { ...s, data: captureCanvasData() } : s
+    );
+    const jsonStr = JSON.stringify(scenesToExport, null, 2);
+    const totalEffects = scenesToExport.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
     const largeEffects = [];
-    scenes.forEach(s => {
+    scenesToExport.forEach(s => {
       (s.data?.effectPaths || []).forEach(e => {
         const urlLen = (e.effectUrl || '').length;
         if (urlLen > 500_000) largeEffects.push(`"${s.name}": ${(urlLen/1024/1024).toFixed(1)}MB effect (${e.category || e.shaderName || 'unknown'})`);
@@ -1365,7 +1372,7 @@ export const GridProvider = ({ children }) => {
     });
     appDebugStore.log({
       category: 'scene-export',
-      message: `Exported ${scenes.length} scene(s) to file`,
+      message: `Exported ${scenesToExport.length} scene(s) to file`,
       detail: `total effects across all scenes: ${totalEffects}, JSON size: ${(jsonStr.length/1024).toFixed(0)}KB${largeEffects.length ? ', large effects: ' + largeEffects.join('; ') : ''}`,
     });
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
@@ -1375,12 +1382,15 @@ export const GridProvider = ({ children }) => {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    toast.success(`Exported ${scenes.length} scene(s) to JSON file (${totalEffects} total effects)`);
-  }, [scenes]);
+    toast.success(`Exported ${scenesToExport.length} scene(s) to JSON file (${totalEffects} total effects)`);
+  }, [scenes, activeSceneId, captureCanvasData]);
 
   const exportSingleScene = useCallback((sceneId) => {
-    const scene = scenes.find(s => s.id === sceneId);
-    if (!scene) return;
+    const found = scenes.find(s => s.id === sceneId);
+    if (!found) return;
+    // Same freshness fix as exportScenes — if this is the currently active
+    // scene, refresh its data with a live capture before exporting.
+    const scene = sceneId === activeSceneId ? { ...found, data: captureCanvasData() } : found;
     const effectCount = (scene.data?.effectPaths || []).length;
     const jsonStr = JSON.stringify([scene], null, 2);
     appDebugStore.log({
@@ -1397,7 +1407,7 @@ export const GridProvider = ({ children }) => {
     downloadAnchor.click();
     downloadAnchor.remove();
     toast.success(`Exported "${scene.name}" (${effectCount} effect${effectCount === 1 ? '' : 's'}) to file`);
-  }, [scenes]);
+  }, [scenes, activeSceneId, captureCanvasData]);
 
   const importScenes = useCallback((importedData) => {
     try {
