@@ -978,13 +978,47 @@ export const GridProvider = ({ children }) => {
     item.id ? item : { ...item, id: `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2,7)}` }
   );
 
+  // Keeps a synchronous, always-current mirror of the content fields
+  // captureCanvasData needs, written to localStorage on every settings
+  // change. This exists specifically because the Grid window and the
+  // (usually detached) Controls window are separate processes syncing
+  // over an async IPC broadcast — if you draw an effect and click Save
+  // quickly in the Controls window, that broadcast may not have arrived
+  // yet, so the effect just drawn gets skipped while the *previous* one
+  // (which had time to propagate) saves fine. localStorage writes/reads
+  // are synchronous and shared across windows of the same origin with no
+  // broadcast delay, so reading from here instead of `settings` directly
+  // at save-time sidesteps the race entirely.
+  useEffect(() => {
+    try {
+      localStorage.setItem('overgrid_live_snapshot', JSON.stringify({
+        placedCliparts: settings.placedCliparts || [],
+        drawingPaths: settings.drawingPaths || [],
+        maskPaths: settings.maskPaths || [],
+        maskRects: settings.maskRects || [],
+        backgroundLayers: settings.backgroundLayers || [],
+        effectPaths: settings.effectPaths || [],
+      }));
+    } catch (e) {}
+  }, [settings.placedCliparts, settings.drawingPaths, settings.maskPaths,
+      settings.maskRects, settings.backgroundLayers, settings.effectPaths]);
+
   const captureCanvasData = useCallback(() => {
+    // Prefer the synchronous localStorage mirror over `settings` directly —
+    // see the comment on the effect above for why.
+    let liveSnapshot = null;
+    try {
+      const raw = localStorage.getItem('overgrid_live_snapshot');
+      if (raw) liveSnapshot = JSON.parse(raw);
+    } catch (e) {}
+    const src = liveSnapshot || settings;
+
     return {
-      placedCliparts: JSON.parse(JSON.stringify(settings.placedCliparts || [])),
-      drawingPaths: JSON.parse(JSON.stringify(backfillIds(settings.drawingPaths, 'draw'))),
-      maskPaths: JSON.parse(JSON.stringify(backfillIds(settings.maskPaths, 'mask'))),
-      maskRects: JSON.parse(JSON.stringify(backfillIds(settings.maskRects, 'maskrect'))),
-      backgroundLayers: JSON.parse(JSON.stringify(settings.backgroundLayers || [])),
+      placedCliparts: JSON.parse(JSON.stringify(src.placedCliparts || [])),
+      drawingPaths: JSON.parse(JSON.stringify(backfillIds(src.drawingPaths, 'draw'))),
+      maskPaths: JSON.parse(JSON.stringify(backfillIds(src.maskPaths, 'mask'))),
+      maskRects: JSON.parse(JSON.stringify(backfillIds(src.maskRects, 'maskrect'))),
+      backgroundLayers: JSON.parse(JSON.stringify(src.backgroundLayers || [])),
       backgroundImage: settings.backgroundImage || null,
       backgroundImageData: settings.backgroundImageData || null,
       backgroundImageScale: settings.backgroundImageScale ?? 100,
@@ -1001,7 +1035,7 @@ export const GridProvider = ({ children }) => {
       lineThickness: settings.lineThickness,
       opacity: settings.opacity,
       // Effects and pings are part of the scene
-      effectPaths: JSON.parse(JSON.stringify(backfillIds(settings.effectPaths, 'eff'))),
+      effectPaths: JSON.parse(JSON.stringify(backfillIds(src.effectPaths, 'eff'))),
       pingsSnapshot: JSON.parse(JSON.stringify(pings || [])),
     };
   }, [settings, measurements, pings]);
