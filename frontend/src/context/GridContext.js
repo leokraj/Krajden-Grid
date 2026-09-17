@@ -341,6 +341,46 @@ export const GridProvider = ({ children }) => {
   const isUpdatingFromRemoteRef = useRef(false);
   const clipartDebounceRef = useRef(null);
 
+  // One-time migration: some effects/drawings/masks may have been created
+  // before id-generation existed on their respective add-functions, and
+  // still lack a stable `id` to this day (they were never re-drawn). The
+  // eye-toggle visibility system needs every item to have one — without
+  // this, a scene's saved effect *count* looks right, but items lacking
+  // an id are silently skipped when matching against the hidden-items
+  // lookup, so toggling visibility appears to work for some items but not
+  // others. This backfills ids directly onto the live grid data (not just
+  // at save time), so the fix applies immediately, once, on load.
+  useEffect(() => {
+    const needsId = (arr) => (arr || []).some(item => !item.id);
+    const backfill = (arr, prefix) => (arr || []).map(item =>
+      item.id ? item : { ...item, id: `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2,7)}` }
+    );
+    setSettings((prev) => {
+      const needsMigration =
+        needsId(prev.effectPaths) || needsId(prev.drawingPaths) ||
+        needsId(prev.maskPaths) || needsId(prev.maskRects);
+      if (!needsMigration) return prev;
+      const next = {
+        ...prev,
+        effectPaths: backfill(prev.effectPaths, 'eff'),
+        drawingPaths: backfill(prev.drawingPaths, 'draw'),
+        maskPaths: backfill(prev.maskPaths, 'mask'),
+        maskRects: backfill(prev.maskRects, 'maskrect'),
+      };
+      if (window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: {
+          effectPaths: next.effectPaths, drawingPaths: next.drawingPaths,
+          maskPaths: next.maskPaths, maskRects: next.maskRects,
+        }});
+      }
+      appDebugStore.log({ category: 'migration', message: 'Backfilled missing ids on legacy items', detail: 'effects/drawings/masks now have stable ids for visibility toggling' });
+      return next;
+    });
+    // Intentionally run only once on mount — this is a one-time backfill,
+    // not something that should re-run as settings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync favorites & custom cliparts to localStorage safely
   useEffect(() => {
     if (clipartDebounceRef.current) clearTimeout(clipartDebounceRef.current);
@@ -927,12 +967,23 @@ export const GridProvider = ({ children }) => {
     setCustomCliparts((prev) => prev.filter((cp) => cp.id !== id));
   }, []);
 
+  // Backfills a missing `id` on any item — needed because some items may
+  // have been created before id-generation was added to their respective
+  // add-functions, and the eye-toggle visibility system requires every
+  // item to have a stable id to match against. Without this, a scene's
+  // saved effect *count* looks correct, but items lacking an id are
+  // silently skipped when building the hidden-items lookup, so toggling
+  // visibility appears to work for some items and not others.
+  const backfillIds = (arr, prefix) => (arr || []).map(item =>
+    item.id ? item : { ...item, id: `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2,7)}` }
+  );
+
   const captureCanvasData = useCallback(() => {
     return {
       placedCliparts: JSON.parse(JSON.stringify(settings.placedCliparts || [])),
-      drawingPaths: JSON.parse(JSON.stringify(settings.drawingPaths || [])),
-      maskPaths: JSON.parse(JSON.stringify(settings.maskPaths || [])),
-      maskRects: JSON.parse(JSON.stringify(settings.maskRects || [])),
+      drawingPaths: JSON.parse(JSON.stringify(backfillIds(settings.drawingPaths, 'draw'))),
+      maskPaths: JSON.parse(JSON.stringify(backfillIds(settings.maskPaths, 'mask'))),
+      maskRects: JSON.parse(JSON.stringify(backfillIds(settings.maskRects, 'maskrect'))),
       backgroundLayers: JSON.parse(JSON.stringify(settings.backgroundLayers || [])),
       backgroundImage: settings.backgroundImage || null,
       backgroundImageData: settings.backgroundImageData || null,
@@ -950,7 +1001,7 @@ export const GridProvider = ({ children }) => {
       lineThickness: settings.lineThickness,
       opacity: settings.opacity,
       // Effects and pings are part of the scene
-      effectPaths: JSON.parse(JSON.stringify(settings.effectPaths || [])),
+      effectPaths: JSON.parse(JSON.stringify(backfillIds(settings.effectPaths, 'eff'))),
       pingsSnapshot: JSON.parse(JSON.stringify(pings || [])),
     };
   }, [settings, measurements, pings]);
