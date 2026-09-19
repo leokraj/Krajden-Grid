@@ -989,6 +989,13 @@ export const GridProvider = ({ children }) => {
   // are synchronous and shared across windows of the same origin with no
   // broadcast delay, so reading from here instead of `settings` directly
   // at save-time sidesteps the race entirely.
+  // NOTE: backgroundLayers is deliberately excluded from this mirror — it
+  // can contain large base64 map images that push the combined write past
+  // localStorage's ~5-10MB per-origin limit, which throws and fails the
+  // ENTIRE write (not just that one field), silently leaving every other
+  // field stale too. addBackgroundLayer/removeBackgroundLayer already
+  // broadcast correctly, so backgroundLayers is read straight from
+  // `settings` instead — no snapshot needed for it.
   useEffect(() => {
     try {
       localStorage.setItem('overgrid_live_snapshot', JSON.stringify({
@@ -996,12 +1003,20 @@ export const GridProvider = ({ children }) => {
         drawingPaths: settings.drawingPaths || [],
         maskPaths: settings.maskPaths || [],
         maskRects: settings.maskRects || [],
-        backgroundLayers: settings.backgroundLayers || [],
         effectPaths: settings.effectPaths || [],
       }));
-    } catch (e) {}
+    } catch (e) {
+      // This used to fail silently — meaning a save could quietly lose data
+      // with zero indication why. Now it's at least visible in the debug
+      // log so a "why didn't my save work" report can be diagnosed.
+      appDebugStore.log({
+        category: 'error',
+        message: 'Failed to write live canvas snapshot to localStorage',
+        detail: `${e.message} — likely exceeded localStorage's size limit; a save/export made right now may use stale data for effects/drawings/masks`,
+      });
+    }
   }, [settings.placedCliparts, settings.drawingPaths, settings.maskPaths,
-      settings.maskRects, settings.backgroundLayers, settings.effectPaths]);
+      settings.maskRects, settings.effectPaths]);
 
   const captureCanvasData = useCallback(() => {
     // Prefer the synchronous localStorage mirror over `settings` directly —
@@ -1018,7 +1033,8 @@ export const GridProvider = ({ children }) => {
       drawingPaths: JSON.parse(JSON.stringify(backfillIds(src.drawingPaths, 'draw'))),
       maskPaths: JSON.parse(JSON.stringify(backfillIds(src.maskPaths, 'mask'))),
       maskRects: JSON.parse(JSON.stringify(backfillIds(src.maskRects, 'maskrect'))),
-      backgroundLayers: JSON.parse(JSON.stringify(src.backgroundLayers || [])),
+      // Read directly from settings, not the mirror — see the note above.
+      backgroundLayers: JSON.parse(JSON.stringify(settings.backgroundLayers || [])),
       backgroundImage: settings.backgroundImage || null,
       backgroundImageData: settings.backgroundImageData || null,
       backgroundImageScale: settings.backgroundImageScale ?? 100,
