@@ -1299,8 +1299,27 @@ export const GridProvider = ({ children }) => {
   const hiddenItemKeys = useMemo(() => {
     const cliparts = new Set(), effects = new Set(), drawings = new Set(),
           maskPaths = new Set(), maskRects = new Set(), backgrounds = new Set();
+    // Read scenes fresh from localStorage rather than trusting the `scenes`
+    // React state variable directly. That state only updates when this
+    // window's 'storage' event listener fires for the 'overgrid_scenes'
+    // key — which, like the IPC broadcast for settings, has some inherent
+    // lag. Toggling visibility immediately after saving (in the Controls
+    // window) could compute this in the Grid window before that event
+    // arrives, using a scenes snapshot that doesn't yet include the effect
+    // you just saved — matching "toggles fine after a reload, but not
+    // right after saving". localStorage reads are synchronous with no
+    // event-based delay, so this guarantees freshness regardless of
+    // 'storage' event timing.
+    let freshScenes = scenes;
+    try {
+      const raw = localStorage.getItem('overgrid_scenes');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) freshScenes = parsed;
+      }
+    } catch (e) {}
     (settings.hiddenSceneIds || []).forEach(sceneId => {
-      const scene = scenes.find(s => s.id === sceneId);
+      const scene = freshScenes.find(s => s.id === sceneId);
       const d = scene?.data || {};
       (d.placedCliparts || []).forEach(c => c.instanceId && cliparts.add(c.instanceId));
       (d.effectPaths || []).forEach(e => e.id && effects.add(e.id));
