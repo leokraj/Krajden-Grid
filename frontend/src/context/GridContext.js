@@ -1344,12 +1344,42 @@ export const GridProvider = ({ children }) => {
   }, [scenes, activeSceneId, loadScene]);
 
   const deleteScene = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
     setScenes((prev) => prev.filter((s) => s.id !== sceneId));
     if (activeSceneId === sceneId) {
       setActiveSceneId(null);
     }
+    // Also remove this layer's own items from the live grid — deleting a
+    // layer that's currently showing on the grid shouldn't leave its
+    // tokens/maps/effects/drawings/masks behind as orphaned content with
+    // nothing tracking them anymore.
+    if (scene?.data) {
+      const d = scene.data;
+      const idsOf = (arr) => new Set((arr || []).map(item => item.id).filter(Boolean));
+      const effectIds = idsOf(d.effectPaths);
+      const drawingIds = idsOf(d.drawingPaths);
+      const maskPathIds = idsOf(d.maskPaths);
+      const maskRectIds = idsOf(d.maskRects);
+      const clipartIds = new Set((d.placedCliparts || []).map(c => c.instanceId).filter(Boolean));
+      const backgroundIds = idsOf(d.backgroundLayers);
+
+      setSettings((prev) => {
+        const next = {
+          effectPaths: (prev.effectPaths || []).filter(e => !effectIds.has(e.id)),
+          drawingPaths: (prev.drawingPaths || []).filter(p => !drawingIds.has(p.id)),
+          maskPaths: (prev.maskPaths || []).filter(p => !maskPathIds.has(p.id)),
+          maskRects: (prev.maskRects || []).filter(r => !maskRectIds.has(r.id)),
+          placedCliparts: (prev.placedCliparts || []).filter(c => !clipartIds.has(c.instanceId)),
+          backgroundLayers: (prev.backgroundLayers || []).filter(l => !backgroundIds.has(l.id)),
+        };
+        if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+          window.electronAPI.broadcast("settings-update", { settings: next });
+        }
+        return { ...prev, ...next };
+      });
+    }
     toast.success('Scene deleted');
-  }, [activeSceneId]);
+  }, [activeSceneId, scenes]);
 
   const duplicateScene = useCallback((sceneId) => {
     const scene = scenes.find((s) => s.id === sceneId);
@@ -1370,8 +1400,7 @@ export const GridProvider = ({ children }) => {
     setActiveSceneId(null);
     setScenes((prev) => prev.map((s) => ({ ...s, active: false })));
     setMeasurements([]);
-    setSettings((prev) => ({
-      ...prev,
+    const cleared = {
       placedCliparts: [],
       drawingPaths: [],
       maskPaths: [],
@@ -1380,8 +1409,16 @@ export const GridProvider = ({ children }) => {
       backgroundImage: null,
       backgroundImageData: null,
       useBackgroundImage: false,
-      effectPaths: [], // was missing — effects used to survive "Blank Canvas"
-    }));
+      effectPaths: [],
+    };
+    setSettings((prev) => ({ ...prev, ...cleared }));
+    // This broadcast was missing entirely — clicking "Clear Active Grid" in
+    // the Controls window only ever cleared that window's own local
+    // settings copy, never reaching the Grid window where the canvas
+    // actually renders, so the button appeared to do nothing.
+    if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+      window.electronAPI.broadcast("settings-update", { settings: cleared });
+    }
     appDebugStore.log({ category: 'scene-load', message: 'Blank Canvas — cleared all grid content' });
     toast.info('Canvas cleared');
   }, []);
