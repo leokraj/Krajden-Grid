@@ -1,3 +1,5 @@
+console.info("render-visibility");
+if (typeof window !== "undefined") { window.__renderVisibilityAnchor = "render-visibility"; }
 /**
  * EffectsLayer.jsx
  * Reverse Mask Video & Animated Effects Engine for Krajden Grid
@@ -1596,22 +1598,30 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         const visibleEffectPaths = effectPaths.filter(ep => !hiddenItemKeys?.effects?.has(ep.id));
 
         // Diagnostic: log what THIS window (the Grid window, where rendering
-        // actually happens) sees for hiddenItemKeys.effects, whenever it
-        // changes. Every previous diagnostic log for this bug ran inside
-        // toggleSceneVisibility in GridContext.js, which executes in the
-        // Controls window — a SEPARATE React tree with its own separate
-        // GridProvider and its own separate hiddenItemKeys computation. That
-        // never actually proved what the Grid window itself computes, only
-        // what the Controls window computes — this closes that gap.
+        // actually happens) sees for hiddenItemKeys.effects. Every previous
+        // diagnostic log for this bug ran inside toggleSceneVisibility in
+        // GridContext.js, which executes in the Controls window — a
+        // SEPARATE React tree with its own separate GridProvider and its
+        // own separate hiddenItemKeys computation. That never actually
+        // proved what the Grid window itself computes, only what the
+        // Controls window computes — this closes that gap.
+        // Logs on BOTH a time throttle (guaranteed at least one snapshot
+        // every ~1.5s regardless of whether anything "changed" by this
+        // code's own comparison, in case that comparison itself has a bug)
+        // AND immediately whenever the hidden set actually changes.
         const hiddenEffectIdsArr = Array.from(hiddenItemKeys?.effects || []);
         const liveIdsArr = effectPaths.map(ep => ep.id || '(no id)');
         const hiddenSetKey = hiddenEffectIdsArr.slice().sort().join(',');
-        if (lastLoggedHiddenSetRef.current !== hiddenSetKey) {
+        const now = Date.now();
+        const changed = lastLoggedHiddenSetRef.current !== hiddenSetKey;
+        const timeThrottleElapsed = !lastLoggedTimeRef.current || (now - lastLoggedTimeRef.current > 1500);
+        if (changed || timeThrottleElapsed) {
           lastLoggedHiddenSetRef.current = hiddenSetKey;
+          lastLoggedTimeRef.current = now;
           appDebugStore.log({
             category: 'render-visibility',
-            message: `[Grid window] hiddenItemKeys.effects changed`,
-            detail: `hidden effect ids (as seen by the Grid window's own render loop): [${hiddenEffectIdsArr.join(', ') || 'none'}] | all live effect ids on grid: [${liveIdsArr.join(', ')}] | effects being drawn this frame: [${visibleEffectPaths.map(ep => ep.id).join(', ')}] | effects skipped this frame: [${effectPaths.filter(ep => hiddenItemKeys?.effects?.has(ep.id)).map(ep => ep.id).join(', ') || 'none'}]`,
+            message: `[Grid window] hiddenItemKeys.effects — ${changed ? 'CHANGED' : 'periodic snapshot'}`,
+            detail: `hidden effect ids (as seen by the Grid window's own render loop): [${hiddenEffectIdsArr.join(', ') || 'none'}] | all live effect ids on grid: [${liveIdsArr.join(', ')}] | effects being drawn this frame: [${visibleEffectPaths.map(ep => ep.id).join(', ')}] | effects skipped this frame: [${effectPaths.filter(ep => hiddenItemKeys?.effects?.has(ep.id)).map(ep => ep.id).join(', ') || 'none'}] | hiddenItemKeys object exists: ${!!hiddenItemKeys} | hiddenItemKeys.effects is a Set: ${hiddenItemKeys?.effects instanceof Set}`,
           });
         }
 
@@ -1788,6 +1798,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // which element ends up as the actual target.
   const dragEffectRef = useRef(null); // { id, startX, startY, origRect, origPoints }
   const lastLoggedHiddenSetRef = useRef(null); // tracks last-logged hiddenItemKeys.effects contents, to avoid logging every single frame
+  const lastLoggedTimeRef = useRef(null); // guarantees a periodic log even if the change-comparison above has a bug
   const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
