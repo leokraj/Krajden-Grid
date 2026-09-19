@@ -1226,10 +1226,11 @@ export const GridProvider = ({ children }) => {
     }
 
     const loadedEffectCount = (d.effectPaths || []).length;
+    const loadedEffectIds = (d.effectPaths || []).map(e => e.id || '(no id)');
     appDebugStore.log({
       category: 'scene-load',
       message: `Replaced grid with scene "${scene.name}"`,
-      detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${loadedEffectCount}${loadedEffectCount ? ' (' + (d.effectPaths||[]).map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''}`,
+      detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${loadedEffectCount}${loadedEffectCount ? ' (' + (d.effectPaths||[]).map(e => e.category || e.shaderName || 'video').join(', ') + ')' : ''} | loaded effect ids: [${loadedEffectIds.join(', ')}]${loadedEffectIds.includes('(no id)') ? ' ⚠️ one or more effects have no id — they were saved before the id-backfill fix and should be deleted and re-drawn' : ''}`,
     });
     toast.success(`Loaded scene: "${scene.name}" (${loadedEffectCount} effect${loadedEffectCount === 1 ? '' : 's'})`);
     setPendingSceneLoad(null);
@@ -1247,10 +1248,26 @@ export const GridProvider = ({ children }) => {
       const next = isHidden ? hidden.filter(id => id !== sceneId) : [...hidden, sceneId];
       const scene = scenes.find(s => s.id === sceneId);
       const d = scene?.data || {};
+      // Log the ACTUAL ids from the saved snapshot, plus the ids currently
+      // live on the grid — if these don't overlap, that's the exact
+      // mismatch that causes "debug says it's there but it's not showing".
+      // Compare against the synchronous localStorage mirror (not
+      // prev.effectPaths directly) — that mirror is written immediately on
+      // every change and read the same way regardless of which window this
+      // toggle was clicked from, so it's not subject to the IPC broadcast
+      // lag that prev.effectPaths can still have.
+      let liveSnapshot = null;
+      try {
+        const raw = localStorage.getItem('overgrid_live_snapshot');
+        if (raw) liveSnapshot = JSON.parse(raw);
+      } catch (e) {}
+      const savedEffectIds = (d.effectPaths || []).map(e => e.id || '(no id)');
+      const liveEffectIds = ((liveSnapshot || prev).effectPaths || []).map(e => e.id || '(no id)');
+      const matchingIds = savedEffectIds.filter(id => liveEffectIds.includes(id));
       appDebugStore.log({
         category: 'scene-visibility',
         message: `${isHidden ? 'Showed' : 'Hid'} scene "${scene?.name || sceneId}"`,
-        detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${(d.effectPaths||[]).length}`,
+        detail: `tokens: ${(d.placedCliparts||[]).length}, drawings: ${(d.drawingPaths||[]).length}, masks: ${(d.maskPaths||[]).length + (d.maskRects||[]).length}, backgrounds: ${(d.backgroundLayers||[]).length}, effects: ${(d.effectPaths||[]).length} | saved effect ids: [${savedEffectIds.join(', ')}] | live effect ids on grid: [${liveEffectIds.join(', ')}] | matching: ${matchingIds.length}/${savedEffectIds.length}${matchingIds.length < savedEffectIds.length ? ' ⚠️ MISMATCH — some saved ids have no matching live effect, so they cannot be hidden/shown' : ''}`,
       });
       const nextSettings = { ...prev, hiddenSceneIds: next };
       if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
