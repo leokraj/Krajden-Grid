@@ -18,6 +18,7 @@ import {
   Minimize2,
   Sparkles,
   MoreVertical,
+  Layers,
 } from 'lucide-react';
 
 export function SceneEditorPanel({ onUndock }) {
@@ -29,6 +30,7 @@ export function SceneEditorPanel({ onUndock }) {
     updateScene,
     loadScene,
     toggleSceneVisibility,
+    performSceneLoad,
     deleteScene,
     duplicateScene,
     clearCanvasState,
@@ -274,6 +276,13 @@ export function SceneEditorPanel({ onUndock }) {
                       keep the row to one compact line. */}
                   {!isEditing && (
                     <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => performSceneLoad(scene.id, 'merge')}
+                        className="p-1 text-slate-500 hover:text-[#caa055] hover:bg-white/5 rounded transition"
+                        title="Add this layer's tokens, maps, and effects on top of what's already on the grid"
+                      >
+                        <Layers className="w-3 h-3" />
+                      </button>
                       <button
                         onClick={() => exportSingleScene(scene.id)}
                         className="p-1 text-slate-500 hover:text-[#caa055] hover:bg-white/5 rounded transition"
