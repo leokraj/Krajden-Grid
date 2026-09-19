@@ -1430,14 +1430,34 @@ export const GridProvider = ({ children }) => {
     try {
       const parsed = typeof importedData === 'string' ? JSON.parse(importedData) : importedData;
       if (Array.isArray(parsed)) {
-        const totalEffects = parsed.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
+        // Regenerate fresh ids for every imported scene and its nested
+        // items. Without this, re-importing a previously-exported file (or
+        // any id collision with an existing scene) means the imported
+        // scene inherits whatever hidden/visible state already exists for
+        // that id in settings.hiddenSceneIds — so it can appear to import
+        // successfully (correct data, correct effect count) while actually
+        // rendering nothing, because it silently came in already hidden.
+        const freshId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2,9)}`;
+        const rekeyItems = (arr, prefix) => (arr || []).map(item => ({ ...item, id: freshId(prefix) }));
+        const rekeyed = parsed.map(scene => ({
+          ...scene,
+          id: freshId('scene'),
+          data: scene.data ? {
+            ...scene.data,
+            effectPaths: rekeyItems(scene.data.effectPaths, 'eff'),
+            drawingPaths: rekeyItems(scene.data.drawingPaths, 'draw'),
+            maskPaths: rekeyItems(scene.data.maskPaths, 'mask'),
+            maskRects: rekeyItems(scene.data.maskRects, 'maskrect'),
+          } : scene.data,
+        }));
+        const totalEffects = rekeyed.reduce((sum, s) => sum + ((s.data?.effectPaths || []).length), 0);
         appDebugStore.log({
           category: 'scene-import',
-          message: `Imported ${parsed.length} scene(s) from file`,
-          detail: `total effects in imported file: ${totalEffects}${parsed.map(s => ` "${s.name}": ${(s.data?.effectPaths||[]).length} effects`).join(',')}`,
+          message: `Imported ${rekeyed.length} scene(s) from file`,
+          detail: `total effects in imported file: ${totalEffects}${rekeyed.map(s => ` "${s.name}": ${(s.data?.effectPaths||[]).length} effects`).join(',')} | fresh ids assigned to avoid inheriting stale hidden/visible state from any id collision`,
         });
-        setScenes((prev) => [...prev, ...parsed]);
-        toast.success(`Imported ${parsed.length} scene(s) (${totalEffects} total effects)`);
+        setScenes((prev) => [...prev, ...rekeyed]);
+        toast.success(`Imported ${rekeyed.length} scene(s) (${totalEffects} total effects)`);
       } else {
         appDebugStore.log({ category: 'scene-import', message: 'Import failed — file was not a scene array', detail: `got type: ${typeof parsed}` });
         toast.error('Invalid scene format');
