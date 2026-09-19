@@ -281,6 +281,13 @@ export function SceneEditorPanel({ onUndock }) {
                       >
                         <Save className="w-3 h-3" />
                       </button>
+                      <button
+                        onClick={() => deleteScene(scene.id)}
+                        className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded transition"
+                        title="Delete this layer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                       <div className="relative">
                         <button
                           onClick={() => setOpenMenuId(isMenuOpen ? null : scene.id)}
