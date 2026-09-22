@@ -834,7 +834,7 @@ export const GridProvider = ({ children }) => {
       appDebugStore.log({
         category: 'addEffectPath-call',
         message: `addEffectPath called — generated id ${newPath.id}`,
-        detail: `window: ${window.location.href} | isUpdatingFromRemoteRef: ${isUpdatingFromRemoteRef.current} | effectPath.id was explicitly passed: ${!!effectPath.id} | type: ${effectPath.type} | category: ${effectPath.category || 'none'}`,
+        detail: `window: ${window.location.href} | isUpdatingFromRemoteRef: ${isUpdatingFromRemoteRef.current} | effectPath.id was explicitly passed: ${!!effectPath.id} | type: ${effectPath.type} | category: ${effectPath.category || 'none'} | stack: ${(new Error().stack || '').split('\n').slice(1, 6).join(' <- ')}`,
       });
       const nextPaths = [...(prev.effectPaths || []), newPath];
       // This broadcast was missing entirely — effects added in the Grid
