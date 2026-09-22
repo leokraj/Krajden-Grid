@@ -1,3 +1,5 @@
+console.info("freshScenes");
+if (typeof window !== "undefined") { window.__freshScenesAnchor = "freshScenes"; }
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { appDebugStore } from '../lib/debugStore';
@@ -821,6 +823,19 @@ export const GridProvider = ({ children }) => {
         ...effectPath,
         id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
       };
+      // Direct, unmissable log of every single call — including which
+      // window made it and whether it happened while applying a remote
+      // broadcast (isUpdatingFromRemoteRef). This exists specifically to
+      // answer, definitively: is addEffectPath being called more than
+      // once for a single drawn stroke, and if so, from where? Prior
+      // diagnostics could only ever show the END RESULT (two different
+      // ids existing somewhere), never which window/code path actually
+      // created each one.
+      appDebugStore.log({
+        category: 'addEffectPath-call',
+        message: `addEffectPath called — generated id ${newPath.id}`,
+        detail: `window: ${window.location.href} | isUpdatingFromRemoteRef: ${isUpdatingFromRemoteRef.current} | effectPath.id was explicitly passed: ${!!effectPath.id} | type: ${effectPath.type} | category: ${effectPath.category || 'none'}`,
+      });
       const nextPaths = [...(prev.effectPaths || []), newPath];
       // This broadcast was missing entirely — effects added in the Grid
       // window never reached other windows' settings.effectPaths at all,
