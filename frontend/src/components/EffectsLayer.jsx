@@ -1800,6 +1800,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const lastLoggedHiddenSetRef = useRef(null); // tracks last-logged hiddenItemKeys.effects contents, to avoid logging every single frame
   const lastLoggedTimeRef = useRef(null); // guarantees a periodic log even if the change-comparison above has a bug
   const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
+  const commitInProgressRef = useRef(false); // synchronous guard against handleMouseUp double-firing for one gesture
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
   // right-click confirms and exits config mode (without also exiting
@@ -2124,6 +2125,23 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
 
   const handleMouseUp = useCallback(() => {
+    // Synchronous guard against this firing twice for the same gesture
+    // (e.g. both mouseup and touchend events for one physical release,
+    // which can both fire on some systems/hybrid input devices). Unlike
+    // the isDrawing STATE check below, a ref updates immediately — a
+    // near-simultaneous duplicate call sees this synchronously and bails
+    // out, instead of both calls slipping past the state check before
+    // React has actually applied the first call's setIsDrawing(false).
+    // Without this, a single stroke could commit via addEffectPath twice,
+    // creating two separate effect objects with two different ids for
+    // what looks like one drawn river/shape — which is exactly why the
+    // visibility toggle appeared to only affect "one out of two" effects:
+    // the saved scene captured one of the two ids, but a different one
+    // ended up being what's actually live on the grid.
+    if (commitInProgressRef.current) return;
+    commitInProgressRef.current = true;
+    setTimeout(() => { commitInProgressRef.current = false; }, 50);
+
     if (placingLightRotateRef.current) {
       placingLightRotateRef.current = null;
       setIsDrawing(false);
