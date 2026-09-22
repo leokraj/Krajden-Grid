@@ -2181,10 +2181,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
       brushSize, opacity, tile, tileScale, blendMode, addEffectPath]);
 
-  // Release on window mouseup (handles dragging off canvas)
+  // Release on window mouseup (handles dragging off canvas). Only acts
+  // when the release happened OUTSIDE the canvas — if it landed ON the
+  // canvas, the canvas's own onMouseUp React prop already handles it, and
+  // without this check both would fire for the same single release (the
+  // window listener sees it too, since the event bubbles all the way up
+  // to window regardless of where it started). That double-fire is what
+  // caused a single drawn stroke to call addEffectPath twice, producing
+  // two different ids for what looked like one effect — which is why the
+  // saved scene and the live grid could end up referencing different ids
+  // for "the same" effect, breaking the visibility toggle for it.
   useEffect(() => {
     if (!isDrawing) return;
-    const up = () => handleMouseUp();
+    const up = (e) => {
+      if (e.target === canvasRef.current) return; // already handled by the canvas's own onMouseUp
+      handleMouseUp();
+    };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
   }, [isDrawing, handleMouseUp]);
