@@ -819,6 +819,33 @@ export const GridProvider = ({ children }) => {
   // ── Effects tool ───────────────────────────────────────────────────────────
   const addEffectPath = useCallback((effectPath) => {
     setSettings((prev) => {
+      // Deduplication guard: if the most recently added effect has the
+      // same points/rect (i.e. the same drawn shape) and was added within
+      // the last 300ms, treat this as a duplicate commit of the same
+      // stroke and skip it entirely, regardless of what actually
+      // triggered this second call. This fixes the symptom directly at
+      // the one place every path to adding an effect converges, rather
+      // than needing to find and patch every possible trigger individually.
+      const existing = prev.effectPaths || [];
+      const last = existing[existing.length - 1];
+      if (last) {
+        const lastTimestampMatch = /_(\d+)_/.exec(last.id || '');
+        const lastTimestamp = lastTimestampMatch ? parseInt(lastTimestampMatch[1], 10) : 0;
+        const withinWindow = lastTimestamp && (Date.now() - lastTimestamp < 300);
+        const samePoints = JSON.stringify(last.points || null) === JSON.stringify(effectPath.points || null);
+        const sameRect = JSON.stringify(last.rect || null) === JSON.stringify(effectPath.rect || null);
+        const structurallyIdentical = (effectPath.points ? samePoints : true) && (effectPath.rect ? sameRect : true)
+          && last.type === effectPath.type;
+        if (withinWindow && structurallyIdentical && !effectPath.id) {
+          appDebugStore.log({
+            category: 'addEffectPath-dedup',
+            message: `Skipped adding a duplicate effect — matches "${last.id}" added ${Date.now() - lastTimestamp}ms ago`,
+            detail: `type: ${effectPath.type}, category: ${effectPath.category || 'none'}`,
+          });
+          return prev;
+        }
+      }
+
       const newPath = {
         ...effectPath,
         id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
