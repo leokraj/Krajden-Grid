@@ -1801,6 +1801,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const lastLoggedTimeRef = useRef(null); // guarantees a periodic log even if the change-comparison above has a bug
   const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
   const commitInProgressRef = useRef(false); // synchronous guard against handleMouseUp double-firing for one gesture
+  const latestHandleMouseUpRef = useRef(null); // always points at the current handleMouseUp closure, kept fresh every render
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
   // right-click confirms and exits config mode (without also exiting
@@ -2191,6 +2192,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
       brushSize, opacity, tile, tileScale, blendMode, addEffectPath]);
 
+  // Keeps latestHandleMouseUpRef pointing at the current handleMouseUp on
+  // every render — separate from the listener-attachment effect below,
+  // which intentionally does NOT depend on handleMouseUp (see its comment).
+  // Without this running on every render, the ref would still point at
+  // the stale, empty-stroke closure from when the drag started.
+  useEffect(() => {
+    latestHandleMouseUpRef.current = handleMouseUp;
+  }, [handleMouseUp]);
+
   // Release on window mouseup (handles dragging off canvas). Only acts
   // when the release happened OUTSIDE the canvas — if it landed ON the
   // canvas, the canvas's own onMouseUp React prop already handles it, and
@@ -2203,13 +2213,24 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // for "the same" effect, breaking the visibility toggle for it.
   useEffect(() => {
     if (!isDrawing) return;
+    // Call through a ref rather than referencing handleMouseUp directly —
+    // handleMouseUp depends on currentStroke, which changes on every single
+    // mousemove while drawing, so it gets recreated many times per drag.
+    // If this effect depended on handleMouseUp directly, the listener would
+    // be torn down and re-attached that many times too, right up until the
+    // exact moment of mouseup — a real (if narrow) race window at the one
+    // moment it matters most. Depending only on isDrawing means the
+    // listener is attached exactly once per drag and detached exactly once
+    // when it ends, with zero rebinding in between. latestHandleMouseUpRef
+    // (kept fresh by the effect above, on every render) ensures we still
+    // always call the version with the up-to-date accumulated stroke.
     const up = (e) => {
       if (e.target === canvasRef.current) return; // already handled by the canvas's own onMouseUp
-      handleMouseUp();
+      latestHandleMouseUpRef.current();
     };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
-  }, [isDrawing, handleMouseUp]);
+  }, [isDrawing]);
 
   // Scroll wheel changes brush size when effects mode is active
   useEffect(() => {
