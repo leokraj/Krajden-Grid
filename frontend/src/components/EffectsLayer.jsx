@@ -2124,7 +2124,17 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       tile, tileScale, blendMode, getCoords, addEffectPath,
       effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e) => {
+    // Direct, unmissable log of EVERY invocation, before the guard check —
+    // this answers definitively whether handleMouseUp itself is being
+    // called more than once per gesture, and if so, what triggered each
+    // call (native event type, if available).
+    appDebugStore.log({
+      category: 'handleMouseUp-call',
+      message: `handleMouseUp invoked`,
+      detail: `event type: ${e?.type || 'none (called directly, no event arg)'} | commitInProgressRef was already true: ${commitInProgressRef.current} | isDrawing: ${isDrawing}`,
+    });
+
     // Synchronous guard against this firing twice for the same gesture
     // (e.g. both mouseup and touchend events for one physical release,
     // which can both fire on some systems/hybrid input devices). Unlike
