@@ -819,30 +819,51 @@ export const GridProvider = ({ children }) => {
   // ── Effects tool ───────────────────────────────────────────────────────────
   const addEffectPath = useCallback((effectPath) => {
     setSettings((prev) => {
-      // Deduplication guard: if the most recently added effect has the
-      // same points/rect (i.e. the same drawn shape) and was added within
-      // the last 300ms, treat this as a duplicate commit of the same
+      // Deduplication guard: if the most recently added effect started at
+      // the same point (i.e. the same drag gesture) and was added within
+      // the last 500ms, treat this as a duplicate commit of the same
       // stroke and skip it entirely, regardless of what actually
-      // triggered this second call. This fixes the symptom directly at
-      // the one place every path to adding an effect converges, rather
-      // than needing to find and patch every possible trigger individually.
+      // triggered this second call. Compares only the FIRST point rather
+      // than the whole points array — two duplicate commits of one
+      // gesture could each capture a slightly different point COUNT if an
+      // extra mousemove snuck in between them, which would make a strict
+      // full-array comparison silently fail to catch the duplicate even
+      // though it's clearly the same stroke. The starting point can't
+      // change between two commits of the same gesture, so it's a much
+      // more reliable signal.
       const existing = prev.effectPaths || [];
       const last = existing[existing.length - 1];
       if (last) {
         const lastTimestampMatch = /_(\d+)_/.exec(last.id || '');
         const lastTimestamp = lastTimestampMatch ? parseInt(lastTimestampMatch[1], 10) : 0;
-        const withinWindow = lastTimestamp && (Date.now() - lastTimestamp < 300);
-        const samePoints = JSON.stringify(last.points || null) === JSON.stringify(effectPath.points || null);
-        const sameRect = JSON.stringify(last.rect || null) === JSON.stringify(effectPath.rect || null);
-        const structurallyIdentical = (effectPath.points ? samePoints : true) && (effectPath.rect ? sameRect : true)
+        const withinWindow = lastTimestamp && (Date.now() - lastTimestamp < 500);
+        const lastFirstPoint = last.points?.[0];
+        const newFirstPoint = effectPath.points?.[0];
+        const samePoints = lastFirstPoint && newFirstPoint
+          && lastFirstPoint.x === newFirstPoint.x && lastFirstPoint.y === newFirstPoint.y;
+        const lastRectStr = JSON.stringify(last.rect || null);
+        const newRectStr = JSON.stringify(effectPath.rect || null);
+        const sameRect = lastRectStr === newRectStr && lastRectStr !== 'null';
+        const structurallyIdentical = (effectPath.points ? samePoints : (effectPath.rect ? sameRect : false))
           && last.type === effectPath.type;
         if (withinWindow && structurallyIdentical && !effectPath.id) {
           appDebugStore.log({
             category: 'addEffectPath-dedup',
             message: `Skipped adding a duplicate effect — matches "${last.id}" added ${Date.now() - lastTimestamp}ms ago`,
-            detail: `type: ${effectPath.type}, category: ${effectPath.category || 'none'}`,
+            detail: `type: ${effectPath.type}, category: ${effectPath.category || 'none'}, points count: last=${last.points?.length ?? 'n/a'} new=${effectPath.points?.length ?? 'n/a'}`,
           });
           return prev;
+        } else if (!effectPath.id && last.type === effectPath.type) {
+          // Log the comparison even when it did NOT trigger a skip — this
+          // is what will reveal exactly why, if the duplicate still gets
+          // through: was it outside the timing window? Did the starting
+          // point genuinely differ? This only logs when the type matches,
+          // to avoid noise from genuinely unrelated effects.
+          appDebugStore.log({
+            category: 'addEffectPath-dedup-check',
+            message: `Dedup check did not skip — msSinceLast: ${lastTimestamp ? Date.now() - lastTimestamp : 'n/a'}, withinWindow: ${withinWindow}, samePoints: ${samePoints}, sameRect: ${sameRect}`,
+            detail: `last first point: ${JSON.stringify(last.points?.[0] || null)} | new first point: ${JSON.stringify(effectPath.points?.[0] || null)} | last rect: ${JSON.stringify(last.rect || null)} | new rect: ${JSON.stringify(effectPath.rect || null)}`,
+          });
         }
       }
 
