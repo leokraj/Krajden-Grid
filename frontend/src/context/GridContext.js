@@ -342,6 +342,12 @@ export const GridProvider = ({ children }) => {
   }, []);
   const isUpdatingFromRemoteRef = useRef(false);
   const clipartDebounceRef = useRef(null);
+  // Always-current mirror of `settings`, readable synchronously from inside
+  // callbacks (like addEffectPath) that need the latest effectPaths BEFORE
+  // calling setSettings — i.e. outside of React's update-batching, where the
+  // `settings` variable from closure would otherwise be stale.
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   // One-time migration: some effects/drawings/masks may have been created
   // before id-generation existed on their respective add-functions, and
@@ -817,73 +823,82 @@ export const GridProvider = ({ children }) => {
   }, []);
 
   // ── Effects tool ───────────────────────────────────────────────────────────
+  // ROOT CAUSE, finally identified from field logs: this used to generate
+  // the new effect's id (`eff_${Date.now()}_${Math.random()...}`) INSIDE the
+  // setSettings functional updater. React's useState implementation can —
+  // completely legitimately, as a documented internal optimization — invoke
+  // a functional updater MORE THAN ONCE for a single dispatch: once eagerly
+  // at call time (to check whether the resulting state actually changed, so
+  // it can bail out of scheduling a render), and again later during the
+  // actual render that processes the queued update. For a PURE updater this
+  // is invisible. Ours wasn't pure: it called Math.random() to mint the id,
+  // so the two invocations produced two DIFFERENT ids for what was meant to
+  // be a single effect. Field logs showed exactly this: two
+  // "addEffectPath-call" entries ~2ms apart, same window, same gesture, one
+  // reached via dispatchSetStateInternal (the eager path) and one via
+  // updateReducerImpl/updateReducer (the real render-time path) — and
+  // because different parts of the app ended up observing different
+  // resulting arrays, the saved scene's effect ids and the canvas's actually
+  // rendered ids silently diverged, which is why toggling visibility on the
+  // "last" effect never visibly matched what was on screen.
+  // Fix: generate the id, run the dedup check/logging, and decide whether to
+  // skip — all BEFORE calling setSettings — exactly like addDrawingPath/
+  // addMaskPath/addMaskRect below already do. The updater itself now only
+  // does the actual (pure, idempotent-safe) array append.
   const addEffectPath = useCallback((effectPath) => {
-    setSettings((prev) => {
-      // Deduplication guard: if the most recently added effect started at
-      // the same point (i.e. the same drag gesture) and was added within
-      // the last 500ms, treat this as a duplicate commit of the same
-      // stroke and skip it entirely, regardless of what actually
-      // triggered this second call. Compares only the FIRST point rather
-      // than the whole points array — two duplicate commits of one
-      // gesture could each capture a slightly different point COUNT if an
-      // extra mousemove snuck in between them, which would make a strict
-      // full-array comparison silently fail to catch the duplicate even
-      // though it's clearly the same stroke. The starting point can't
-      // change between two commits of the same gesture, so it's a much
-      // more reliable signal.
-      const existing = prev.effectPaths || [];
-      const last = existing[existing.length - 1];
-      if (last) {
-        const lastTimestampMatch = /_(\d+)_/.exec(last.id || '');
-        const lastTimestamp = lastTimestampMatch ? parseInt(lastTimestampMatch[1], 10) : 0;
-        const withinWindow = lastTimestamp && (Date.now() - lastTimestamp < 500);
-        const lastFirstPoint = last.points?.[0];
-        const newFirstPoint = effectPath.points?.[0];
-        const samePoints = lastFirstPoint && newFirstPoint
-          && lastFirstPoint.x === newFirstPoint.x && lastFirstPoint.y === newFirstPoint.y;
-        const lastRectStr = JSON.stringify(last.rect || null);
-        const newRectStr = JSON.stringify(effectPath.rect || null);
-        const sameRect = lastRectStr === newRectStr && lastRectStr !== 'null';
-        const structurallyIdentical = (effectPath.points ? samePoints : (effectPath.rect ? sameRect : false))
-          && last.type === effectPath.type;
-        if (withinWindow && structurallyIdentical && !effectPath.id) {
-          appDebugStore.log({
-            category: 'addEffectPath-dedup',
-            message: `Skipped adding a duplicate effect — matches "${last.id}" added ${Date.now() - lastTimestamp}ms ago`,
-            detail: `type: ${effectPath.type}, category: ${effectPath.category || 'none'}, points count: last=${last.points?.length ?? 'n/a'} new=${effectPath.points?.length ?? 'n/a'}`,
-          });
-          return prev;
-        } else if (!effectPath.id && last.type === effectPath.type) {
-          // Log the comparison even when it did NOT trigger a skip — this
-          // is what will reveal exactly why, if the duplicate still gets
-          // through: was it outside the timing window? Did the starting
-          // point genuinely differ? This only logs when the type matches,
-          // to avoid noise from genuinely unrelated effects.
-          appDebugStore.log({
-            category: 'addEffectPath-dedup-check',
-            message: `Dedup check did not skip — msSinceLast: ${lastTimestamp ? Date.now() - lastTimestamp : 'n/a'}, withinWindow: ${withinWindow}, samePoints: ${samePoints}, sameRect: ${sameRect}`,
-            detail: `last first point: ${JSON.stringify(last.points?.[0] || null)} | new first point: ${JSON.stringify(effectPath.points?.[0] || null)} | last rect: ${JSON.stringify(last.rect || null)} | new rect: ${JSON.stringify(effectPath.rect || null)}`,
-          });
-        }
+    // Deduplication guard: if the most recently added effect started at the
+    // same point (i.e. the same drag gesture) and was added within the last
+    // 500ms, treat this as a duplicate commit of the same stroke and skip it
+    // entirely. Compares only the FIRST point rather than the whole points
+    // array — two duplicate commits of one gesture could each capture a
+    // slightly different point COUNT, which would make a strict full-array
+    // comparison silently fail to catch the duplicate. Reads live settings
+    // via the ref rather than prev inside an updater, since this now runs
+    // once, outside of React's update cycle.
+    const existing = settingsRef.current?.effectPaths || [];
+    const last = existing[existing.length - 1];
+    if (last) {
+      const lastTimestampMatch = /_(\d+)_/.exec(last.id || '');
+      const lastTimestamp = lastTimestampMatch ? parseInt(lastTimestampMatch[1], 10) : 0;
+      const withinWindow = lastTimestamp && (Date.now() - lastTimestamp < 500);
+      const lastFirstPoint = last.points?.[0];
+      const newFirstPoint = effectPath.points?.[0];
+      const samePoints = lastFirstPoint && newFirstPoint
+        && lastFirstPoint.x === newFirstPoint.x && lastFirstPoint.y === newFirstPoint.y;
+      const lastRectStr = JSON.stringify(last.rect || null);
+      const newRectStr = JSON.stringify(effectPath.rect || null);
+      const sameRect = lastRectStr === newRectStr && lastRectStr !== 'null';
+      const structurallyIdentical = (effectPath.points ? samePoints : (effectPath.rect ? sameRect : false))
+        && last.type === effectPath.type;
+      if (withinWindow && structurallyIdentical && !effectPath.id) {
+        appDebugStore.log({
+          category: 'addEffectPath-dedup',
+          message: `Skipped adding a duplicate effect — matches "${last.id}" added ${Date.now() - lastTimestamp}ms ago`,
+          detail: `type: ${effectPath.type}, category: ${effectPath.category || 'none'}, points count: last=${last.points?.length ?? 'n/a'} new=${effectPath.points?.length ?? 'n/a'}`,
+        });
+        return;
       }
+    }
 
-      const newPath = {
-        ...effectPath,
-        id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
-      };
-      // Direct, unmissable log of every single call — including which
-      // window made it and whether it happened while applying a remote
-      // broadcast (isUpdatingFromRemoteRef). This exists specifically to
-      // answer, definitively: is addEffectPath being called more than
-      // once for a single drawn stroke, and if so, from where? Prior
-      // diagnostics could only ever show the END RESULT (two different
-      // ids existing somewhere), never which window/code path actually
-      // created each one.
-      appDebugStore.log({
-        category: 'addEffectPath-call',
-        message: `addEffectPath called — generated id ${newPath.id}`,
-        detail: `window: ${window.location.href} | isUpdatingFromRemoteRef: ${isUpdatingFromRemoteRef.current} | effectPath.id was explicitly passed: ${!!effectPath.id} | type: ${effectPath.type} | category: ${effectPath.category || 'none'} | stack: ${(new Error().stack || '').split('\n').slice(1, 6).join(' <- ')}`,
-      });
+    // Generate the id ONCE, here, before touching React state at all — this
+    // is the actual fix. No matter how many times setSettings's updater
+    // runs internally, it will only ever see and append this exact id.
+    const newPath = {
+      ...effectPath,
+      id: effectPath.id || `eff_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
+    };
+    appDebugStore.log({
+      category: 'addEffectPath-call',
+      message: `addEffectPath called — generated id ${newPath.id}`,
+      detail: `window: ${window.location.href} | isUpdatingFromRemoteRef: ${isUpdatingFromRemoteRef.current} | effectPath.id was explicitly passed: ${!!effectPath.id} | type: ${effectPath.type} | category: ${effectPath.category || 'none'}`,
+    });
+
+    setSettings((prev) => {
+      // Guard against the id somehow already being present (e.g. this fired
+      // once already and a stale re-render path calls through again) —
+      // purely defensive, should never trigger now that id generation is
+      // stable, but costs nothing.
+      if ((prev.effectPaths || []).some(e => e.id === newPath.id)) return prev;
       const nextPaths = [...(prev.effectPaths || []), newPath];
       // This broadcast was missing entirely — effects added in the Grid
       // window never reached other windows' settings.effectPaths at all,
