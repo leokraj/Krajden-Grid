@@ -1802,6 +1802,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
   const commitInProgressRef = useRef(false); // synchronous guard against handleMouseUp double-firing for one gesture
   const latestHandleMouseUpRef = useRef(null); // always points at the current handleMouseUp closure, kept fresh every render
+  // Root cause of the "last effect drawn doesn't toggle" bug: on any
+  // touch-capable display (this app is routinely run on touchscreen
+  // monitors/tablets for the tabletop surface), the browser follows every
+  // touchstart/touchmove/touchend sequence with a SEPARATE, synthesized
+  // "compatibility" mouse event sequence (mousedown/mousemove/mouseup) so
+  // that mouse-only code keeps working. Because this canvas had BOTH
+  // onTouchEnd and onMouseUp wired to handleMouseUp, one physical touch
+  // release fired handleMouseUp twice — once for real, once for the
+  // browser's synthetic mouseup — producing two different effect ids for
+  // what looked like a single drawn stroke. The commitInProgressRef guard
+  // above didn't catch this because its 50ms reset window is shorter than
+  // the gap before the synthetic event arrives. inputModeRef tracks which
+  // kind of event actually started the current stroke, so handleMouseUp
+  // can reject a same-gesture release that arrives via the OTHER input
+  // type — see handleMouseDown/handleMouseUp below.
+  const inputModeRef = useRef(null); // 'touch' | 'mouse' | null
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
   // right-click confirms and exits config mode (without also exiting
@@ -2050,7 +2066,21 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   const handleMouseDown = useCallback((e) => {
     if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
+    // A touch-originated gesture that just committed (within the last
+    // 600ms, per commitInProgressRef's window) is immediately followed by
+    // the browser's synthesized compatibility mousedown/mouseup pair at the
+    // same screen position. The handleMouseUp-side guard below can't catch
+    // this for LIGHT placement specifically, because lights commit an
+    // effect immediately here in handleMouseDown, not on release — so a
+    // synthetic mousedown arriving right after a real touch-placed light
+    // would otherwise place a second, duplicate light. Block it here too.
+    if (commitInProgressRef.current) return;
     e.preventDefault();
+    // Record which input type actually started this stroke, so the
+    // matching handleMouseUp call can reject a same-gesture release that
+    // arrives via the browser's synthesized OTHER-type event instead (see
+    // inputModeRef's declaration for the full explanation).
+    inputModeRef.current = (e.type && e.type.startsWith('touch')) ? 'touch' : 'mouse';
     const pt = getCoords(e);
 
     // Selecting an existing effect is handled globally now (see the
@@ -2149,9 +2179,34 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // visibility toggle appeared to only affect "one out of two" effects:
     // the saved scene captured one of the two ids, but a different one
     // ended up being what's actually live on the grid.
+    // Reject a release that arrives via the OTHER input type than the one
+    // that started this stroke — this is the actual fix for the
+    // long-standing "last effect doesn't toggle" bug. See inputModeRef's
+    // declaration above for the full explanation: a touch-drawn stroke
+    // gets a real touchend AND a browser-synthesized mouseup for the same
+    // physical release, and vice versa for a mouse-drawn stroke on some
+    // hybrid/touch-capable displays. Only the event matching the mode that
+    // started the gesture is allowed to commit it.
+    const eventInputMode = (e?.type && e.type.startsWith('touch')) ? 'touch' : 'mouse';
+    if (inputModeRef.current && eventInputMode !== inputModeRef.current) {
+      appDebugStore.log({
+        category: 'handleMouseUp-cross-mode-reject',
+        message: `Rejected synthetic/duplicate release`,
+        detail: `event type: ${e?.type || 'none'} (${eventInputMode}) did not match the mode that started this stroke (${inputModeRef.current}) — this is the browser's compatibility-event duplicate, not a real second release.`,
+      });
+      return;
+    }
+
     if (commitInProgressRef.current) return;
     commitInProgressRef.current = true;
-    setTimeout(() => { commitInProgressRef.current = false; }, 50);
+    // The cross-mode check above (comparing e.type against inputModeRef) is
+    // now the primary defense against the touch/synthetic-mouse duplicate,
+    // and it has no false-positive risk against legitimate fast repeated
+    // strokes. This timer is just a backstop for a same-type double-fire
+    // (e.g. two listeners for the same event type) — kept short so it
+    // doesn't suppress a genuine quick second stroke drawn right after the
+    // first one.
+    setTimeout(() => { commitInProgressRef.current = false; inputModeRef.current = null; }, 120);
 
     if (placingLightRotateRef.current) {
       placingLightRotateRef.current = null;
@@ -2201,6 +2256,29 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     latestHandleMouseUpRef.current = handleMouseUp;
   }, [handleMouseUp]);
 
+  // Belt-and-suspenders: stop the browser from ever synthesizing the
+  // compatibility mouse-event sequence after a real touch gesture in the
+  // first place, rather than only filtering it out after the fact (the
+  // inputModeRef / commitInProgressRef checks above). React is known to
+  // attach its own onTouchStart/onTouchMove handlers as PASSIVE listeners
+  // (for scroll performance), which means e.preventDefault() called from
+  // inside handleMouseDown/handleMouseMove via those React props silently
+  // does nothing when invoked for a touch event — the browser still goes
+  // ahead and fires mouseover/mousemove/mousedown/mouseup/click afterward.
+  // A manually-attached, explicitly non-passive native listener is the only
+  // reliable way to actually suppress that synthesis.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const suppressSynthesis = (e) => { if (e.cancelable) e.preventDefault(); };
+    canvas.addEventListener('touchstart', suppressSynthesis, { passive: false });
+    canvas.addEventListener('touchmove', suppressSynthesis, { passive: false });
+    return () => {
+      canvas.removeEventListener('touchstart', suppressSynthesis);
+      canvas.removeEventListener('touchmove', suppressSynthesis);
+    };
+  }, []);
+
   // Release on window mouseup (handles dragging off canvas). Only acts
   // when the release happened OUTSIDE the canvas — if it landed ON the
   // canvas, the canvas's own onMouseUp React prop already handles it, and
@@ -2226,7 +2304,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     // always call the version with the up-to-date accumulated stroke.
     const up = (e) => {
       if (e.target === canvasRef.current) return; // already handled by the canvas's own onMouseUp
-      latestHandleMouseUpRef.current();
+      latestHandleMouseUpRef.current(e); // forward the event so cross-mode/type detection in handleMouseUp has real data
     };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
