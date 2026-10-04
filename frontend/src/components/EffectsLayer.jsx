@@ -1176,7 +1176,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // flowModeActive gates that forced behavior to only the path-drawing
   // tools (brush/lasso), letting Marquee and Eraser work normally even
   // with a river preset selected.
-  const flowModeActive = effectMode === 'flow' && effectTool !== 'marquee' && effectTool !== 'eraser';
+  // Lasso belongs alongside Marquee/Eraser here too — it's an enclosed-area
+  // tool (e.g. painting a pond-shaped puddle), not a flow-stroke tool, so a
+  // river preset being active shouldn't hijack it into drawing a flowing
+  // ribbon instead of letting the lasso's own click/drag/Alt-click logic run.
+  const flowModeActive = effectMode === 'flow'
+    && effectTool !== 'marquee' && effectTool !== 'eraser' && effectTool !== 'lasso';
 
   const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
@@ -1313,8 +1318,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         oc.stroke(); // thick round-capped brush stroke
       }
 
-      // Edge fade — blur the mask edges for gradient falloff
-      const fade = effect.edgeFade || 0;
+      // Edge fade — blur the mask edges for gradient falloff. Rivers default
+      // to 5px here too — this is the path SHADER-based rivers (Lava River,
+      // Mud River: isShader:true, not a video texture) actually go through,
+      // via the shader-flow branch in renderEffect below, which clips the
+      // shader to this same mask. The ribbon-shader edgeFade uniform added
+      // elsewhere only covers VIDEO-textured rivers, not these — this is the
+      // part of the river default-fade fix that was missing for them.
+      const isRiverMask = type === 'bezier' && (effect.category === 'flow' || FLOW_EFFECTS.has(effect.effectId || ''));
+      const fade = effect.edgeFade != null ? effect.edgeFade : (isRiverMask ? 5 : 0);
       if (fade > 0) {
         const tmp = document.createElement('canvas');
         tmp.width = w; tmp.height = h;
@@ -2351,6 +2363,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           effectUrl: activeEffectUrl, effectId: activeEffectId,
           isShader: !!activeShader, shaderName: activeShader || null,
           category: settings.activeEffectCategory || undefined,
+          marqueeShape: settings.effectMarqueeShape || 'rect',
           opacity, tile, tileScale, blendMode,
         });
       }
