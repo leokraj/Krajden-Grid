@@ -11,6 +11,17 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   const drawingCanvasRef = useRef(null);
   const bgCanvasRef = useRef(null);
   const containerRef = useRef(null);
+  // A right-click that exits an active tool (measure/draw/erase/ping) sets
+  // this ref so the native 'contextmenu' event from that SAME click doesn't
+  // also open the radial menu. It has to be a ref, not state: React's state
+  // update from the mousedown handler can commit and re-render — removing
+  // the measure-mode interaction overlay the mousedown fired on — before the
+  // browser dispatches 'contextmenu' for that same right-click, so by the
+  // time onContextMenu runs it can see settings.measureMode already false
+  // and, finding "no active tool", open the radial menu right after exiting
+  // one. A ref read synchronously at the top of onContextMenu sidesteps that
+  // render-timing race entirely.
+  const suppressNextContextMenuRef = useRef(false);
   const { 
     settings, 
     updateSettings,
@@ -1420,6 +1431,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       // Right click (button 2): Reset active tool, clear pinned measurements & turn off measure mode
       if (e.button === 2) {
         e.preventDefault();
+        suppressNextContextMenuRef.current = true;
+        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
+        // touch-emulated right-click on some platforms), don't leave the
+        // flag stuck true and silently eat the next real right-click.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
         setMeasureWaypoints([]);
         setCurrentPoint(null);
         setIsDrawing(false);
@@ -1455,6 +1471,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     if (e.button === 2) {
       e.preventDefault();
       if (settings.pingMode) {
+        suppressNextContextMenuRef.current = true;
+        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
+        // touch-emulated right-click on some platforms), don't leave the
+        // flag stuck true and silently eat the next real right-click.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
         updateSettings({ pingMode: false });
         toast.info('Exited Beacon Mode');
         return;
@@ -1478,6 +1499,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
     if ((settings.drawingEnabled || settings.eraserEnabled) && !isBlocked) {
       if (e.button === 2) {
         e.preventDefault();
+        suppressNextContextMenuRef.current = true;
+        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
+        // touch-emulated right-click on some platforms), don't leave the
+        // flag stuck true and silently eat the next real right-click.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
         setIsDrawing(false);
         setIsErasing(false);
         setCurrentDrawingPath([]);
@@ -1843,6 +1869,14 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       onDragOver={handleDragOver}
       onContextMenu={(e) => {
         e.preventDefault();
+        // If a mousedown handler already exited an active tool for this same
+        // right-click, don't also open the radial menu — see
+        // suppressNextContextMenuRef's declaration for why this has to be a
+        // ref check rather than re-reading settings here.
+        if (suppressNextContextMenuRef.current) {
+          suppressNextContextMenuRef.current = false;
+          return;
+        }
         if (settings.measureMode) {
           updateSettings({ measureMode: false });
           return;
