@@ -8,8 +8,10 @@ if (typeof window !== "undefined") { window.__renderVisibilityAnchor = "render-v
  * - Dynamic Reverse Mask Revealer: reveals animated video/GIF/textures beneath the tabletop.
  * - 4 Powerful Mask Tools:
  *     1. Brush: Freehand smooth painting brush with round caps & adjustable size.
- *     2. Marquee: Rectangular selection window.
- *     3. Bezier: Flowing curved vector path.
+ *     2. Marquee: Rectangular (or circular) selection window.
+ *     3. Lasso: Freehand enclosed-area selection, Photoshop-style — drag to
+ *        trace freehand, hold Alt and click to add straight edges instead,
+ *        release (without Alt) to close the loop and fill it.
  *     4. Eraser: Erases from the mask (restores normal background).
  * - Video Tiling: Seamlessly repeat video as a tiled pattern with controllable tile scale (25% - 300%) or stretch across bounds.
  * - Built-in High Quality Video & Animated Presets (Lava, River Water, Arcane Portal, Toxic Acid, Blizzard, Firestorm, Void).
@@ -173,11 +175,24 @@ const RIBBON_FRAG_TEX = `
   precision mediump float;
   uniform sampler2D u_tex;
   uniform float u_opacity;
+  // Fraction (0..0.5) of the ribbon's width, on EACH side, over which the
+  // texture fades to transparent. Was previously missing entirely — the
+  // ribbon's own alpha channel (almost always fully opaque for ordinary
+  // video/image assets) was used as-is, producing a hard rectangular edge
+  // straight across the texture. At any bend in the path, that hard edge
+  // sweeps across at an angle relative to the actual curve tangent, which
+  // reads as uneven/patchy transparency along the river's banks — this is
+  // the "alpha on the back areas" artifact.
+  uniform float u_edgeFade;
   varying vec2 v_uv;
   void main() {
     vec2 uv = vec2(fract(v_uv.x), v_uv.y);
     vec4 col = texture2D(u_tex, uv);
-    gl_FragColor = vec4(col.rgb, col.a * u_opacity);
+    float fade = clamp(u_edgeFade, 0.0, 0.49);
+    float edgeAlpha = fade > 0.0
+      ? smoothstep(0.0, fade, v_uv.y) * smoothstep(1.0, 1.0 - fade, v_uv.y)
+      : 1.0;
+    gl_FragColor = vec4(col.rgb, col.a * u_opacity * edgeAlpha);
   }
 `;
 
@@ -244,9 +259,16 @@ function getRibbonGL(cW, cH) {
 
 // Build ribbon geometry: returns {positions, uvs} Float32Arrays
 function buildRibbonGeometry(points, type, strokeWidth, repeatCount, widthVariation) {
-  // Tessellate the path
+  // Tessellate the path. Always run the Catmull-Rom smoothing pass when
+  // there are enough points to do so — not just for type==='bezier'. A
+  // river rendered from raw, unsmoothed points has sharp corners wherever
+  // two consecutive mouse/touch samples aren't collinear; at those corners
+  // the simple perpendicular-offset ribbon (no real miter join) can pinch
+  // or gap on the inside of the turn, showing background through — part of
+  // what read as "alpha on the back areas". Smoothing the path first keeps
+  // curvature gradual enough that this basic offsetting looks right.
   const tess = [];
-  if (type === 'bezier' && points.length >= 3) {
+  if (points.length >= 3) {
     const STEPS = Math.min(300, points.length * 30);
     for (let s = 0; s <= STEPS; s++) {
       const t = s / STEPS;
@@ -346,6 +368,12 @@ export function renderRibbonWithVideo(ctx, media, points, type, strokeWidth, opa
   // Set uniforms
   gl.uniform2f(gl.getUniformLocation(progTex, 'u_res'), cW, cH);
   gl.uniform1f(gl.getUniformLocation(progTex, 'u_opacity'), opacity);
+  // edgeFade arrives in pixels (same unit as the stroke width slider, and
+  // the same convention used by buildMask's blur-based edgeFade elsewhere).
+  // The shader's v_uv.y spans the FULL ribbon width (0=one bank, 1=other),
+  // so convert to a fraction of that width for the smoothstep fade region.
+  const edgeFadeFraction = strokeWidth > 0 ? Math.max(0, edgeFade || 0) / strokeWidth : 0;
+  gl.uniform1f(gl.getUniformLocation(progTex, 'u_edgeFade'), edgeFadeFraction);
 
   // Upload video/image as texture — reuse one texture object across frames
   // (creating/deleting a new GL texture every frame is wasteful and can stall).
@@ -1141,6 +1169,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // Auto-detect flow vs area based on selected effect
   const activePreset = BUILTIN_EFFECT_PRESETS.find(p => p.id === activeEffectId);
   const effectMode   = activePreset ? getEffectMode(activePreset) : 'area';
+  // A river/flow preset being active used to unconditionally force every
+  // click into a single click-drag flow-stroke gesture, completely ignoring
+  // the selected tool — so picking Marquee (or the eraser) while a river
+  // preset was active silently did nothing but draw a flow path instead.
+  // flowModeActive gates that forced behavior to only the path-drawing
+  // tools (brush/lasso), letting Marquee and Eraser work normally even
+  // with a river preset selected.
+  const flowModeActive = effectMode === 'flow' && effectTool !== 'marquee' && effectTool !== 'eraser';
 
   const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
@@ -1247,6 +1283,16 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           // Rectangle or freehand-filled
           oc.fillRect(rect.x, rect.y, rect.width, rect.height);
         }
+      } else if (type === 'lasso' && points.length >= 3) {
+        // Lasso is always a CLOSED, FILLED region — unlike the brush/flow
+        // stroke case below, which paints a thick line following the path.
+        // closePath() connects the last point straight back to the first,
+        // exactly like releasing a Photoshop lasso selection.
+        oc.beginPath();
+        oc.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) oc.lineTo(points[i].x, points[i].y);
+        oc.closePath();
+        oc.fill();
       } else if (points.length === 1) {
         oc.beginPath();
         oc.arc(points[0].x, points[0].y, sw/2, 0, Math.PI*2);
@@ -1327,8 +1373,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           if (ready) {
             const repeatCount = effect.repeatCount || 3;
             const widthVariation = effect.widthVariation || 0;
+            // Rivers get a soft border fade by default (5px) — applied here
+            // rather than only at creation time, so it also covers rivers
+            // drawn before this default existed. An explicit edgeFade value
+            // (including an explicit 0, for someone who wants hard edges)
+            // always wins.
+            const riverEdgeFade = effect.edgeFade != null ? effect.edgeFade : 5;
             const ok = renderRibbonWithVideo(ctx, media, points, type,
-              sw, op, repeatCount, widthVariation, effect.edgeFade || 0, cW, cH);
+              sw, op, repeatCount, widthVariation, riverEdgeFade, cW, cH);
             if (ok) { setDbg('composited-ok', { renderPath: 'ribbon-mesh' }); return; }
           } else if (isVid && media.paused) {
             media.play().catch(() => {});
@@ -1498,12 +1550,16 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           for (let ty = 0; ty < cH; ty += tH - 1)
             try { texCtx.drawImage(media, tx, ty, tW + 1, tH + 1); } catch (_) {}
       } else {
+        // Lasso is a closed, filled polygon like marquee (its own points are
+        // the exact boundary) — no outward stroke-width padding needed,
+        // unlike a brush/bezier stroke which extends sw/2 beyond its points.
+        const isClosedArea = type === 'marquee' || type === 'lasso';
         const xs = type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
         const ys = type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
-        const bx=Math.min(...xs)-(type==='marquee'?0:sw/2);
-        const by=Math.min(...ys)-(type==='marquee'?0:sw/2);
-        const bw=Math.max(...xs)-Math.min(...xs)+(type==='marquee'?0:sw);
-        const bh=Math.max(...ys)-Math.min(...ys)+(type==='marquee'?0:sw);
+        const bx=Math.min(...xs)-(isClosedArea?0:sw/2);
+        const by=Math.min(...ys)-(isClosedArea?0:sw/2);
+        const bw=Math.max(...xs)-Math.min(...xs)+(isClosedArea?0:sw);
+        const bh=Math.max(...ys)-Math.min(...ys)+(isClosedArea?0:sw);
         try { texCtx.drawImage(media, bx, by, Math.max(1,bw), Math.max(1,bh)); } catch (_) {}
       }
 
@@ -1667,9 +1723,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           }
         }
 
-        // Live preview
-        if (isDrawing && hasActiveEffect) {
-          const liveType = effectMode === 'flow' ? 'bezier' : effectTool;
+        // Live preview. Normally gated on isDrawing (mouse button down), but
+        // a paused lasso session (after an Alt+click, waiting for the next
+        // click) has NO button held — isDrawing is false — yet the
+        // in-progress shape and an aiming guide to the cursor should still
+        // be visible, so it's included in the gate explicitly.
+        const lassoPaused = effectTool === 'lasso' && lassoSessionActiveRef.current && !isDrawing;
+        if ((isDrawing || lassoPaused) && hasActiveEffect) {
+          const liveType = flowModeActive ? 'bezier' : effectTool;
         const liveRect = (marqueeStart && marqueeCurrent) ? {
           x: Math.min(marqueeStart.x, marqueeCurrent.x),
           y: Math.min(marqueeStart.y, marqueeCurrent.y),
@@ -1697,6 +1758,44 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             ctx.strokeRect(liveRect.x, liveRect.y, liveRect.width, liveRect.height);
           }
           ctx.setLineDash([]); ctx.restore();
+        } else if (liveType === 'lasso' && currentStroke.length >= 1) {
+          // Filled-area preview of the lasso so far (only meaningful with 3+
+          // points — buildMask's lasso branch itself requires that).
+          if (currentStroke.length >= 3) {
+            renderEffect({
+              type: 'lasso', points: currentStroke,
+              effectUrl: activeEffectUrl, isShader: !!activeShader, shaderName: activeShader,
+              opacity: opacity * 0.5, tile: tile, tileScale: tileScale, blendMode: blendMode,
+            });
+          }
+          // Outline of the committed points so far, plus a rubber-band guide
+          // line from the last vertex to the current cursor position — this
+          // is what shows where an Alt+click would place the next straight
+          // edge, and (while paused) that the session is still open.
+          ctx.save();
+          ctx.strokeStyle = '#caa055'; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(currentStroke[0].x, currentStroke[0].y);
+          for (let i = 1; i < currentStroke.length; i++) ctx.lineTo(currentStroke[i].x, currentStroke[i].y);
+          ctx.globalAlpha = 0.85;
+          ctx.stroke();
+          if (mousePos) {
+            const last = currentStroke[currentStroke.length - 1];
+            ctx.beginPath();
+            ctx.moveTo(last.x, last.y);
+            ctx.lineTo(mousePos.x, mousePos.y);
+            ctx.setLineDash([5, 4]);
+            ctx.globalAlpha = 0.6;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          // Vertex dots — most useful while paused, to show exactly where
+          // each placed straight-edge click landed.
+          ctx.fillStyle = '#caa055'; ctx.globalAlpha = 0.9;
+          for (const p of currentStroke) {
+            ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
         } else if (currentStroke.length >= 2) {
           renderEffect({
             type: liveType, points: currentStroke,
@@ -1707,18 +1806,14 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         }
       }
 
-      // Brush cursor ring — shows the current width for both area painting
-      // (brush/bezier) AND flow/river drawing, since rivers also use
-      // brushSize to set their stroke width. Previously only shown in area
-      // mode, so river presets (Lava River, Water River, etc.) never got
-      // this size feedback even though they use the exact same value.
-      // Note: effectTool is irrelevant once in flow mode (flow always uses
-      // click-drag regardless of the brush/marquee/bezier selection), so the
-      // marquee exclusion only applies to area mode.
-      const showBrushRing = effectsEnabled && mousePos && (
-        (effectMode === 'area' && effectTool !== 'marquee') ||
-        effectMode === 'flow'
-      );
+      // Brush cursor ring — shows the current width for area painting
+      // (brush), the eraser's radius, and flow/river drawing, since all of
+      // those use brushSize. Excluded for marquee (shows its own rect/
+      // ellipse preview) and lasso (its shape is the exact click points —
+      // brushSize plays no part in it, so the ring would just be a
+      // misleading leftover circle).
+      const showBrushRing = effectsEnabled && mousePos
+        && effectTool !== 'marquee' && effectTool !== 'lasso';
       if (showBrushRing) {
         ctx.save();
         ctx.beginPath();
@@ -1818,6 +1913,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // can reject a same-gesture release that arrives via the OTHER input
   // type — see handleMouseDown/handleMouseUp below.
   const inputModeRef = useRef(null); // 'touch' | 'mouse' | null
+  // Lasso tool state. A lasso "session" can span MULTIPLE mousedown/mouseup
+  // cycles: a plain drag-release finalizes it, but an Alt+click only adds a
+  // straight-edge vertex and leaves the session open, waiting for the next
+  // mousedown (to resume freehand) or another Alt+click (another straight
+  // edge) — exactly like Photoshop's Lasso/Polygonal-Lasso toggle. `isDrawing`
+  // still means "mouse button is down right now" for the CURRENT segment;
+  // this ref tracks whether there's an unfinished lasso waiting across
+  // segments, independent of that.
+  const lassoSessionActiveRef = useRef(false);
   // Light config mode: right after placing a light, it's "armed" for quick
   // adjustment — scroll cycles color, middle-click cycles flicker speed,
   // right-click confirms and exits config mode (without also exiting
@@ -2053,6 +2157,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         return true;
       });
       if (remaining.length !== effectPaths.length) updateSettings({ effectPaths: remaining });
+    } else if (effectTool === 'lasso' && e.altKey) {
+      // Alt held during a lasso drag: pause freehand point accumulation so
+      // the straight-edge rubber-band preview (drawn from the last vertex to
+      // the live mousePos, in the render loop below) stays clean instead of
+      // picking up jittery freehand points while the user is aiming a
+      // straight edge.
     } else {
       setCurrentStroke(prev => {
         if (prev.length > 0) {
@@ -2095,8 +2205,12 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (configuringLightId) setConfiguringLightId(null);
 
     // FLOW MODE: click and drag to draw river path (like Arcane Overlay)
-    // Scroll wheel changes width while drawing
-    if (effectMode === 'flow') {
+    // Scroll wheel changes width while drawing. Gated by flowModeActive, not
+    // the raw effectMode — this used to fire unconditionally whenever a
+    // river preset was active, hijacking Marquee and Eraser clicks into
+    // flow-stroke drawing and leaving those tools unusable with any river
+    // selected.
+    if (flowModeActive) {
       setIsDrawing(true);
       setCurrentStroke([pt]);
       return;
@@ -2147,10 +2261,20 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       setMarqueeStart(pt); setMarqueeCurrent(pt);
     } else if (effectTool === 'eraser') {
       // handled in mousemove
+    } else if (effectTool === 'lasso') {
+      if (lassoSessionActiveRef.current) {
+        // Resuming after an Alt+click paused the session — the straight
+        // vertex was already pushed by that mouseup. Just let this drag's
+        // mousemove resume freehand accumulation from the existing points;
+        // don't reset or re-push anything here.
+      } else {
+        lassoSessionActiveRef.current = true;
+        setCurrentStroke([pt]);
+      }
     } else {
       setCurrentStroke([pt]);
     }
-  }, [effectsEnabled, effectMode, effectTool, flowPoints, hasActiveEffect,
+  }, [effectsEnabled, effectMode, effectTool, flowModeActive, flowPoints, hasActiveEffect,
       activeEffectUrl, activeEffectId, activeShader, brushSize, opacity,
       tile, tileScale, blendMode, getCoords, addEffectPath,
       effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
@@ -2231,10 +2355,37 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         });
       }
       setMarqueeStart(null); setMarqueeCurrent(null);
+    } else if (effectTool === 'lasso' && lassoSessionActiveRef.current) {
+      const pt = getCoords(e);
+      if (e.altKey) {
+        // Alt+click: add a straight-edge vertex and leave the session open.
+        // The next mousedown resumes freehand from here; another Alt+click
+        // adds another straight edge. The lasso is NOT finalized yet, so we
+        // deliberately skip the generic setCurrentStroke([]) reset below.
+        setCurrentStroke(prev => [...prev, pt]);
+        return;
+      }
+      // Plain release: finalize. Include the exact release point (mousemove's
+      // distance throttle may have dropped a point this close to the last
+      // sample), then close the polygon into a filled area.
+      const finalPoints = [...currentStroke, pt];
+      if (finalPoints.length >= 3 && hasActiveEffect) {
+        addEffectPath({
+          type: 'lasso',
+          points: finalPoints,
+          effectUrl: activeEffectUrl, effectId: activeEffectId,
+          isShader: !!activeShader, shaderName: activeShader || null,
+          category: settings.activeEffectCategory || undefined,
+          opacity, tile, tileScale, blendMode,
+        });
+      }
+      lassoSessionActiveRef.current = false;
+      setCurrentStroke([]);
+      return;
     } else if (currentStroke.length >= 2 && hasActiveEffect) {
       const isFlow = effectMode === 'flow';
       addEffectPath({
-        type: isFlow ? 'bezier' : (effectTool === 'bezier' ? 'bezier' : 'brush'),
+        type: isFlow ? 'bezier' : 'brush',
         points: [...currentStroke],
         effectUrl: activeEffectUrl, effectId: activeEffectId,
         isShader: !!activeShader, shaderName: activeShader || null,
@@ -2245,7 +2396,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     setCurrentStroke([]);
   }, [isDrawing, effectMode, effectTool, marqueeStart, marqueeCurrent, currentStroke,
       hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
-      brushSize, opacity, tile, tileScale, blendMode, addEffectPath]);
+      brushSize, opacity, tile, tileScale, blendMode, addEffectPath, getCoords]);
 
   // Keeps latestHandleMouseUpRef pointing at the current handleMouseUp on
   // every render — separate from the listener-attachment effect below,
@@ -2325,19 +2476,36 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     return () => { if (canvas) canvas.removeEventListener('wheel', handler); };
   }, [effectsEnabled, brushSize, updateSettings]);
 
-  // Escape cancels flow/brush drawing
+  // Escape cancels flow/brush drawing, and also an in-progress lasso session
+  // (which can otherwise be left "open" — waiting for another click — after
+  // an Alt+click, with no mouse button held down to cancel it by releasing).
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') { setFlowPoints([]); setIsDrawing(false); setCurrentStroke([]); } };
+    const handler = (e) => {
+      if (e.key === 'Escape') {
+        setFlowPoints([]); setIsDrawing(false); setCurrentStroke([]);
+        lassoSessionActiveRef.current = false;
+      }
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // If the tool is switched away from Lasso mid-session, cancel the pending
+  // lasso rather than leaving it silently open — switching tools is a clear
+  // enough signal of intent to abandon whatever was half-drawn.
+  useEffect(() => {
+    if (effectTool !== 'lasso' && lassoSessionActiveRef.current) {
+      lassoSessionActiveRef.current = false;
+      setCurrentStroke([]);
+    }
+  }, [effectTool]);
 
   if (!effectPaths.length && !effectsEnabled) return null;
 
   // ── Cursor ────────────────────────────────────────────────────────────────
   const cursorStyle = !effectsEnabled    ? 'default'
     : !hasActiveEffect && effectTool !== 'eraser' ? 'not-allowed'
-    : effectMode === 'flow'               ? 'crosshair'
+    : flowModeActive                      ? 'crosshair'
     : effectTool === 'eraser'             ? 'cell'
     : effectTool === 'marquee'            ? 'crosshair'
     : 'none';
@@ -2379,10 +2547,19 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         </div>
       )}
 
-      {/* Flow mode: drag hint + scroll wheel tip */}
-      {effectsEnabled && effectMode === 'flow' && (
+      {/* Flow mode: drag hint + scroll wheel tip — hidden when Marquee or
+          Eraser is selected, since a river preset no longer forces
+          flow-stroke drawing for those tools. */}
+      {effectsEnabled && flowModeActive && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-[9px] font-mono pointer-events-none" style={{ zIndex: 20 }}>
           🌊 Click &amp; drag to draw river · Scroll wheel to change width
+        </div>
+      )}
+
+      {/* Lasso tool hint */}
+      {effectsEnabled && effectTool === 'lasso' && !flowModeActive && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/80 border border-[#caa055]/30 text-[#caa055] text-[9px] font-mono pointer-events-none" style={{ zIndex: 20 }}>
+          🪢 Drag to trace freehand · Hold Alt and click for a straight edge · Release to fill
         </div>
       )}
 
@@ -2524,7 +2701,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
                 />
                 <span className="text-[9px] text-[#caa055] font-mono w-8">{ep.tileScale ?? 100}%</span>
               </div>
-              {ep.type !== 'marquee' && (<>
+              {ep.type !== 'marquee' && ep.type !== 'lasso' && (<>
                 <div className="w-px h-5 bg-white/20" />
                 <div className="flex items-center gap-1.5">
                   <span className="text-[9px] text-white/50">width</span>
@@ -2870,7 +3047,7 @@ export function EffectsControlPanel({ onClose }) {
           {[
             { id: 'brush', label: 'Brush', icon: '🖌️', desc: 'Freehand Paint' },
             { id: 'marquee', label: 'Marquee', icon: '🔲', desc: 'Box Window' },
-            { id: 'bezier', label: 'Bezier', icon: '〰️', desc: 'Curved Path' },
+            { id: 'lasso', label: 'Lasso', icon: '🪢', desc: 'Freehand · Alt+click = straight' },
             { id: 'eraser', label: 'Eraser', icon: '🧹', desc: 'Erase Mask' }
           ].map((tool) => (
             <button
@@ -2938,7 +3115,7 @@ export function EffectsControlPanel({ onClose }) {
             </div>
 
             {/* Width (stroke effects) */}
-            {selEp.type !== 'marquee' && (
+            {selEp.type !== 'marquee' && selEp.type !== 'lasso' && (
               <div>
                 <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
                   <span>Width</span>
@@ -2950,13 +3127,15 @@ export function EffectsControlPanel({ onClose }) {
               </div>
             )}
 
-            {/* Edge Fade */}
+            {/* Edge Fade — rivers default to 5px even when edgeFade was never
+                explicitly stored (see the render-time default in renderEffect),
+                so the displayed value matches what's actually drawn. */}
             <div>
               <div className="flex justify-between text-[9px] text-gray-400 mb-0.5">
                 <span>Edge Fade</span>
-                <span className="text-[#caa055] font-mono">{selEp.edgeFade ?? 0}px</span>
+                <span className="text-[#caa055] font-mono">{selEp.edgeFade ?? (selEp.category === 'flow' ? 5 : 0)}px</span>
               </div>
-              <input type="range" min="0" max="120" step="4" value={selEp.edgeFade ?? 0}
+              <input type="range" min="0" max="120" step="4" value={selEp.edgeFade ?? (selEp.category === 'flow' ? 5 : 0)}
                 onChange={e => updateEffectPath(selEp.id, { edgeFade: parseInt(e.target.value) })}
                 className="w-full h-1 accent-[#caa055]" />
             </div>
@@ -3319,7 +3498,7 @@ export function EffectsControlPanel({ onClose }) {
                           className="w-full h-1 accent-[#caa055]" />
                       </div>
                       {/* Width (for stroke effects) */}
-                      {ep.type !== 'marquee' && (
+                      {ep.type !== 'marquee' && ep.type !== 'lasso' && (
                         <div>
                           <div className="flex justify-between mb-0.5">
                             <span className="text-[8px] text-white/50 uppercase tracking-wider">Width</span>
