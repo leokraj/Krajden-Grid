@@ -1965,6 +1965,34 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
               && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
         }
+        if (ep.type === 'lasso' && ep.points && ep.points.length >= 3) {
+          // Lasso is a closed, filled area — select it anywhere inside, not
+          // just near the outline. Standard ray-casting point-in-polygon
+          // test, with a small outline tolerance so an edge click near the
+          // boundary (which may fall just outside the polygon due to the
+          // stroke's own width) still counts as a hit.
+          const pts = ep.points;
+          let inside = false;
+          for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+            if (((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)) {
+              inside = !inside;
+            }
+          }
+          if (inside) return true;
+          const tol = 10;
+          for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+            const dx = xj - xi, dy = yj - yi;
+            const lenSq = dx * dx + dy * dy;
+            let t = lenSq > 0 ? ((pt.x - xi) * dx + (pt.y - yi) * dy) / lenSq : 0;
+            t = Math.max(0, Math.min(1, t));
+            const cx = xi + t * dx, cy = yi + t * dy;
+            if (Math.hypot(pt.x - cx, pt.y - cy) <= tol) return true;
+          }
+          return false;
+        }
         if (ep.points) {
           const w = (ep.width || 60) / 2 + 10;
           return ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= w);
@@ -2165,6 +2193,22 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       const r = brushSize / 2;
       const remaining = effectPaths.filter(ep => {
         if (ep.rect) return !(pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height);
+        if (ep.type === 'lasso' && ep.points && ep.points.length >= 3) {
+          // Same filled-area test as selection's findHit — a lasso is a
+          // closed region, so erasing it needs to work from anywhere inside,
+          // not just within reach of a vertex point.
+          const pts = ep.points;
+          let inside = false;
+          for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+            if (((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)) {
+              inside = !inside;
+            }
+          }
+          if (inside) return false;
+          return !pts.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= r);
+        }
         if (ep.points) return !ep.points.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) <= r + (ep.width || 60) / 2);
         return true;
       });
