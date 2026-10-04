@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGrid, TOKEN_SIZE_PRESETS, DND_CONDITIONS } from '../context/GridContext';
 import { toast } from 'sonner';
-import { 
-  Ruler, 
-  Minus, 
-  Circle, 
-  Triangle, 
-  XCircle, 
-  Radio, 
-  Image, 
-  PenTool, 
-  Eraser, 
-  Trash2, 
+import {
+  Ruler,
+  Minus,
+  Circle,
+  Triangle,
+  XCircle,
+  Radio,
+  Image,
+  PenTool,
+  Eraser,
+  Trash2,
   X,
   Sparkles,
   MapPin,
   Layers,
-  Grid
+  Grid,
+  Flame
 } from 'lucide-react';
 
 export function RadialContextMenu() {
@@ -98,6 +99,20 @@ export function RadialContextMenu() {
   const handleBeaconSelect = () => {
     updateSettings({ pingMode: true });
     toast.info('Beacon Mode Active (Left click map to drop beacon)');
+    closeRadialMenu();
+  };
+
+  const handleEffectsSelect = () => {
+    updateSettings({ effectsEnabled: true });
+    const elem = document.getElementById('section-effects');
+    if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+    toast.success('Effects Painting Mode active');
+    closeRadialMenu();
+  };
+
+  const handleEffectsOff = () => {
+    updateSettings({ effectsEnabled: false });
+    toast.info('Effects Painting Mode turned off');
     closeRadialMenu();
   };
 
@@ -243,6 +258,24 @@ export function RadialContextMenu() {
                   {selectedClipartIds.length}
                 </span>
               )}
+            </div>
+          </div>
+
+          {/* CORNER: BOTTOM-RIGHT — Effects Painting Mode */}
+          <div
+            className="absolute bottom-6 right-6 flex flex-col items-center group cursor-pointer z-10"
+            onMouseEnter={() => setActiveSubMenu('effects')}
+            onClick={() => (settings.effectsEnabled ? setActiveSubMenu(activeSubMenu === 'effects' ? null : 'effects') : handleEffectsSelect())}
+            data-testid="radial-corner-effects"
+            title="Effects Painting Mode"
+          >
+            <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+              settings.effectsEnabled
+                ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
+                : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
+            }`}>
+              <Flame className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider">Effects</span>
             </div>
           </div>
 
@@ -422,6 +455,28 @@ export function RadialContextMenu() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* BOTTOM-RIGHT SUBMENU: EFFECTS (only reachable once already on, via the corner toggle) */}
+          {activeSubMenu === 'effects' && settings.effectsEnabled && (
+            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2">
+              <button
+                onClick={handleEffectsSelect}
+                className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[#caa055] text-black font-bold text-[9px] uppercase tracking-wider hover:bg-[#e2b563] cursor-pointer shadow-lg"
+                data-testid="radial-effects-panel"
+              >
+                <Flame className="w-4 h-4" />
+                <span>Open Panel</span>
+              </button>
+              <button
+                onClick={handleEffectsOff}
+                className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer"
+                data-testid="radial-effects-off"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Off</span>
+              </button>
             </div>
           )}
 
