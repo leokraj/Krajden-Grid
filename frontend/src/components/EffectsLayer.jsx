@@ -75,26 +75,92 @@ function getLocalEffectUrl(id) {
 // ── Static SVG Splatter Presets ───────────────────────────────────────────────
 // Simple blob splats — no drips, no animation, just paint marks
 
-function makeSplatSvg(color1, color2, count = 12, seed = 0) {
+function makeSplatSvg(color1, color2, dotCount = 14, seed = 0) {
+  // Procedural splatter: a few irregular (non-elliptical) impact blobs near
+  // the center, each with thin drip tails trailing outward to a small
+  // droplet tip, plus a fine scatter of satellite dots falling off in size
+  // and density with distance. Plain randomly-placed ellipses (the previous
+  // approach) just read as "ovals" — splatters need the irregular, jagged
+  // blob silhouette and the drip trails to actually look like a splat.
   const rng = (n) => { let x = Math.sin(n + seed) * 43758.5453; return x - Math.floor(x); };
-  let blobs = '';
-  for (let i = 0; i < count; i++) {
-    const cx = 10 + rng(i * 7 + 1) * 80;
-    const cy = 10 + rng(i * 7 + 2) * 80;
-    const rx = 3 + rng(i * 7 + 3) * 14;
-    const ry = 2 + rng(i * 7 + 4) * 10;
-    const rot = rng(i * 7 + 5) * 360;
-    const alpha = 0.6 + rng(i * 7 + 6) * 0.4;
-    const c = rng(i * 7) > 0.5 ? color1 : color2;
-    blobs += `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="${c}" opacity="${alpha.toFixed(2)}" transform="rotate(${rot.toFixed(1)},${cx.toFixed(1)},${cy.toFixed(1)})"/>`;
-    // Small satellite dots
-    for (let j = 0; j < 3; j++) {
-      const dx = cx + (rng(i*21+j*3)*30-15), dy = cy + (rng(i*21+j*3+1)*30-15);
-      const dr = 0.8 + rng(i*21+j*3+2) * 3;
-      blobs += `<circle cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" r="${dr.toFixed(1)}" fill="${c}" opacity="${(alpha*0.7).toFixed(2)}"/>`;
+  const pick = (n) => (rng(n) > 0.5 ? color1 : color2);
+
+  // Irregular blob outline: pick N points around a circle at randomized
+  // radii, then connect them with quadratic curves through their midpoints
+  // so the outline stays smooth but noticeably non-circular/non-elliptical.
+  const blobPath = (cx, cy, baseR, s) => {
+    const sides = 8;
+    const verts = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2;
+      const r = baseR * (0.55 + rng(s + i * 3) * 0.75);
+      verts.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
+    }
+    let d = `M ${verts[0].x.toFixed(1)} ${verts[0].y.toFixed(1)} `;
+    for (let i = 0; i < sides; i++) {
+      const curr = verts[i];
+      const next = verts[(i + 1) % sides];
+      const mx = (curr.x + next.x) / 2, my = (curr.y + next.y) / 2;
+      d += `Q ${curr.x.toFixed(1)} ${curr.y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)} `;
+    }
+    return d + 'Z';
+  };
+
+  // Thin tapered drip tail from (cx,cy) out to a point at the given angle
+  // and length, widest at the base, narrowing to the tip.
+  const dripPath = (cx, cy, angle, length, width) => {
+    const ex = cx + Math.cos(angle) * length, ey = cy + Math.sin(angle) * length;
+    const px = -Math.sin(angle) * width, py = Math.cos(angle) * width;
+    const mx = cx + Math.cos(angle) * length * 0.55, my = cy + Math.sin(angle) * length * 0.55;
+    return `M ${(cx + px).toFixed(1)} ${(cy + py).toFixed(1)} `
+         + `Q ${(mx + px * 0.4).toFixed(1)} ${(my + py * 0.4).toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)} `
+         + `Q ${(mx - px * 0.4).toFixed(1)} ${(my - py * 0.4).toFixed(1)} ${(cx - px).toFixed(1)} ${(cy - py).toFixed(1)} Z`;
+  };
+
+  let shapes = '';
+  const cx0 = 50, cy0 = 50;
+  const numBlobs = Math.max(3, Math.min(5, Math.round(dotCount / 4)));
+
+  for (let b = 0; b < numBlobs; b++) {
+    const s = b * 97 + 11;
+    const dist = b === 0 ? 0 : 6 + rng(s) * 16;
+    const dirAngle = rng(s + 1) * Math.PI * 2;
+    const bx = cx0 + Math.cos(dirAngle) * dist;
+    const by = cy0 + Math.sin(dirAngle) * dist;
+    const baseR = (b === 0 ? 12 : 5) + rng(s + 2) * 8;
+    const color = pick(s + 3);
+    const alpha = 0.75 + rng(s + 4) * 0.25;
+    shapes += `<path d="${blobPath(bx, by, baseR, s + 10)}" fill="${color}" opacity="${alpha.toFixed(2)}"/>`;
+
+    const numDrips = 1 + Math.floor(rng(s + 20) * 3);
+    for (let d = 0; d < numDrips; d++) {
+      const ds = s + 30 + d * 13;
+      const dripAngle = dirAngle + (rng(ds) - 0.5) * 1.6;
+      const dripLen = baseR * (0.9 + rng(ds + 1) * 1.3);
+      const dripW = baseR * (0.12 + rng(ds + 2) * 0.16);
+      const tipX = bx + Math.cos(dripAngle) * dripLen;
+      const tipY = by + Math.sin(dripAngle) * dripLen;
+      shapes += `<path d="${dripPath(bx, by, dripAngle, dripLen, dripW)}" fill="${color}" opacity="${(alpha * 0.9).toFixed(2)}"/>`;
+      shapes += `<circle cx="${tipX.toFixed(1)}" cy="${tipY.toFixed(1)}" r="${(dripW * 1.3).toFixed(1)}" fill="${color}" opacity="${(alpha * 0.85).toFixed(2)}"/>`;
     }
   }
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">${blobs}</svg>`)}`;
+
+  // Fine scatter — denser and larger close to the impact, sparser and
+  // smaller further out, same as a real splatter's spray pattern.
+  for (let i = 0; i < dotCount; i++) {
+    const s = 500 + i * 7;
+    const dist = 6 + rng(s) * 46;
+    const angle = rng(s + 1) * Math.PI * 2;
+    const dx = cx0 + Math.cos(angle) * dist;
+    const dy = cy0 + Math.sin(angle) * dist;
+    const dr = (0.6 + rng(s + 2) * 3.2) * Math.max(0.15, 1 - dist / 55);
+    if (dr <= 0.3) continue;
+    const color = pick(s + 3);
+    const alpha = 0.4 + rng(s + 4) * 0.5;
+    shapes += `<circle cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" r="${dr.toFixed(1)}" fill="${color}" opacity="${alpha.toFixed(2)}"/>`;
+  }
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">${shapes}</svg>`)}`;
 }
 
 const STATIC_BLOOD_SPLAT_URL = makeSplatSvg('#8b0000', '#cc0000', 14, 42);
