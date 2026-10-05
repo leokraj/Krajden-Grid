@@ -2876,6 +2876,36 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 }
 
 
+// The settings patch that makes an effect the active brush. Shared by the
+// panel's thumbnails and the radial menu's effect list so both select
+// identically.
+export function effectSelectionPatch(eff) {
+  return {
+    activeEffectId: eff.id,
+    activeEffectUrl: eff.isShader ? null : (eff.url || eff.imageUrl),
+    activeEffectShader: eff.isShader ? eff.shaderName : null,
+    activeEffectCategory: eff.category || (eff.isShader ? 'shader' : 'image'),
+    effectsEnabled: true,
+  };
+}
+
+// Built-in presets for one radial category (river/light/static/area), with
+// the generated splatter SVG urls resolved like the panel does.
+export function getBuiltinEffectsForCategory(category) {
+  const match = {
+    river: (e) => e.category === 'flow',
+    light: (e) => e.isLight,
+    static: (e) => e.isStaticSvg,
+    area: (e) => e.category !== 'flow' && !e.isLight && !e.isStaticSvg,
+  }[category];
+  if (!match) return [];
+  return BUILTIN_EFFECT_PRESETS.filter(match).map(p => {
+    if (!p.isStaticSvg) return p;
+    const url = p.svgKey === 'blood' ? STATIC_BLOOD_SPLAT_URL : STATIC_ACID_SPLAT_URL;
+    return { ...p, url, imageUrl: url };
+  });
+}
+
 export function EffectsControlPanel({ onClose }) {
   const {
     settings,
@@ -2908,6 +2938,32 @@ export function EffectsControlPanel({ onClose }) {
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [openGroups, setOpenGroups] = useState({ river: true, area: true, static: true, light: true });
   const toggleGroup = (g) => setOpenGroups(prev => ({ ...prev, [g]: !prev[g] }));
+
+  // Consumes the radial menu's category pick (RadialContextMenu.jsx writes
+  // settings.effectsRadialTarget = { category, ts }). Switches to the right
+  // tab/category group here, scrolls the panel into view, then clears the
+  // flag itself — this is a one-shot command, not persistent state, so it
+  // must not re-fire on every render while it lingers in settings.
+  const handledRadialTargetTsRef = useRef(null);
+  useEffect(() => {
+    const target = settings.effectsRadialTarget;
+    if (!target || handledRadialTargetTsRef.current === target.ts) return;
+    handledRadialTargetTsRef.current = target.ts;
+    if (target.category === 'vault') {
+      setActiveTab('vault');
+    } else {
+      setActiveTab('builtin');
+      setOpenGroups({
+        river: target.category === 'river',
+        light: target.category === 'light',
+        static: target.category === 'static',
+        area: target.category === 'area',
+      });
+    }
+    const elem = document.getElementById('section-effects');
+    if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+    updateSettings({ effectsRadialTarget: null });
+  }, [settings.effectsRadialTarget, updateSettings]);
 
   // Renders the debug info list as an HTML string for the popped-out window
   // Active Tool & Settings
@@ -3016,13 +3072,7 @@ export function EffectsControlPanel({ onClose }) {
   }, [allEffects, activeTab, selectedTheme, searchQuery]);
 
   const selectEffect = (eff) => {
-    updateSettings({
-      activeEffectId: eff.id,
-      activeEffectUrl: eff.isShader ? null : (eff.url || eff.imageUrl),
-      activeEffectShader: eff.isShader ? eff.shaderName : null,
-      activeEffectCategory: eff.category || (eff.isShader ? 'shader' : 'image'),
-      effectsEnabled: true,
-    });
+    updateSettings(effectSelectionPatch(eff));
     toast.success(`Active: "${eff.name}" — Draw on map!`);
   };
 
