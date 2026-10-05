@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGrid, TOKEN_SIZE_PRESETS, DND_CONDITIONS } from '../context/GridContext';
 import { toast } from 'sonner';
+import { getBuiltinEffectsForCategory, effectSelectionPatch } from './EffectsLayer';
+import { subscribeEffects } from '../lib/firebase';
 import {
   Ruler,
   Minus,
@@ -33,7 +35,20 @@ export function RadialContextMenu() {
   const [activeSubMenu, setActiveSubMenu] = useState(null);
   const [labelInput, setLabelInput] = useState('');
   const [showLabelEdit, setShowLabelEdit] = useState(false);
+  // Which effect category was picked in the 2nd-level Effects submenu,
+  // waiting on the 3rd-level tool submenu to finish the selection.
+  const [pendingEffectCategory, setPendingEffectCategory] = useState(null);
   const menuRef = useRef(null);
+
+  // Vault effects live in Firestore, so only subscribe while the final
+  // (effect list) step is showing the Vault category.
+  const [vaultEffects, setVaultEffects] = useState([]);
+  const vaultListOpen = radialMenuOpen && activeSubMenu === 'effectsList' && pendingEffectCategory === 'vault';
+  useEffect(() => {
+    if (!vaultListOpen) return;
+    const unsubscribe = subscribeEffects((fx) => { if (Array.isArray(fx)) setVaultEffects(fx); });
+    return () => unsubscribe?.();
+  }, [vaultListOpen]);
 
   // Token being right-clicked (if any)
   const tokenInstanceId = radialMenuPos?.tokenInstanceId || null;
@@ -102,13 +117,54 @@ export function RadialContextMenu() {
     closeRadialMenu();
   };
 
-  const handleEffectsSelect = () => {
-    updateSettings({ effectsEnabled: true });
-    const elem = document.getElementById('section-effects');
-    if (elem) elem.scrollIntoView({ behavior: 'smooth' });
-    toast.success('Effects Painting Mode active');
+  // 2nd-level: pick an effect category — Rivers / Lights / Static / Area /
+  // Vault — which opens the 3rd-level tool submenu rather than committing
+  // anything yet.
+  const EFFECT_CATEGORIES = [
+    { key: 'river', label: 'Rivers', emoji: '🌊' },
+    { key: 'light', label: 'Lights', emoji: '🕯️' },
+    { key: 'static', label: 'Static', emoji: '🩸' },
+    { key: 'area', label: 'Area', emoji: '🔥' },
+    { key: 'vault', label: 'Vault', emoji: '⭐' },
+  ];
+
+  // 3rd-level: pick the mask/paint tool — this is what actually commits
+  // the selection (effect category + tool) and turns Painting Mode on.
+  const EFFECT_TOOLS = [
+    { id: 'brush', label: 'Brush', emoji: '🖌️' },
+    { id: 'marquee', label: 'Marquee', emoji: '🔲' },
+    { id: 'lasso', label: 'Lasso', emoji: '🪢' },
+    { id: 'eraser', label: 'Eraser', emoji: '🧹' },
+  ];
+
+  const handleEffectCategorySelect = (categoryKey) => {
+    setPendingEffectCategory(categoryKey);
+    setActiveSubMenu('effectsTool');
+  };
+
+  const handleEffectToolSelect = (toolId) => {
+    updateSettings({
+      effectsEnabled: true,
+      effectTool: toolId,
+      // A transient "command" the Effects panel watches for: it opens the
+      // right tab/category group, scrolls into view, then clears this
+      // itself. Keeps this radial menu decoupled from the panel's own
+      // (locally-held) tab/group state.
+      effectsRadialTarget: { category: pendingEffectCategory, ts: Date.now() },
+    });
+    // Final step: choose the actual effect from a list. The menu stays open.
+    setActiveSubMenu('effectsList');
+  };
+
+  const handleEffectPick = (eff) => {
+    updateSettings(effectSelectionPatch(eff));
+    toast.success(`Active: "${eff.name}" — Draw on map!`);
     closeRadialMenu();
   };
+
+  const effectListItems = pendingEffectCategory === 'vault'
+    ? vaultEffects
+    : getBuiltinEffectsForCategory(pendingEffectCategory);
 
   const handleEffectsOff = () => {
     updateSettings({ effectsEnabled: false });
@@ -261,11 +317,11 @@ export function RadialContextMenu() {
             </div>
           </div>
 
-          {/* CORNER: BOTTOM-RIGHT — Effects Painting Mode */}
+          {/* CORNER: BOTTOM-RIGHT — Effects Painting Mode (opens category submenu) */}
           <div
             className="absolute bottom-6 right-6 flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('effects')}
-            onClick={() => (settings.effectsEnabled ? setActiveSubMenu(activeSubMenu === 'effects' ? null : 'effects') : handleEffectsSelect())}
+            onClick={() => setActiveSubMenu(['effects', 'effectsTool', 'effectsList'].includes(activeSubMenu) ? null : 'effects')}
             data-testid="radial-corner-effects"
             title="Effects Painting Mode"
           >
@@ -458,25 +514,94 @@ export function RadialContextMenu() {
             </div>
           )}
 
-          {/* BOTTOM-RIGHT SUBMENU: EFFECTS (only reachable once already on, via the corner toggle) */}
-          {activeSubMenu === 'effects' && settings.effectsEnabled && (
-            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2">
+          {/* BOTTOM-RIGHT SUBMENU (LEVEL 2): EFFECTS CATEGORY */}
+          {activeSubMenu === 'effects' && (
+            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+              {EFFECT_CATEGORIES.map((cat) => (
+                <button
+                  key={cat.key}
+                  onClick={() => handleEffectCategorySelect(cat.key)}
+                  className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all"
+                  data-testid={`radial-effects-cat-${cat.key}`}
+                >
+                  <span className="text-xs leading-none">{cat.emoji}</span>
+                  <span>{cat.label}</span>
+                </button>
+              ))}
+              {settings.effectsEnabled && (
+                <button
+                  onClick={handleEffectsOff}
+                  className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer"
+                  data-testid="radial-effects-off"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Off</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* BOTTOM-RIGHT SUBMENU (LEVEL 3): PAINT TOOL — reached after a category is picked */}
+          {activeSubMenu === 'effectsTool' && (
+            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
               <button
-                onClick={handleEffectsSelect}
-                className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[#caa055] text-black font-bold text-[9px] uppercase tracking-wider hover:bg-[#e2b563] cursor-pointer shadow-lg"
-                data-testid="radial-effects-panel"
+                onClick={() => setActiveSubMenu('effects')}
+                className="w-full flex items-center justify-center gap-1 p-1 rounded-lg text-[8px] uppercase font-bold text-[#caa055]/60 hover:text-[#caa055] cursor-pointer"
+                data-testid="radial-effects-tool-back"
               >
-                <Flame className="w-4 h-4" />
-                <span>Open Panel</span>
+                ← Back
               </button>
+              {EFFECT_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  onClick={() => handleEffectToolSelect(tool.id)}
+                  className={`w-full flex items-center gap-1.5 p-1.5 rounded-lg border transition-all cursor-pointer text-[9px] uppercase font-bold ${
+                    settings.effectTool === tool.id && settings.effectsEnabled
+                      ? 'bg-[#caa055] text-black border-white'
+                      : 'border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20'
+                  }`}
+                  data-testid={`radial-effects-tool-${tool.id}`}
+                >
+                  <span className="text-xs leading-none">{tool.emoji}</span>
+                  <span>{tool.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* BOTTOM-RIGHT SUBMENU (LEVEL 4, LAST): scrollable list of effects in the chosen category */}
+          {activeSubMenu === 'effectsList' && (
+            <div className="absolute bottom-0 -right-44 flex flex-col w-40 max-h-72 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150">
               <button
-                onClick={handleEffectsOff}
-                className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer"
-                data-testid="radial-effects-off"
+                onClick={() => setActiveSubMenu('effectsTool')}
+                className="w-full flex items-center justify-center p-1 text-[8px] uppercase font-bold text-[#caa055]/60 hover:text-[#caa055] cursor-pointer shrink-0"
+                data-testid="radial-effects-list-back"
               >
-                <XCircle className="w-3.5 h-3.5" />
-                <span>Off</span>
+                ← Back
               </button>
+              <div className="overflow-y-auto space-y-1 pr-0.5">
+                {effectListItems.length === 0 && (
+                  <p className="text-[9px] text-white/50 text-center py-3">
+                    {pendingEffectCategory === 'vault' ? 'No vault effects found' : 'No effects'}
+                  </p>
+                )}
+                {effectListItems.map((eff) => (
+                  <button
+                    key={eff.id}
+                    onClick={() => handleEffectPick(eff)}
+                    className={`w-full flex items-center gap-1.5 p-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                      settings.activeEffectId === eff.id
+                        ? 'bg-[#caa055] text-black border-white'
+                        : 'border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20'
+                    }`}
+                    title={eff.description || eff.name}
+                    data-testid={`radial-effect-${eff.id}`}
+                  >
+                    <span className="text-xs leading-none shrink-0">{eff.emoji || '✨'}</span>
+                    <span className="text-[9px] font-bold uppercase truncate">{eff.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
