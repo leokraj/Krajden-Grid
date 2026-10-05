@@ -289,6 +289,18 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     session: true,
     ...(sectionFilter ? { [sectionFilter]: false } : {}),
   });
+  // The radial menu's Effects flow can send a category pick here
+  // (settings.effectsRadialTarget) while this section happens to be
+  // collapsed — make sure it's expanded so EffectsControlPanel actually
+  // mounts and its own effect (which applies the category + scrolls) can
+  // run. This only flips the collapsed flag; EffectsControlPanel clears
+  // effectsRadialTarget itself once it has consumed it.
+  useEffect(() => {
+    if (settings.effectsRadialTarget) {
+      setCollapsedSections(prev => (prev.effects ? { ...prev, effects: false } : prev));
+    }
+  }, [settings.effectsRadialTarget]);
+
   const [undockedPanels, setUndockedPanels] = useState({
     layers: false,
     clipart: false,
