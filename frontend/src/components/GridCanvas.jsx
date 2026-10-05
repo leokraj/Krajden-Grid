@@ -22,6 +22,14 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   // one. A ref read synchronously at the top of onContextMenu sidesteps that
   // render-timing race entirely.
   const suppressNextContextMenuRef = useRef(false);
+  // Any fresh mouse press starts a new gesture: drop a stale suppress flag.
+  // Capture phase on document runs before React's handlers, so the exit
+  // click's own handleMouseDown can still set it afterwards.
+  useEffect(() => {
+    const reset = () => { suppressNextContextMenuRef.current = false; };
+    document.addEventListener('mousedown', reset, true);
+    return () => document.removeEventListener('mousedown', reset, true);
+  }, []);
   const { 
     settings, 
     updateSettings,
@@ -1432,10 +1440,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       if (e.button === 2) {
         e.preventDefault();
         suppressNextContextMenuRef.current = true;
-        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
-        // touch-emulated right-click on some platforms), don't leave the
-        // flag stuck true and silently eat the next real right-click.
-        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
+        // NOTE: no short timer here. On Windows 'contextmenu' fires on mouse
+        // RELEASE, so a quick timeout clears this before it's consumed. It is
+        // reset by the next mousedown (document-level listener below) and
+        // consumed by onContextMenu, with a long fallback just in case.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 1500);
         setMeasureWaypoints([]);
         setCurrentPoint(null);
         setIsDrawing(false);
@@ -1472,10 +1481,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       e.preventDefault();
       if (settings.pingMode) {
         suppressNextContextMenuRef.current = true;
-        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
-        // touch-emulated right-click on some platforms), don't leave the
-        // flag stuck true and silently eat the next real right-click.
-        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
+        // NOTE: no short timer here. On Windows 'contextmenu' fires on mouse
+        // RELEASE, so a quick timeout clears this before it's consumed. It is
+        // reset by the next mousedown (document-level listener below) and
+        // consumed by onContextMenu, with a long fallback just in case.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 1500);
         updateSettings({ pingMode: false });
         toast.info('Exited Beacon Mode');
         return;
@@ -1500,10 +1510,11 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       if (e.button === 2) {
         e.preventDefault();
         suppressNextContextMenuRef.current = true;
-        // Safety net: if 'contextmenu' never fires for this gesture (e.g. a
-        // touch-emulated right-click on some platforms), don't leave the
-        // flag stuck true and silently eat the next real right-click.
-        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 50);
+        // NOTE: no short timer here. On Windows 'contextmenu' fires on mouse
+        // RELEASE, so a quick timeout clears this before it's consumed. It is
+        // reset by the next mousedown (document-level listener below) and
+        // consumed by onContextMenu, with a long fallback just in case.
+        setTimeout(() => { suppressNextContextMenuRef.current = false; }, 1500);
         setIsDrawing(false);
         setIsErasing(false);
         setCurrentDrawingPath([]);
