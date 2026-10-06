@@ -4,6 +4,7 @@ import { SessionProvider, useSession } from '../context/SessionContext';
 import { GridCanvas } from '../components/GridCanvas';
 import { FloatingControls } from '../components/FloatingControls';
 import { Toaster } from '../components/ui/sonner';
+import { toast } from 'sonner';
 import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
@@ -18,7 +19,12 @@ export function FullscreenContent() {
     customCliparts,
     addCustomClipart,
     removeCustomClipart,
-    addPlacedClipart
+    addPlacedClipart,
+    isDmScreen,
+    pushToGame,
+    pullFromGame,
+    dmGameViewport,
+    dmLastSync,
   } = useGrid();
   const [showControls, setShowControls] = useState(true);
 
@@ -318,7 +324,7 @@ export function FullscreenContent() {
         <div className="fixed top-4 left-4 z-50 max-h-[90vh] overflow-y-auto" data-testid="fullscreen-controls"
           style={{ WebkitAppRegion: 'no-drag' }}>
           <div className="flex justify-end mb-1">
-            <button
+            {!isDmScreen && <button
               onClick={() => {
                 window.electronAPI?.openControlsWindow?.();
                 updateSettings({ controlsDetached: true });
@@ -327,7 +333,7 @@ export function FullscreenContent() {
               title="Move controls to their own window — the grid window will then be free to move to another monitor alone"
             >
               📌 Detach to Own Window
-            </button>
+            </button>}
           </div>
           <FloatingControls onClose={() => setShowControls(false)} />
         </div>
@@ -366,6 +372,47 @@ export function FullscreenContent() {
       <div className="fixed bottom-4 right-4 z-40 bg-black/60 backdrop-blur-sm border border-[#caa055]/20 rounded-[4px] px-3 py-1.5 text-[9px] font-mono text-slate-muted pointer-events-none tracking-wider">
         Press <span className="text-[#caa055] font-bold">Ctrl + Shift + C</span> to toggle controls dashboard
       </div>
+
+      {/* DM Screen chrome: makes it unmistakable this is the private copy, and
+          holds the explicit "send to players" action. */}
+      {isDmScreen && (() => {
+        const mismatch = dmGameViewport
+          && (Math.abs(dmGameViewport.w - window.innerWidth) > 2 || Math.abs(dmGameViewport.h - window.innerHeight) > 2);
+        return (
+          <>
+            <div className="pointer-events-none fixed inset-0 z-[60] border-2 border-[#caa055]/50" />
+            <div className="fixed top-1 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-2 bg-[#111214]/95 border border-[#caa055]/50 rounded-[4px] px-3 py-1.5 shadow-lg"
+              style={{ WebkitAppRegion: 'no-drag' }} data-testid="dm-screen-bar">
+              <span className="text-[10px] font-bold text-[#caa055] tracking-widest uppercase">🎭 DM Screen — players can't see edits</span>
+              <button
+                onClick={() => { pushToGame() ? toast.success('Game screen updated') : toast.error('Could not reach the game screen'); }}
+                className="text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-[3px] bg-[#caa055] text-black hover:bg-[#e2b563] cursor-pointer"
+                data-testid="dm-push-btn"
+              >
+                ▶ Update Game Screen
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm('Replace everything on this DM screen with what the game screen shows now? Unpushed DM edits will be lost.')) {
+                    pullFromGame();
+                    toast.info('DM screen re-synced from game');
+                  }
+                }}
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-[3px] border border-[#caa055]/40 text-[#caa055] hover:bg-[#caa055]/15 cursor-pointer"
+                data-testid="dm-pull-btn"
+              >
+                ⟲ Re-sync from Game
+              </button>
+              {!dmLastSync && <span className="text-[9px] text-white/50 font-mono">waiting for game screen…</span>}
+            </div>
+            {mismatch && (
+              <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[70] bg-amber-900/90 border border-amber-500/60 rounded-[4px] px-3 py-1 text-[9px] text-amber-100 font-mono">
+                ⚠ Game screen is {dmGameViewport.w}×{dmGameViewport.h}, this window is {window.innerWidth}×{window.innerHeight} — positions will be offset when pushed
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* 3D dice animation layer — renders tumbling dice at cursor position on every roll */}
       <DiceAnimationLayer />
