@@ -11,6 +11,9 @@ Menu.setApplicationMenu(null);
 
 let mainWindow = null;
 const childWindows = {};
+// DM Screen: an isolated duplicate of the grid. Deliberately NOT in childWindows
+// so the normal live-sync relay never reaches it (see 'broadcast' handler).
+let dmWindow = null;
 
 let currentAppUrl = '';
 
@@ -217,7 +220,44 @@ function createMainWindow(targetUrl) {
     Object.values(childWindows).forEach(win => {
       if (win && !win.isDestroyed()) win.close();
     });
+    if (dmWindow && !dmWindow.isDestroyed()) dmWindow.close();
   });
+}
+
+// Opens (or focuses) the DM Screen. It prefers a display other than the one
+// the game grid is on, so it lands on the DM's own monitor.
+function createDmWindow() {
+  if (dmWindow && !dmWindow.isDestroyed()) {
+    dmWindow.focus();
+    return;
+  }
+  const displays = screen.getAllDisplays();
+  const gameDisplay = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const target = displays.find(d => d.id !== gameDisplay.id) || gameDisplay;
+  const { x, y, width, height } = target.bounds;
+
+  dmWindow = new BrowserWindow({
+    x, y, width, height,
+    title: 'Krajden Grid - DM Screen',
+    frame: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0d0f12', symbolColor: '#caa055', height: 28 },
+    movable: true,
+    resizable: true,
+    maximizable: true,
+    backgroundColor: '#0d0f12',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    }
+  });
+
+  const baseUrl = currentAppUrl.split('/fullscreen')[0];
+  dmWindow.loadURL(`${baseUrl}/fullscreen?electron=1&mode=dm`);
+  dmWindow.on('closed', () => { dmWindow = null; });
 }
 
 function createChildWindow(mode, title, width = 450, height = 650, senderBounds = null, extraQuery = '') {
@@ -297,6 +337,10 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
 
 // IPC Relay: Broadcast messages from one window (e.g. controls/settings) to all others
 ipcMain.on('broadcast', (event, channel, data) => {
+  // The DM Screen is isolated: nothing it does is relayed out, and nothing
+  // from the game windows is relayed in. Only the explicit dm-* IPC below
+  // moves state between them.
+  if (dmWindow && !dmWindow.isDestroyed() && event.sender === dmWindow.webContents) return;
   if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
     mainWindow.webContents.send(channel, data);
   }
@@ -484,6 +528,29 @@ ipcMain.on('open-section-window', (event, sectionId, label) => {
   const mode = `section-${sectionId}`;
   const title = `Krajden Grid - ${label || sectionId}`;
   createChildWindow(mode, title, 380, 560, bounds, `&section=${encodeURIComponent(sectionId)}&label=${encodeURIComponent(label || sectionId)}`);
+});
+
+ipcMain.on('open-dm-window', () => createDmWindow());
+
+// DM asks the game window for its current state (used on open + "Re-sync").
+ipcMain.on('dm-request-snapshot', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('dm-snapshot-request');
+  }
+});
+// Game window answers; forward to the DM window.
+ipcMain.on('dm-send-snapshot', (event, snapshot) => {
+  if (dmWindow && !dmWindow.isDestroyed()) {
+    dmWindow.webContents.send('dm-snapshot', snapshot);
+  }
+});
+// DM pressed "Update Game Screen": hand the snapshot to the game window.
+// It applies it via its normal settings path, which then mirrors the change
+// to the Controls window and any other game-side windows.
+ipcMain.on('dm-push', (event, snapshot) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('dm-push', snapshot);
+  }
 });
 
 ipcMain.on('close-controls-window', () => {
