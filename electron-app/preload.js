@@ -57,5 +57,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   openSectionWindow: (sectionId, label) => {
     ipcRenderer.send('open-section-window', sectionId, label);
-  }
+  },
+
+  // DM Screen
+  openDmWindow: () => ipcRenderer.send('open-dm-window'),
+  dmRequestSnapshot: () => ipcRenderer.send('dm-request-snapshot'),
+  dmSendSnapshot: (snapshot) => ipcRenderer.send('dm-send-snapshot', snapshot),
+  dmPush: (snapshot) => ipcRenderer.send('dm-push', snapshot)
 });
