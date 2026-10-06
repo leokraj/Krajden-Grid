@@ -163,10 +163,38 @@ const defaultSettings = {
   maskShapeRadius: 80,
 };
 
+// DM Screen: a separate, isolated duplicate of the grid (opened as
+// /fullscreen?mode=dm). Edits there stay local until the DM clicks "Update
+// Game Screen". See electron-app/main.js for the IPC isolation.
+const IS_DM_SCREEN = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('mode') === 'dm';
+
+// Per-window tool/UI state that must never be copied between DM and game.
+const DM_LOCAL_KEYS = new Set([
+  'controlsDetached', 'effectsEnabled', 'effectTool', 'selectedEffectPathId',
+  'effectsRadialTarget', 'measureMode', 'drawingEnabled', 'eraserEnabled',
+  'pingMode', 'maskEnabled', 'liveMeasurement',
+]);
+
+const buildDmSnapshot = (settings, measurements) => {
+  const out = {};
+  for (const [k, v] of Object.entries(settings)) {
+    if (!DM_LOCAL_KEYS.has(k)) out[k] = v;
+  }
+  return {
+    settings: out,
+    measurements: measurements || [],
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+  };
+};
+
 const GridContext = createContext(undefined);
 
 export const GridProvider = ({ children }) => {
   const [initialState] = useState(() => {
+    // DM Screen never loads the game's saved state; it gets a live snapshot
+    // from the game window over IPC instead.
+    if (IS_DM_SCREEN) return null;
     try {
       const saved = localStorage.getItem('overgrid_grid_state');
       if (!saved) return null;
@@ -189,6 +217,8 @@ export const GridProvider = ({ children }) => {
     if (initial.gridColor === '#00F0FF' || initial.gridColor === '#00f0ff' || !initial.gridColor) {
       initial.gridColor = '#caa055';
     }
+    // DM Screen has its controls docked in the same window.
+    if (IS_DM_SCREEN) initial = { ...initial, controlsDetached: false };
     return initial;
   });
 
@@ -423,6 +453,7 @@ export const GridProvider = ({ children }) => {
 
   // Periodic persistence of grid state to localStorage
   useEffect(() => {
+    if (IS_DM_SCREEN) return undefined; // DM edits are scratch until pushed
     const timer = setTimeout(() => {
       try {
         const stateToSave = {};
@@ -476,6 +507,50 @@ export const GridProvider = ({ children }) => {
         isUpdatingFromRemoteRef.current = false;
       }
     });
+  }, []);
+
+  // ── DM Screen sync ────────────────────────────────────────────────────
+  const measurementsRef = useRef(measurements);
+  useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
+  const [dmGameViewport, setDmGameViewport] = useState(null);
+  const [dmLastSync, setDmLastSync] = useState(null);
+
+  // Game side: answer the DM's snapshot request, and apply pushed updates.
+  // Applying goes through updateSettings so the change also mirrors to the
+  // Controls window and any other game-side windows like any other edit.
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron || IS_DM_SCREEN) return;
+    const offReq = window.electronAPI.on('dm-snapshot-request', () => {
+      window.electronAPI.dmSendSnapshot(buildDmSnapshot(settingsRef.current, measurementsRef.current));
+    });
+    const offPush = window.electronAPI.on('dm-push', (snap) => {
+      if (snap?.settings) updateSettings(snap.settings);
+      if (Array.isArray(snap?.measurements)) setMeasurements(snap.measurements);
+    });
+    return () => { offReq?.(); offPush?.(); };
+  }, [updateSettings]);
+
+  // DM side: receive the game's snapshot (on open, and on "Re-sync").
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron || !IS_DM_SCREEN) return;
+    const off = window.electronAPI.on('dm-snapshot', (snap) => {
+      if (!snap?.settings) return;
+      setSettings((prev) => ({ ...prev, ...snap.settings, controlsDetached: false }));
+      setMeasurements(Array.isArray(snap.measurements) ? snap.measurements : []);
+      setDmGameViewport(snap.viewport || null);
+      setDmLastSync(Date.now());
+    });
+    window.electronAPI.dmRequestSnapshot();
+    return () => off?.();
+  }, []);
+
+  const pushToGame = useCallback(() => {
+    if (!window.electronAPI?.dmPush) return false;
+    window.electronAPI.dmPush(buildDmSnapshot(settingsRef.current, measurementsRef.current));
+    return true;
+  }, []);
+  const pullFromGame = useCallback(() => {
+    window.electronAPI?.dmRequestSnapshot?.();
   }, []);
 
   // Listen for localStorage changes to sync cliparts and scenes across child windows.
@@ -2126,6 +2201,11 @@ export const GridProvider = ({ children }) => {
     resetRadialConfig,
     showClipartLibrary,
     setShowClipartLibrary,
+    isDmScreen: IS_DM_SCREEN,
+    pushToGame,
+    pullFromGame,
+    dmGameViewport,
+    dmLastSync,
     sceneMergeOption: SCENE_MERGE_OPTION,
     openSectionWindow: (section, title) => window?.electronAPI?.openSectionWindow?.(section, title)
   };
