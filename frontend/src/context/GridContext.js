@@ -1275,6 +1275,83 @@ export const GridProvider = ({ children }) => {
     }
   }, []);
 
+  // Add whatever is currently selected on the grid (selected tokens — plus the
+  // rest of any group they belong to — the selected effect, and the selected
+  // background layer) into an EXISTING scene, without touching anything else
+  // in that scene. Items already in the scene (same id) are replaced in place
+  // rather than duplicated, so re-adding after moving a token updates it.
+  const addSelectionToScene = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return false;
+    const snap = captureCanvasData();
+
+    const selectedIds = new Set(selectedClipartIds || []);
+    const selectedGroups = new Set(
+      (snap.placedCliparts || []).filter((c) => selectedIds.has(c.instanceId) && c.groupId).map((c) => c.groupId)
+    );
+    const tokens = (snap.placedCliparts || []).filter(
+      (c) => selectedIds.has(c.instanceId) || (c.groupId && selectedGroups.has(c.groupId))
+    );
+    const effects = settings.selectedEffectPathId
+      ? (snap.effectPaths || []).filter((e) => e.id === settings.selectedEffectPathId)
+      : [];
+    const bgLayers = selectedBgLayerId
+      ? (snap.backgroundLayers || []).filter((l) => l.id === selectedBgLayerId)
+      : [];
+
+    const total = tokens.length + effects.length + bgLayers.length;
+    if (total === 0) {
+      toast.error('Nothing selected — select tokens, an effect, or a map layer on the grid first.');
+      return false;
+    }
+
+    const mergeById = (existing, incoming, key) => {
+      const out = [...(existing || [])];
+      incoming.forEach((item) => {
+        const i = out.findIndex((x) => x[key] === item[key]);
+        if (i >= 0) out[i] = item; else out.push(item);
+      });
+      return out;
+    };
+
+    setScenes((prev) => prev.map((s) => {
+      if (s.id !== sceneId) return s;
+      const data = s.data || {};
+      return {
+        ...s,
+        updatedAt: Date.now(),
+        data: {
+          ...data,
+          placedCliparts: mergeById(data.placedCliparts, tokens, 'instanceId'),
+          effectPaths: mergeById(data.effectPaths, effects, 'id'),
+          backgroundLayers: mergeById(data.backgroundLayers, bgLayers, 'id'),
+        },
+      };
+    }));
+    appDebugStore.log({
+      category: 'scene-save',
+      message: `Added selection to scene "${scene.name}"`,
+      detail: `tokens: ${tokens.length}, effects: ${effects.length}, map layers: ${bgLayers.length}`,
+    });
+    toast.success(`Added ${total} item${total === 1 ? '' : 's'} to "${scene.name}"`);
+    return true;
+  }, [scenes, captureCanvasData, selectedClipartIds, selectedBgLayerId, settings.selectedEffectPathId]);
+
+  // Replace a scene's contents with the entire current grid state.
+  const replaceSceneWithCurrent = useCallback((sceneId) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return false;
+    const data = captureCanvasData();
+    setScenes((prev) => prev.map((s) => (s.id === sceneId ? { ...s, updatedAt: Date.now(), data } : s)));
+    appDebugStore.log({
+      category: 'scene-save',
+      message: `Replaced scene "${scene.name}" with current grid`,
+      detail: `tokens: ${(data.placedCliparts || []).length}, effects: ${(data.effectPaths || []).length}`,
+    });
+    toast.success(`"${scene.name}" replaced with the current grid`);
+    return true;
+  }, [scenes, captureCanvasData]);
+
   // Scene loading now asks Replace vs Merge before touching the grid.
   // `loadScene(sceneId)` just queues the request; `performSceneLoad` does the
   // actual work once the user picks a mode via the confirmation prompt.
@@ -2146,6 +2223,8 @@ export const GridProvider = ({ children }) => {
     captureCanvasData,
     saveNewScene,
     updateActiveScene,
+    addSelectionToScene,
+    replaceSceneWithCurrent,
     updateScene,
     loadScene,
     pendingSceneLoad,
