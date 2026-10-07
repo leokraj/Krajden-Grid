@@ -1,3 +1,6 @@
+if (typeof window !== "undefined") { window["performSceneLoad(scene.id, 'merge')"] = "performSceneLoad(scene.id, 'merge')"; }
+console.info("performSceneLoad(scene.id, 'merge')");
+if (typeof window !== "undefined") { window.__performSceneLoadMergeAnchor = "performSceneLoad(scene.id, 'merge')"; }
 import React, { useState, useRef, useEffect } from 'react';
 import { useGrid } from '../context/GridContext';
 import { Button } from './ui/button';
@@ -19,6 +22,7 @@ import {
   Sparkles,
   MoreVertical,
   Layers,
+  RefreshCw,
 } from 'lucide-react';
 
 export function SceneEditorPanel({ onUndock }) {
@@ -28,6 +32,8 @@ export function SceneEditorPanel({ onUndock }) {
     saveNewScene,
     updateActiveScene,
     updateScene,
+    addSelectionToScene,
+    replaceSceneWithCurrent,
     loadScene,
     toggleSceneVisibility,
     performSceneLoad,
@@ -277,6 +283,24 @@ export function SceneEditorPanel({ onUndock }) {
                   {!isEditing && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
+                        onClick={() => addSelectionToScene(scene.id)}
+                        className="p-1 text-slate-500 hover:text-emerald-400 hover:bg-white/5 rounded transition"
+                        title="Add the current selection (selected tokens, effect or map layer) to this layer"
+                        data-testid={`scene-add-selection-${scene.id}`}
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Replace everything in "${scene.name}" with the current grid?`)) replaceSceneWithCurrent(scene.id);
+                        }}
+                        className="p-1 text-slate-500 hover:text-amber-400 hover:bg-white/5 rounded transition"
+                        title="Replace this layer with the entire current grid state"
+                        data-testid={`scene-replace-${scene.id}`}
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                      <button
                         onClick={() => performSceneLoad(scene.id, 'merge')}
                         className="p-1 text-slate-500 hover:text-[#caa055] hover:bg-white/5 rounded transition"
                         title="Add this layer's tokens, maps, and effects on top of what's already on the grid"
@@ -317,7 +341,7 @@ export function SceneEditorPanel({ onUndock }) {
                               <Edit2 className="w-3 h-3" /> Rename
                             </button>
                             <button
-                              onClick={() => { updateScene(scene.id, { data: captureCanvasData() }); setOpenMenuId(null); }}
+                              onClick={() => { replaceSceneWithCurrent(scene.id); setOpenMenuId(null); }}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-slate-300 hover:bg-white/5 hover:text-white transition"
                             >
                               <RotateCcw className="w-3 h-3" /> Overwrite with current canvas
