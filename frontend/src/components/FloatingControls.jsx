@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useContext } from 'react';
+import { toast } from 'sonner';
 import { useGrid } from '../context/GridContext';
 import { appDebugStore } from '../lib/debugStore';
 import SessionContext from '../context/SessionContext';
@@ -705,10 +706,13 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
         {!window.electronAPI?.isElectron && <Separator className="bg-[#caa055]/15" />}
 
         {/* DM Screen launcher — an isolated duplicate of the grid for the DM's own monitor */}
-        {window.electronAPI?.openDmWindow && !isDmScreen && !sectionFilter && (
+        {window.electronAPI?.isElectron && !isDmScreen && !sectionFilter && (
           <div className="space-y-1.5">
             <Button
-              onClick={() => window.electronAPI.openDmWindow()}
+              onClick={() => {
+                if (window.electronAPI?.openDmWindow) window.electronAPI.openDmWindow();
+                else toast.error('DM Screen needs the latest desktop app build — reinstall the newest KrajdenGrid-Windows release.');
+              }}
               className="w-full h-9 text-[11px] font-bold tracking-wider uppercase bg-[#caa055]/15 hover:bg-[#caa055]/30 text-[#caa055] border border-[#caa055]/40 rounded-[4px]"
               title="Open a private copy of the grid for your own monitor. Edits there stay hidden from players until you click Update Game Screen."
               data-testid="open-dm-screen-btn"
