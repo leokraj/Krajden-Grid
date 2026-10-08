@@ -174,6 +174,7 @@ const DM_LOCAL_KEYS = new Set([
   'controlsDetached', 'effectsEnabled', 'effectTool', 'selectedEffectPathId',
   'effectsRadialTarget', 'measureMode', 'drawingEnabled', 'eraserEnabled',
   'pingMode', 'maskEnabled', 'liveMeasurement',
+  'atmoTool', 'spellEditMode',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
@@ -463,7 +464,9 @@ export const GridProvider = ({ children }) => {
           "backgroundLayers",
           "liveMeasurement",
           "maskPaths",
-          "maskRects"
+          "maskRects",
+          "atmoTool",
+          "spellEditMode"
         ]);
         for (const [key, val] of Object.entries(settings)) {
           if (!excludeKeys.has(key)) {
@@ -1206,6 +1209,20 @@ export const GridProvider = ({ children }) => {
       // Effects and pings are part of the scene
       effectPaths: JSON.parse(JSON.stringify(backfillIds(src.effectPaths, 'eff'))),
       pingsSnapshot: JSON.parse(JSON.stringify(pings || [])),
+      // Atmosphere: fog of war, spell circles, weather, time of day
+      atmo: JSON.parse(JSON.stringify({
+        fogEnabled: !!settings.fogEnabled, fogOps: settings.fogOps || [],
+        fogOpacity: settings.fogOpacity, fogSoft: settings.fogSoft,
+        spellCircles: settings.spellCircles || [],
+        weatherBlockers: settings.weatherBlockers || [],
+        weatherFogOn: !!settings.weatherFogOn, weatherFogDensity: settings.weatherFogDensity,
+        weatherFogSpeed: settings.weatherFogSpeed, weatherFogColor: settings.weatherFogColor,
+        weatherRainOn: !!settings.weatherRainOn, weatherRainDensity: settings.weatherRainDensity,
+        weatherRainSpeed: settings.weatherRainSpeed, weatherWindAngle: settings.weatherWindAngle,
+        weatherLightningOn: !!settings.weatherLightningOn, weatherLightningFreq: settings.weatherLightningFreq,
+        todPreset: settings.todPreset || 'off', todColor: settings.todColor, todOpacity: settings.todOpacity, todBlend: settings.todBlend,
+        itemGroups: settings.itemGroups || [],
+      })),
     };
   }, [settings, measurements, pings]);
 
@@ -1451,6 +1468,8 @@ export const GridProvider = ({ children }) => {
         backgroundImageRotation: d.backgroundImageRotation ?? prev.backgroundImageRotation,
         useBackgroundImage: d.useBackgroundImage ?? prev.useBackgroundImage,
         effectPaths: d.effectPaths || [],
+        // Older scenes have no atmo block: leave the current atmosphere alone.
+        ...(d.atmo ? d.atmo : {}),
       };
       if (d.gridType) nextSettings.gridType = d.gridType;
       if (d.gridColor) nextSettings.gridColor = d.gridColor;
@@ -1558,8 +1577,12 @@ export const GridProvider = ({ children }) => {
       (d.maskRects || []).forEach(r => r.id && maskRects.add(r.id));
       (d.backgroundLayers || []).forEach(l => l.id && backgrounds.add(l.id));
     });
+    // Group "hide" flag (Groups & Mass Edit panel) hides members the same way.
+    (settings.placedCliparts || []).forEach(c => c.hidden && c.instanceId && cliparts.add(c.instanceId));
+    (settings.effectPaths || []).forEach(e => e.hidden && e.id && effects.add(e.id));
+    (settings.backgroundLayers || []).forEach(l => l.hidden && l.id && backgrounds.add(l.id));
     return { cliparts, effects, drawings, maskPaths, maskRects, backgrounds };
-  }, [scenes, settings.hiddenSceneIds]);
+  }, [scenes, settings.hiddenSceneIds, settings.placedCliparts, settings.effectPaths, settings.backgroundLayers]);
 
   const toggleSceneActive = useCallback((sceneId) => {
     const target = scenes.find((s) => s.id === sceneId);
