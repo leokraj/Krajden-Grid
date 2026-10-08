@@ -9,6 +9,7 @@ import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
 import { EffectsDrawingOverlay, EffectsControlPanel } from '../components/EffectsLayer';
+import { AtmosphereLayer } from '../components/AtmosphereLayer';
 
 export function FullscreenContent() {
   const { 
@@ -316,6 +317,9 @@ export function FullscreenContent() {
       <EffectsDrawingOverlay
         canvasSize={{ width: window.screen.width || 1920, height: window.screen.height || 1080 }}
       />
+
+      {/* Atmosphere: time of day, weather, fog of war, spell circles, mouse token */}
+      <AtmosphereLayer />
 
       {/* Controls are detached by default — the Controls window opens automatically
           on app launch. This embedded panel only shows if the user explicitly
