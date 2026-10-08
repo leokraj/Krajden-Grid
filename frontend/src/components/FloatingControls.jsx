@@ -18,6 +18,7 @@ import BackgroundLayersPanel from './BackgroundLayersPanel';
 import SceneEditorPanel from './SceneEditorPanel';
 import { FloatingWindow } from './FloatingWindow';
 import { EffectsControlPanel } from './EffectsLayer';
+import { AtmosphereSections } from './AtmospherePanel';
 import { CustomizationModal } from './CustomizationModal';
 import { 
   Grid3X3, 
@@ -1216,6 +1217,9 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
             </div>
           </>
         )}
+
+        {/* Atmosphere: time & weather, fog of war, spell circles, groups, graphics */}
+        <AtmosphereSections sectionFilter={sectionFilter} />
 
         {/* Measure Tools */}
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'measure' ? 'hidden' : ''}`} id="section-measure">
