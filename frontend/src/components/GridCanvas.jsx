@@ -1959,8 +1959,8 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
               removeBackgroundLayer(layer.id);
               if (broadcastBgLayerRemove) broadcastBgLayerRemove(layer.id);
             }}
-            canEdit={interactive && !isBlocked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode && !settings.bgLayersLocked}
-            disabled={settings.drawingEnabled || settings.eraserEnabled || !!settings.measureMode || settings.bgLayersLocked}
+            canEdit={interactive && !isBlocked && !layer.locked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode && !settings.bgLayersLocked}
+            disabled={settings.drawingEnabled || settings.eraserEnabled || !!settings.measureMode || settings.bgLayersLocked || !!layer.locked}
           />
         ))}
         {/* Remote layers (from session host, for guests) */}
@@ -2044,7 +2044,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
                   broadcastRemoveClipart(clipart.instanceId);
                 }
               }}
-              canEdit={interactive && !isBlocked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode}
+              canEdit={interactive && !isBlocked && !clipart.locked && !settings.drawingEnabled && !settings.eraserEnabled && !settings.measureMode}
               disabled={settings.drawingEnabled || settings.eraserEnabled || !!settings.measureMode}
               snapToGrid={settings.snapClipartsToGrid}
               gridCellWidth={physicalCellSize.cellWidth}
