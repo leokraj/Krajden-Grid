@@ -1,18 +1,18 @@
 {
   "name": "krajden-grid-desktop",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Desktop Companion for Krajden Grid - Transparent overlay",
   "author": "Krajden Grid",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --x64"
+    "dist": "electron-builder --dir --win --x64"
   },
   "dependencies": {},
   "devDependencies": {
     "electron": "31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.krajden.grid",

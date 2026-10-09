@@ -4,15 +4,15 @@ import axios from 'axios';
 
 const owner = 'leokraj';
 const repo = 'Krajden-Grid';
-const tag = 'v1.0.0';
-const title = 'Krajden Grid v1.0.0';
+const tag = 'v1.2.0';
+const title = 'Krajden Grid v1.2.0';
 const filePath = path.join(process.cwd(), 'backend', 'downloads', 'KrajdenGrid-Portable.zip');
 
 async function uploadToGitHub() {
   console.log('=== GITHUB RELEASE UPLOAD ENGINE ===');
 
   // 1. Resolve token
-  let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_PAT || process.env.GH_PAT;
+  let token = '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';
   if (!token && fs.existsSync('/app/.dev.env.json')) {
     try {
       const devEnv = JSON.parse(fs.readFileSync('/app/.dev.env.json', 'utf8'));

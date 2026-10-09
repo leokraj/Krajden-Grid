@@ -1,0 +1,160 @@
+[
+  {
+    "id": "eff_1787777628690",
+    "name": "Lava_river_0001",
+    "category": "fire",
+    "theme": "fire",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feff_1787777628690.mp4?alt=media&token=917574e6-ac46-4f98-8d0b-a6a291bf7152",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feff_1787777628690.mp4?alt=media&token=917574e6-ac46-4f98-8d0b-a6a291bf7152",
+    "tags": [
+      "fire",
+      "admin_uploaded"
+    ],
+    "created_at": "2026-08-26T20:53:48.690Z",
+    "updated_at": "2026-08-26T21:04:18.228Z",
+    "isVault": true
+  },
+  {
+    "id": "eff_1787777647264",
+    "name": "River_0001",
+    "category": "water",
+    "theme": "water",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feff_1787777647264.mp4?alt=media&token=9692a8f0-8364-403c-8f49-ca4de47feaa0",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feff_1787777647264.mp4?alt=media&token=9692a8f0-8364-403c-8f49-ca4de47feaa0",
+    "tags": [
+      "water",
+      "admin_uploaded"
+    ],
+    "created_at": "2026-08-26T20:54:07.264Z",
+    "updated_at": "2026-08-26T21:04:18.542Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1788495267122_aakdb",
+    "name": "Blood Splatter Small",
+    "category": "static",
+    "theme": "nature",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788495267122_aakdb.webp?alt=media&token=7fc0f031-03d5-4284-85d5-40633e4e9fd1",
+    "tags": [
+      "nature"
+    ],
+    "created_at": null,
+    "updated_at": "2026-09-04T04:14:28.103Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1788496036515_09qnf",
+    "name": "Lava_River_01",
+    "category": "video",
+    "theme": "fire",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788496036515_09qnf.mp4?alt=media&token=0e1e4002-b244-4d95-878a-7d9ae03538b9",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788496036515_09qnf.mp4?alt=media&token=0e1e4002-b244-4d95-878a-7d9ae03538b9",
+    "tags": [
+      "fire"
+    ],
+    "created_at": null,
+    "updated_at": "2026-09-04T04:27:18.071Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1788499039640_2hlrb",
+    "name": "Blood Splatter Large",
+    "category": "static",
+    "theme": "nature",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499039640_2hlrb.webp?alt=media&token=fe7bafbb-1b67-460c-b94e-f13d2ee380dd",
+    "tags": [
+      "nature"
+    ],
+    "created_at": null,
+    "updated_at": "2026-09-04T05:17:20.282Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1788499062060_f4ecv",
+    "name": "Lava_river_0002",
+    "category": "video",
+    "theme": "fire",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499062060_f4ecv.mp4?alt=media&token=044a1f54-b8b1-4f51-a358-af410b97699d",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499062060_f4ecv.mp4?alt=media&token=044a1f54-b8b1-4f51-a358-af410b97699d",
+    "tags": [
+      "fire"
+    ],
+    "created_at": null,
+    "updated_at": "2026-09-04T05:17:43.850Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1788499087222_1y0yp",
+    "name": "River_0002",
+    "category": "video",
+    "theme": "water",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499087222_1y0yp.mp4?alt=media&token=dec7b3c5-dc87-4520-8f6b-10c493c4dc6a",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1788499087222_1y0yp.mp4?alt=media&token=dec7b3c5-dc87-4520-8f6b-10c493c4dc6a",
+    "tags": [
+      "water"
+    ],
+    "created_at": null,
+    "updated_at": "2026-09-04T05:18:08.811Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1791244093688_rcyzi",
+    "name": "Acid_pool_0001",
+    "category": "video",
+    "theme": "water",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1791244093688_rcyzi.mp4?alt=media&token=2cc98e23-cfe9-488b-9acf-3932630f982e",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1791244093688_rcyzi.mp4?alt=media&token=2cc98e23-cfe9-488b-9acf-3932630f982e",
+    "tags": [
+      "water"
+    ],
+    "created_at": null,
+    "updated_at": "2026-10-05T23:48:15.689Z",
+    "isVault": true
+  },
+  {
+    "id": "effect_1791244116473_27ato",
+    "name": "Acid_river_0001",
+    "category": "video",
+    "theme": "water",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1791244116473_27ato.mp4?alt=media&token=cc411356-a66c-4aab-ab38-27bbe68acf7f",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Feffect_1791244116473_27ato.mp4?alt=media&token=cc411356-a66c-4aab-ab38-27bbe68acf7f",
+    "tags": [
+      "water"
+    ],
+    "created_at": null,
+    "updated_at": "2026-10-05T23:48:38.717Z",
+    "isVault": true
+  },
+  {
+    "id": "fx_1787791059575_yjcl1",
+    "name": "Lava_river_0001",
+    "category": "video",
+    "theme": "Custom",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Ffx_1787791059575_yjcl1.mp4?alt=media&token=8c39a78c-1935-4805-96e1-172182fe50b7",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Ffx_1787791059575_yjcl1.mp4?alt=media&token=8c39a78c-1935-4805-96e1-172182fe50b7",
+    "tags": [
+      "custom",
+      "video"
+    ],
+    "created_at": "2026-08-27T00:37:39.575Z",
+    "updated_at": "2026-08-27T00:37:41.658Z",
+    "isVault": true
+  },
+  {
+    "id": "fx_1787862215526_60oqc",
+    "name": "Lava_river_0001",
+    "category": "video",
+    "theme": "Custom",
+    "url": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Ffx_1787862215526_60oqc.mp4?alt=media&token=e822912e-f278-4fb9-ae81-a42e0fd37e18",
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/krajdengrid.firebasestorage.app/o/effects%2Ffx_1787862215526_60oqc.mp4?alt=media&token=e822912e-f278-4fb9-ae81-a42e0fd37e18",
+    "tags": [
+      "custom",
+      "video"
+    ],
+    "created_at": "2026-08-27T20:23:35.526Z",
+    "updated_at": "2026-08-27T20:23:37.257Z",
+    "isVault": true
+  }
+]
