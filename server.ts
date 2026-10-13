@@ -380,7 +380,22 @@ Write-Host "        INSTALLING KRAJDEN GRID FOR WINDOWS               " -Foregro
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "[1/4] Downloading native Windows desktop app (~125 MB)..." -ForegroundColor Green
-Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
+$downloaded = $false
+try {
+    $ghHeaders = @{ "Authorization" = "token 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"; "User-Agent" = "KrajdenGrid-Setup" }
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/leokraj/Krajden-Grid/releases" -Headers $ghHeaders
+    if ($releases -and $releases.Count -gt 0) {
+        $asset = $releases[0].assets | Where-Object { $_.name -eq "KrajdenGrid-Windows.zip" -or $_.name -eq "KrajdenGrid-Portable.zip" } | Select-Object -First 1
+        if ($asset) {
+            $dlHeaders = @{ "Authorization" = "token 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"; "Accept" = "application/octet-stream"; "User-Agent" = "Mozilla/5.0" }
+            Invoke-WebRequest -Uri $asset.url -Headers $dlHeaders -OutFile $ZipPath
+            if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 50000000) { $downloaded = $true }
+        }
+    }
+} catch {}
+if (-not $downloaded) {
+    Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
+}
 
 Write-Host "[2/4] Installing files to $InstallDir..." -ForegroundColor Green
 if (Test-Path $InstallDir) {

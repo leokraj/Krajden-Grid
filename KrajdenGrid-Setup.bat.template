@@ -48,7 +48,50 @@ Write-Host ""
 Write-Host "Downloading latest core files (approx. 120MB)..." -ForegroundColor Yellow
 
 $downloaded = $false
-foreach ($url in $urls) {
+
+# 0. Primary: Download directly from latest GitHub Release
+try {
+    Write-Host "Checking GitHub Releases for latest build..." -ForegroundColor Cyan
+    $ghHeaders = @{
+        "Authorization" = "token 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"
+        "User-Agent" = "KrajdenGrid-Setup"
+    }
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/leokraj/Krajden-Grid/releases" -Headers $ghHeaders
+    if ($releases -and $releases.Count -gt 0) {
+        $latestRel = $releases[0]
+        $asset = $latestRel.assets | Where-Object { $_.name -eq "KrajdenGrid-Portable.zip" } | Select-Object -First 1
+        if ($asset) {
+            Write-Host "Found release: $($latestRel.tag_name) ($($asset.name))" -ForegroundColor Green
+            Write-Host "Downloading $($asset.name)..." -ForegroundColor Yellow
+            if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+            
+            if (Get-Command "curl.exe" -ErrorAction SilentlyContinue) {
+                & curl.exe -L -H "Authorization: token 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" -H "Accept: application/octet-stream" -H "User-Agent: Mozilla/5.0" --connect-timeout 30 -o $zipPath $asset.url
+            } else {
+                $dlHeaders = @{
+                    "Authorization" = "token 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"
+                    "Accept" = "application/octet-stream"
+                    "User-Agent" = "Mozilla/5.0"
+                }
+                Invoke-WebRequest -Uri $asset.url -Headers $dlHeaders -OutFile $zipPath
+            }
+            if (Test-Path $zipPath) {
+                $fileSize = (Get-Item $zipPath).Length
+                if ($fileSize -gt 50000000) {
+                    $downloaded = $true
+                    Write-Host "Download from GitHub release succeeded!" -ForegroundColor Green
+                } else {
+                    Remove-Item -Path $zipPath -Force
+                }
+            }
+        }
+    }
+} catch {
+    Write-Host "GitHub release download failed, trying web server mirrors..." -ForegroundColor DarkGray
+}
+
+if (-not $downloaded) {
+    foreach ($url in $urls) {
     Write-Host "Attempting download from: $url" -ForegroundColor Gray
     if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
     

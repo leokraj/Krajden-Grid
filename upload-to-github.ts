@@ -102,23 +102,23 @@ async function uploadToGitHub() {
       }
     };
 
-    // Helper to upload a single asset
-    const uploadAsset = async (assetName: string) => {
+    // Helper to upload a single asset from path
+    const uploadAssetFile = async (assetName: string, targetPath: string, contentType = 'application/zip') => {
       await ensureAssetCleaned(assetName);
 
       console.log(`Uploading "${assetName}" to GitHub Releases...`);
-      const fileStream = fs.readFileSync(filePath);
+      const fileBuffer = fs.readFileSync(targetPath);
 
       const uploadHeaders = {
         ...headers,
-        'Content-Type': 'application/zip',
-        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Content-Length': fileBuffer.length,
       };
 
       try {
         const uploadResponse = await axios.post(
           `${uploadBaseUrl}?name=${assetName}`,
-          fileStream,
+          fileBuffer,
           {
             headers: uploadHeaders,
             maxContentLength: Infinity,
@@ -134,14 +134,21 @@ async function uploadToGitHub() {
       }
     };
 
-    // 5. Upload both assets
-    const url1 = await uploadAsset('KrajdenGrid-Portable.zip');
-    const url2 = await uploadAsset('KrajdenGrid-Windows.zip');
+    // 5. Upload assets
+    const url1 = await uploadAssetFile('KrajdenGrid-Portable.zip', filePath, 'application/zip');
+    const url2 = await uploadAssetFile('KrajdenGrid-Windows.zip', path.join(process.cwd(), 'backend', 'downloads', 'KrajdenGrid-Windows.zip'), 'application/zip');
+    
+    const batPath = path.join(process.cwd(), 'backend', 'downloads', 'KrajdenGrid-Setup.bat');
+    let url3 = '';
+    if (fs.existsSync(batPath)) {
+      url3 = await uploadAssetFile('KrajdenGrid-Setup.bat', batPath, 'text/plain');
+    }
 
     console.log('\n==================================================');
     console.log('🎉 ALL ASSETS UPLOADED SUCCESSFULLY!');
-    console.log(`Public Asset 1: ${url1}`);
-    console.log(`Public Asset 2: ${url2}`);
+    console.log(`Asset 1: ${url1}`);
+    console.log(`Asset 2: ${url2}`);
+    if (url3) console.log(`Asset 3: ${url3}`);
     console.log('==================================================\n');
 
   } catch (error: any) {
