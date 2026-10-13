@@ -2935,8 +2935,8 @@ export function EffectsControlPanel({ onClose }) {
   const userId = getLocalUserId();
   const effectPaths = settings.effectPaths || [];
 
-  const [settingsOpen, setSettingsOpen] = useState(true);
-  const [openGroups, setOpenGroups] = useState({ river: true, area: true, static: true, light: true });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState({ river: false, area: false, static: false, light: false });
   const toggleGroup = (g) => setOpenGroups(prev => ({ ...prev, [g]: !prev[g] }));
 
   // Consumes the radial menu's category pick (RadialContextMenu.jsx writes
