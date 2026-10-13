@@ -45,6 +45,13 @@ try {
     console.warn(`Warning: ${frontendDistDir} does not exist. Standalone offline bundle may be missing.`);
   }
 
+  // Copy offline data assets from electron-app/data if present
+  const electronDataDir = path.join(electronAppDir, 'data');
+  if (fs.existsSync(electronDataDir)) {
+    console.log(`Copying offline data assets to ${path.join(webDistDir, 'data')}...`);
+    fs.cpSync(electronDataDir, path.join(webDistDir, 'data'), { recursive: true });
+  }
+
   // 3. Ensure icon.ico exists (generate if missing)
   if (!fs.existsSync(iconIcoPath)) {
     console.log('Generating missing icon.ico from icon-512.png...');
@@ -73,11 +80,34 @@ try {
     }
   }
 
-  // 3. Run unpacked build via electron-builder (which runs fine on Linux without Wine!)
-  console.log('Building unpacked Windows binary via electron-builder...');
-  execSync('npx electron-builder --dir --win --x64 --project electron-app', { stdio: 'inherit' });
+  // 4. Clean electron-app/dist before rebuilding
+  const electronDistDir = path.join(electronAppDir, 'dist');
+  if (fs.existsSync(electronDistDir)) {
+    console.log(`Cleaning existing ${electronDistDir}...`);
+    fs.rmSync(electronDistDir, { recursive: true, force: true });
+  }
 
-  // 4. Create portable ZIP file of the unpacked Windows application
+  // 5. Run unpacked build via electron-builder (which runs fine on Linux without Wine!)
+  console.log('Building unpacked Windows binary via electron-builder...');
+  execSync('npx electron-builder --dir --win --x64 --project electron-app', {
+    stdio: 'inherit',
+    env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
+  });
+
+  // 6. Ensure timestamps on KrajdenGrid.exe and app.asar reflect the current build time
+  const exePath = path.join(unpackedDir, 'KrajdenGrid.exe');
+  const asarPath = path.join(unpackedDir, 'resources', 'app.asar');
+  const buildDate = new Date();
+  if (fs.existsSync(exePath)) {
+    fs.utimesSync(exePath, buildDate, buildDate);
+    console.log(`Updated timestamp on ${exePath} to: ${buildDate.toISOString()}`);
+  }
+  if (fs.existsSync(asarPath)) {
+    fs.utimesSync(asarPath, buildDate, buildDate);
+    console.log(`Updated timestamp on ${asarPath} to: ${buildDate.toISOString()}`);
+  }
+
+  // 7. Create portable ZIP file of the unpacked Windows application
   console.log(`Packaging unpacked binary into: ${portableZipPath}...`);
   if (fs.existsSync(unpackedDir)) {
     // Add Windows Unblock + Launcher scripts
@@ -91,7 +121,7 @@ start "" "%~dp0KrajdenGrid.exe"
     const ps1LauncherContent = `# Krajden Grid Launcher Script
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Get-ChildItem -Path $scriptDir -Recurse -ErrorAction SilentlyContinue | Unblock-File
-Start-Process -FilePath "$scriptDir\KrajdenGrid.exe"
+Start-Process -FilePath "$scriptDir\\KrajdenGrid.exe"
 `;
     fs.writeFileSync(path.join(unpackedDir, 'Launch-KrajdenGrid.bat'), batLauncherContent);
     fs.writeFileSync(path.join(unpackedDir, 'Launch-KrajdenGrid.ps1'), ps1LauncherContent);
