@@ -4,8 +4,8 @@ import axios from 'axios';
 
 const owner = 'leokraj';
 const repo = 'Krajden-Grid';
-const tag = 'v1.2.0';
-const title = 'Krajden Grid v1.2.0';
+const tag = 'v1.3.0';
+const title = 'Krajden Grid v1.3.0';
 const filePath = path.join(process.cwd(), 'backend', 'downloads', 'KrajdenGrid-Portable.zip');
 
 async function uploadToGitHub() {
