@@ -275,7 +275,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   }, [appDebugSnapshot, renderAppDebugHtml]);
 
   const [collapsedSections, setCollapsedSections] = useState({
-    effects: false,
+    effects: true,
     geometry: true,
     measure: true,
     ping: true,
