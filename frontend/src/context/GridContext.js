@@ -174,7 +174,7 @@ const DM_LOCAL_KEYS = new Set([
   'controlsDetached', 'effectsEnabled', 'effectTool', 'selectedEffectPathId',
   'effectsRadialTarget', 'measureMode', 'drawingEnabled', 'eraserEnabled',
   'pingMode', 'maskEnabled', 'liveMeasurement',
-  'atmoTool', 'spellEditMode',
+  'atmoTool', 'spellEditMode', 'selectedSpellId',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
@@ -466,7 +466,8 @@ export const GridProvider = ({ children }) => {
           "maskPaths",
           "maskRects",
           "atmoTool",
-          "spellEditMode"
+          "spellEditMode",
+          "selectedSpellId"
         ]);
         for (const [key, val] of Object.entries(settings)) {
           if (!excludeKeys.has(key)) {
