@@ -99,6 +99,28 @@ export function HomePage() {
 
   const [downloadProgress, setDownloadProgress] = useState(0);
 
+  const triggerBrowserDownload = (url, filename) => {
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+      }, 2000);
+    } catch (e) {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 60000);
+    }
+  };
+
   const handleDownloadWindows = useCallback(async () => {
     setDownloading(true);
     setDownloadProgress(0);
@@ -126,18 +148,16 @@ export function HomePage() {
       setDownloadProgress(100);
       const blob = new Blob(chunks, { type: 'application/zip' });
       const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = 'KrajdenGrid-Windows.zip';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      triggerBrowserDownload(blobUrl, 'KrajdenGrid-Windows.zip');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     } catch (err) {
-      console.warn('Direct zip fetch failed:', err);
-      window.location.href = '/api/download/KrajdenGrid-Windows.zip';
+      console.warn('Direct zip fetch failed, falling back to background download:', err);
+      triggerBrowserDownload('/api/download/KrajdenGrid-Windows.zip', 'KrajdenGrid-Windows.zip');
     } finally {
-      setDownloading(false);
+      setTimeout(() => {
+        setDownloading(false);
+        setDownloadProgress(0);
+      }, 1500);
     }
   }, []);
 
@@ -260,26 +280,55 @@ export function HomePage() {
           </div>
 
           {/* Primary 1-Click Download Action Bar */}
-          <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">
-            <Link to="/download" className="w-full sm:w-auto flex-1">
+          <div className="pt-4 flex flex-col items-center justify-center gap-3 max-w-md mx-auto">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
               <Button
                 size="lg"
-                className="w-full h-14 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-extrabold text-sm tracking-widest uppercase rounded-2xl shadow-xl shadow-[#caa055]/20 hover:shadow-[#caa055]/30 transition-all flex items-center justify-center gap-3 cursor-pointer"
+                onClick={handleDownloadWindows}
+                disabled={downloading}
+                className="w-full sm:w-auto flex-1 h-14 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-extrabold text-sm tracking-widest uppercase rounded-2xl shadow-xl shadow-[#caa055]/20 hover:shadow-[#caa055]/30 transition-all flex items-center justify-center gap-3 cursor-pointer disabled:opacity-85"
               >
-                <Download className="w-5 h-5" /> Download for Windows
+                {downloading ? (
+                  <><Loader2 className="w-5 h-5 animate-spin text-black" /> Downloading {downloadProgress}%...</>
+                ) : (
+                  <><Download className="w-5 h-5" /> Download for Windows</>
+                )}
               </Button>
-            </Link>
 
-            <Link to="/fullscreen" className="w-full sm:w-auto">
-              <Button
-                size="lg"
-                variant="outline"
-                className="w-full sm:w-auto h-14 border border-white/20 hover:border-[#caa055] text-white hover:text-[#caa055] font-cinzel font-bold text-xs tracking-wider uppercase rounded-2xl px-6 transition-all"
+              <Link to="/fullscreen" className="w-full sm:w-auto">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full sm:w-auto h-14 border border-white/20 hover:border-[#caa055] text-white hover:text-[#caa055] font-cinzel font-bold text-xs tracking-wider uppercase rounded-2xl px-6 transition-all"
+                >
+                  <Tv className="w-4 h-4 mr-2 text-[#caa055]" />
+                  Web Canvas
+                </Button>
+              </Link>
+            </div>
+
+            {downloading && (
+              <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mt-1">
+                <div 
+                  className="bg-[#caa055] h-full transition-all duration-200" 
+                  style={{ width: `${downloadProgress}%` }}
+                />
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
+              <a
+                href="/api/download/KrajdenGrid-Windows.zip"
+                download="KrajdenGrid-Windows.zip"
+                className="text-[#caa055] hover:underline"
               >
-                <Tv className="w-4 h-4 mr-2 text-[#caa055]" />
-                Web Canvas
-              </Button>
-            </Link>
+                Direct ZIP Link
+              </a>
+              <span>•</span>
+              <Link to="/download" className="hover:text-white hover:underline">
+                Installation Guide &rarr;
+              </Link>
+            </div>
           </div>
 
           {/* Compatibility guarantee */}

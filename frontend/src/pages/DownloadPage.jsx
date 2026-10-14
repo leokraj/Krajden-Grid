@@ -51,6 +51,28 @@ export function DownloadPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
+  const triggerBrowserDownload = (url, filename) => {
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+      }, 2000);
+    } catch (e) {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 60000);
+    }
+  };
+
   const startDownload = async (e) => {
     if (e) e.preventDefault();
     setDownloading(true);
@@ -80,16 +102,11 @@ export function DownloadPage() {
       setDownloadProgress(100);
       const blob = new Blob(chunks, { type: 'application/zip' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'KrajdenGrid-Windows.zip';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      triggerBrowserDownload(url, 'KrajdenGrid-Windows.zip');
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err) {
-      console.warn('Fetch streaming download failed, falling back to direct link:', err);
-      window.location.href = '/api/download/KrajdenGrid-Windows.zip';
+      console.warn('Fetch streaming download failed, falling back to direct background download:', err);
+      triggerBrowserDownload('/api/download/KrajdenGrid-Windows.zip', 'KrajdenGrid-Windows.zip');
     } finally {
       setTimeout(() => {
         setDownloading(false);
