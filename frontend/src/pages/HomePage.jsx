@@ -282,18 +282,13 @@ export function HomePage() {
           {/* Primary 1-Click Download Action Bar */}
           <div className="pt-4 flex flex-col items-center justify-center gap-3 max-w-md mx-auto">
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
-              <Button
-                size="lg"
-                onClick={handleDownloadWindows}
-                disabled={downloading}
-                className="w-full sm:w-auto flex-1 h-14 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-extrabold text-sm tracking-widest uppercase rounded-2xl shadow-xl shadow-[#caa055]/20 hover:shadow-[#caa055]/30 transition-all flex items-center justify-center gap-3 cursor-pointer disabled:opacity-85"
+              <a
+                href="/api/download/KrajdenGrid-Windows.zip"
+                download="KrajdenGrid-Windows.zip"
+                className="w-full sm:w-auto flex-1 h-14 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-extrabold text-sm tracking-widest uppercase rounded-2xl shadow-xl shadow-[#caa055]/20 hover:shadow-[#caa055]/30 transition-all flex items-center justify-center gap-3 cursor-pointer no-underline text-center"
               >
-                {downloading ? (
-                  <><Loader2 className="w-5 h-5 animate-spin text-black" /> Downloading {downloadProgress}%...</>
-                ) : (
-                  <><Download className="w-5 h-5" /> Download for Windows</>
-                )}
-              </Button>
+                <Download className="w-5 h-5" /> Download for Windows
+              </a>
 
               <Link to="/fullscreen" className="w-full sm:w-auto">
                 <Button
@@ -503,27 +498,13 @@ export function HomePage() {
               </div>
 
               <div className="space-y-3 pt-2">
-                <Button
-                  size="lg"
-                  onClick={handleDownloadWindows}
-                  disabled={downloading}
-                  className="w-full h-12 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all shadow-lg cursor-pointer disabled:opacity-85 flex items-center justify-center gap-2"
+                <a
+                  href="/api/download/KrajdenGrid-Windows.zip"
+                  download="KrajdenGrid-Windows.zip"
+                  className="w-full h-12 bg-[#caa055] hover:bg-[#d5b271] text-black font-cinzel font-bold text-xs tracking-widest uppercase rounded-xl transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2 no-underline text-center"
                 >
-                  {downloading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin text-black" /> Downloading {downloadProgress}% (~125 MB)...</>
-                  ) : (
-                    <><Download className="w-4 h-4" /> Download Windows App (.zip)</>
-                  )}
-                </Button>
-
-                {downloading && (
-                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-                    <div 
-                      className="bg-[#caa055] h-full transition-all duration-200" 
-                      style={{ width: `${downloadProgress}%` }}
-                    />
-                  </div>
-                )}
+                  <Download className="w-4 h-4" /> Download Windows App (.zip)
+                </a>
 
                 <div className="text-center">
                   <a

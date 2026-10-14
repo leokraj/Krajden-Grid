@@ -48,71 +48,11 @@ const FAQS = [
 export function DownloadPage() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [faqOpen, setFaqOpen] = useState(null);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [started, setStarted] = useState(false);
 
-  const triggerBrowserDownload = (url, filename) => {
-    try {
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        if (document.body.contains(link)) document.body.removeChild(link);
-      }, 2000);
-    } catch (e) {
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.src = url;
-      document.body.appendChild(iframe);
-      setTimeout(() => {
-        if (document.body.contains(iframe)) document.body.removeChild(iframe);
-      }, 60000);
-    }
-  };
-
-  const startDownload = async (e) => {
-    if (e) e.preventDefault();
-    setDownloading(true);
-    setDownloadProgress(0);
-
-    try {
-      const resp = await fetch('/api/download/KrajdenGrid-Windows.zip');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-      const contentLength = resp.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 115351061;
-      let loaded = 0;
-
-      const reader = resp.body.getReader();
-      const chunks = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        if (total > 0) {
-          setDownloadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-        }
-      }
-
-      setDownloadProgress(100);
-      const blob = new Blob(chunks, { type: 'application/zip' });
-      const url = URL.createObjectURL(blob);
-      triggerBrowserDownload(url, 'KrajdenGrid-Windows.zip');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (err) {
-      console.warn('Fetch streaming download failed, falling back to direct background download:', err);
-      triggerBrowserDownload('/api/download/KrajdenGrid-Windows.zip', 'KrajdenGrid-Windows.zip');
-    } finally {
-      setTimeout(() => {
-        setDownloading(false);
-        setDownloadProgress(0);
-      }, 1500);
-    }
+  const handleDownloadClick = () => {
+    setStarted(true);
+    setTimeout(() => setStarted(false), 8000);
   };
 
   useEffect(() => {
@@ -213,41 +153,37 @@ export function DownloadPage() {
         </p>
 
         {/* THE PRIMARY DOWNLOAD BUTTON */}
-        <button
-          onClick={startDownload}
-          disabled={downloading}
+        <a
+          href="/api/download/KrajdenGrid-Windows.zip"
+          download="KrajdenGrid-Windows.zip"
+          onClick={handleDownloadClick}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 12,
             padding: '18px 40px', borderRadius: 14,
-            background: downloading ? '#a6823c' : '#caa055',
+            background: started ? '#d4b060' : '#caa055',
             color: '#08080a',
             fontFamily: 'Cinzel, serif', fontWeight: 900,
             fontSize: 15, letterSpacing: '0.12em',
             textTransform: 'uppercase', textDecoration: 'none',
             boxShadow: '0 0 50px rgba(202,160,85,0.3)',
             transition: 'all 0.2s',
-            cursor: downloading ? 'wait' : 'pointer',
-            border: 'none',
+            cursor: 'pointer',
           }}
           onMouseEnter={e => {
-            if (!downloading) {
-              e.currentTarget.style.background = '#d4b060';
-              e.currentTarget.style.boxShadow = '0 0 70px rgba(202,160,85,0.5)';
-              e.currentTarget.style.transform = 'scale(1.02)';
-            }
+            e.currentTarget.style.background = '#d4b060';
+            e.currentTarget.style.boxShadow = '0 0 70px rgba(202,160,85,0.5)';
+            e.currentTarget.style.transform = 'scale(1.02)';
           }}
           onMouseLeave={e => {
-            if (!downloading) {
-              e.currentTarget.style.background = '#caa055';
-              e.currentTarget.style.boxShadow = '0 0 50px rgba(202,160,85,0.3)';
-              e.currentTarget.style.transform = 'scale(1)';
-            }
+            e.currentTarget.style.background = '#caa055';
+            e.currentTarget.style.boxShadow = '0 0 50px rgba(202,160,85,0.3)';
+            e.currentTarget.style.transform = 'scale(1)';
           }}
         >
-          {downloading ? (
+          {started ? (
             <>
               <Loader2 className="animate-spin" style={{ width: 20, height: 20 }} />
-              Downloading {downloadProgress}%...
+              Downloading Windows App...
             </>
           ) : (
             <>
@@ -255,16 +191,16 @@ export function DownloadPage() {
               Download for Windows
             </>
           )}
-        </button>
+        </a>
 
-        {downloading && (
-          <div style={{ width: '100%', maxWidth: 360, background: 'rgba(255,255,255,0.1)', height: 6, borderRadius: 3, marginTop: 14, overflow: 'hidden' }}>
-            <div style={{ background: '#caa055', height: '100%', width: `${downloadProgress}%`, transition: 'width 0.2s' }} />
-          </div>
+        {started && (
+          <p style={{ marginTop: 12, color: '#caa055', fontSize: 13, fontFamily: 'monospace' }}>
+            ✓ Download started! Check your browser's Downloads bar.
+          </p>
         )}
 
         <p style={{
-          marginTop: 16, color: 'rgba(255,255,255,0.35)',
+          marginTop: 16, color: 'rgba(255,255,255,0.4)',
           fontSize: 12, fontFamily: 'monospace',
         }}>
           KrajdenGrid-Windows.zip · ~110 MB · Unzip and run — no installer needed
