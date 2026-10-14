@@ -19,7 +19,9 @@ import {
   MapPin,
   Layers,
   Grid,
-  Flame
+  Flame,
+  CloudFog,
+  Map as MapIcon
 } from 'lucide-react';
 
 export function RadialContextMenu() {
@@ -173,12 +175,69 @@ export function RadialContextMenu() {
   };
 
   const handleLibrarySelect = () => {
-    if (setShowClipartLibrary) {
-      setShowClipartLibrary(true);
+    // The Token Library is a floating window. The radial menu lives in the
+    // Grid window, so in the desktop app ask Electron to open the library's
+    // own window directly (setShowClipartLibrary only reaches panels that
+    // live in this same window).
+    if (window.electronAPI?.openClipartWindow) {
+      window.electronAPI.openClipartWindow();
+    } else {
+      if (setShowClipartLibrary) setShowClipartLibrary(true);
+      const elem = document.getElementById('section-clipart');
+      if (elem) elem.scrollIntoView({ behavior: 'smooth' });
     }
-    const elem = document.getElementById('section-clipart');
-    if (elem) elem.scrollIntoView({ behavior: 'smooth' });
     toast.success('Opened Token & Clipart Library');
+    closeRadialMenu();
+  };
+
+  // Map Importer = the Battle Maps & Layers window.
+  const handleMapImporterSelect = () => {
+    if (window.electronAPI?.openLayersWindow) {
+      window.electronAPI.openLayersWindow();
+    } else {
+      const elem = document.getElementById('section-bgimage');
+      if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+    }
+    toast.success('Opened Map Importer');
+    closeRadialMenu();
+  };
+
+  // Grid Mask: erase the grid under a brush / rectangle / circle.
+  const handleMaskSelect = (tool) => {
+    updateSettings({
+      maskEnabled: true, maskTool: tool,
+      measureMode: false, drawingEnabled: false, eraserEnabled: false, pingMode: false,
+      effectsEnabled: false, atmoTool: null,
+    });
+    toast.success(`Grid Mask: ${tool}. Right-click to exit.`);
+    closeRadialMenu();
+  };
+  const handleMaskOff = () => {
+    updateSettings({ maskEnabled: false });
+    closeRadialMenu();
+  };
+
+  // Fog of War (painted fog): pick reveal/re-cover + brush/rect/circle.
+  const handleFogTool = (tool) => {
+    updateSettings({
+      fogEnabled: true, atmoTool: tool,
+      measureMode: false, drawingEnabled: false, eraserEnabled: false, pingMode: false,
+      maskEnabled: false, effectsEnabled: false,
+    });
+    closeRadialMenu();
+  };
+  const handleFogAll = (reveal) => {
+    const ops = settings.fogOps || [];
+    updateSettings({
+      fogEnabled: true,
+      fogOps: reveal
+        ? [...ops, { id: `fog_${Date.now()}`, mode: 'reveal', kind: 'rect', x: -5000, y: -5000, w: 20000, h: 20000, soft: 0 }]
+        : [],
+    });
+    closeRadialMenu();
+  };
+  const handleFogOff = () => {
+    updateSettings({ fogEnabled: false, atmoTool: null });
     closeRadialMenu();
   };
 
@@ -332,6 +391,58 @@ export function RadialContextMenu() {
             }`}>
               <Flame className="w-5 h-5 text-[#caa055]" />
               <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider">Effects</span>
+            </div>
+          </div>
+
+          {/* OUTER RING: GRID MASK (between Measure and the Token corner) */}
+          <div
+            className="absolute flex flex-col items-center cursor-pointer z-10"
+            style={{ left: 'calc(50% - 54px - 20px)', top: 'calc(50% - 129px - 20px)' }}
+            onMouseEnter={() => setActiveSubMenu('mask')}
+            onClick={() => setActiveSubMenu(activeSubMenu === 'mask' ? null : 'mask')}
+            data-testid="radial-mask"
+            title="Grid Mask"
+          >
+            <div className={`w-10 h-10 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+              settings.maskEnabled || activeSubMenu === 'mask'
+                ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_12px_#caa055] scale-110'
+                : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
+            }`}>
+              <Grid className="w-4 h-4 text-[#caa055]" />
+              <span className="text-[6px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Mask</span>
+            </div>
+          </div>
+
+          {/* OUTER RING: MAP IMPORTER (between Library and the Fog corner) */}
+          <div
+            className="absolute flex flex-col items-center cursor-pointer z-10"
+            style={{ left: 'calc(50% - 54px - 20px)', top: 'calc(50% + 129px - 20px)' }}
+            onMouseEnter={() => setActiveSubMenu('mapimport')}
+            onClick={handleMapImporterSelect}
+            data-testid="radial-map-importer"
+            title="Map Importer"
+          >
+            <div className="w-10 h-10 rounded-full border bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105 flex flex-col items-center justify-center transition-all duration-200">
+              <MapIcon className="w-4 h-4 text-[#caa055]" />
+              <span className="text-[6px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Maps</span>
+            </div>
+          </div>
+
+          {/* CORNER: BOTTOM-LEFT — Fog of War */}
+          <div
+            className="absolute bottom-6 left-6 flex flex-col items-center cursor-pointer z-10"
+            onMouseEnter={() => setActiveSubMenu('fog')}
+            onClick={() => setActiveSubMenu(activeSubMenu === 'fog' ? null : 'fog')}
+            data-testid="radial-corner-fog"
+            title="Fog of War"
+          >
+            <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+              settings.fogEnabled || activeSubMenu === 'fog'
+                ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
+                : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
+            }`}>
+              <CloudFog className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider">Fog</span>
             </div>
           </div>
 
@@ -511,6 +622,42 @@ export function RadialContextMenu() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* TOP-LEFT SUBMENU: GRID MASK */}
+          {activeSubMenu === 'mask' && (
+            <div className="absolute top-0 -left-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+              <button onClick={() => handleMaskSelect('brush')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-brush"><span>🖌️</span><span>Brush</span></button>
+              <button onClick={() => handleMaskSelect('rect')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-rect"><span>▭</span><span>Rectangle</span></button>
+              <button onClick={() => handleMaskSelect('circle')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-circle"><span>◯</span><span>Circle</span></button>
+              {settings.maskEnabled && (
+                <button onClick={handleMaskOff} className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer" data-testid="radial-mask-off">
+                  <XCircle className="w-3.5 h-3.5" /><span>Off</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* BOTTOM-LEFT SUBMENU: FOG OF WAR */}
+          {activeSubMenu === 'fog' && (
+            <div className="absolute bottom-0 -left-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+              <div className="w-full grid grid-cols-2 gap-1">
+                <button onClick={() => updateSettings({ fogMode: 'reveal' })} className={`p-1 rounded-md border text-[8px] uppercase font-bold ${(settings.fogMode || 'reveal') === 'reveal' ? 'bg-[#caa055]/30 border-[#caa055] text-[#f1d9a0]' : 'border-[#caa055]/30 text-[#caa055]'}`} data-testid="radial-fog-reveal">Reveal</button>
+                <button onClick={() => updateSettings({ fogMode: 'hide' })} className={`p-1 rounded-md border text-[8px] uppercase font-bold ${settings.fogMode === 'hide' ? 'bg-[#caa055]/30 border-[#caa055] text-[#f1d9a0]' : 'border-[#caa055]/30 text-[#caa055]'}`} data-testid="radial-fog-hide">Cover</button>
+              </div>
+              <button onClick={() => handleFogTool('fog-brush')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-fog-brush"><span>🖌️</span><span>Brush</span></button>
+              <button onClick={() => handleFogTool('fog-rect')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-fog-rect"><span>▭</span><span>Rectangle</span></button>
+              <button onClick={() => handleFogTool('fog-circle')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-fog-circle"><span>◯</span><span>Circle</span></button>
+              <div className="w-full grid grid-cols-2 gap-1">
+                <button onClick={() => handleFogAll(true)} className="p-1 rounded-md border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[8px] uppercase font-bold" data-testid="radial-fog-reveal-all">Show all</button>
+                <button onClick={() => handleFogAll(false)} className="p-1 rounded-md border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[8px] uppercase font-bold" data-testid="radial-fog-cover-all">Cover all</button>
+              </div>
+              {settings.fogEnabled && (
+                <button onClick={handleFogOff} className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer" data-testid="radial-fog-off">
+                  <XCircle className="w-3.5 h-3.5" /><span>Fog off</span>
+                </button>
+              )}
             </div>
           )}
 
