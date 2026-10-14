@@ -746,7 +746,6 @@ export function AtmosphereLayer() {
         </div>
       )}
 
-      <MouseToken settings={settings} />
     </>
   );
 }
