@@ -458,7 +458,6 @@ export function AtmosphereSections({ sectionFilter }) {
       <Section id="atmo-fog" title="Fog of War" icon={CloudFog} sectionFilter={sectionFilter}><FogPanel /></Section>
       <Section id="atmo-spells" title="Spell Circles & Hits" icon={Wand2} sectionFilter={sectionFilter}><SpellPanel /></Section>
       <Section id="atmo-groups" title="Groups & Mass Edit" icon={Layers} sectionFilter={sectionFilter}><GroupsPanel /></Section>
-      <Section id="atmo-gfx" title="Graphics & Mouse Token" icon={MousePointer2} sectionFilter={sectionFilter}><GraphicsPanel /></Section>
     </>
   );
 }
