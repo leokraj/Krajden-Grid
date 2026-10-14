@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, MapPin } from 'lucide-react';
+import { ChevronDown, ChevronRight, MapPin, CloudSun, CloudFog, Wand2, Layers, MousePointer2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useGrid } from '../context/GridContext';
 import {
@@ -44,7 +44,7 @@ const ColorInput = ({ label, value, onChange }) => (
   </label>
 );
 
-function Section({ id, title, emoji, sectionFilter, children, defaultOpen = false }) {
+function Section({ id, title, icon: Icon, sectionFilter, children, defaultOpen = false }) {
   const [open, setOpen] = useState(sectionFilter === id ? true : defaultOpen);
   if (sectionFilter && sectionFilter !== id) return null;
   return (
@@ -53,7 +53,8 @@ function Section({ id, title, emoji, sectionFilter, children, defaultOpen = fals
         <div className="flex-1 min-w-0">
           <button onClick={() => setOpen(o => !o)} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90">
             <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-              <span className="text-base leading-none">{emoji}</span>{title}
+              <Icon className="w-3.5 h-3.5 text-[#caa055]/80" />
+              {title}
             </span>
             {open ? <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" />}
           </button>
@@ -167,32 +168,56 @@ function SpellPanel() {
   const g = (k) => gv(settings, k);
   const set = updateSettings;
   const tool = settings.atmoTool;
-  const d = g('spellDraft');
   const md = g('markDraft');
-  const setD = (p) => set({ spellDraft: { ...d, ...p } });
   const setM = (p) => set({ markDraft: { ...md, ...p } });
   const circles = g('spellCircles') || [];
+  const selId = settings.selectedSpellId || null;
+  const sel = circles.find(c => c.id === selId) || null;
+
+  // The same controls edit either the selected circle or the defaults used for new ones.
+  const target = sel || g('spellDraft');
+  const setT = (p) => {
+    if (sel) set({ spellCircles: circles.map(c => (c.id === sel.id ? { ...c, ...p } : c)) });
+    else set({ spellDraft: { ...g('spellDraft'), ...p } });
+  };
+  const reroll = () => setT({ seed: Math.floor(Math.random() * 99999) + 1 });
+  const duplicate = () => {
+    if (!sel) return;
+    const id = uid('spell');
+    set({ spellCircles: [...circles, { ...sel, id, x: sel.x + 60, y: sel.y + 60, groupId: undefined, locked: false }], selectedSpellId: id });
+  };
+
   return (
     <>
-      <div className="text-[10px] uppercase tracking-wider text-[#caa055]/60 font-mono">Spell circle</div>
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-[#caa055]/60 font-mono">
+          {sel ? 'Editing selected circle' : 'New circle settings'}
+        </div>
+        {sel && <Btn onClick={() => set({ selectedSpellId: null })}>Done</Btn>}
+      </div>
+      {!sel && (
+        <div className="text-[9px] text-[#caa055]/45 font-mono">
+          Click a placed circle on the map (on its outer ring or its centre) to select it, then change it here. Drag to move, scroll to resize, Delete to remove.
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-1">
-        {Object.entries(SPELL_STYLES).map(([k, s]) => (
-          <Btn key={k} active={d.style === k} onClick={() => setD({ style: k, color: s.color })}>{s.label}</Btn>
+        {Object.entries(SPELL_STYLES).map(([k, st]) => (
+          <Btn key={k} active={target.style === k} onClick={() => setT({ style: k, color: st.color })}>{st.label}</Btn>
         ))}
       </div>
-      <ColorInput label="Colour" value={d.color} onChange={(v) => setD({ color: v })} />
-      <Slider label="Radius" value={d.radius} min={40} max={500} onChange={(v) => setD({ radius: v })} fmt={(v) => `${v}px`} />
-      <Slider label="Rings" value={d.rings} min={1} max={6} onChange={(v) => setD({ rings: v })} />
-      <Slider label="Spokes" value={d.spokes} min={3} max={12} onChange={(v) => setD({ spokes: v })} />
-      <Slider label="Runes" value={d.runes} min={0} max={36} onChange={(v) => setD({ runes: v })} />
-      <Slider label="Spin speed" value={d.speed} min={0.2} max={4} step={0.1} onChange={(v) => setD({ speed: v })} />
+      <ColorInput label="Colour" value={target.color} onChange={(v) => setT({ color: v })} />
+      <Slider label="Radius" value={target.radius} min={40} max={500} onChange={(v) => setT({ radius: v })} fmt={(v) => `${v}px`} />
+      <Slider label="Rings" value={target.rings} min={1} max={6} onChange={(v) => setT({ rings: v })} />
+      <Slider label="Spokes" value={target.spokes} min={3} max={12} onChange={(v) => setT({ spokes: v })} />
+      <Slider label="Runes" value={target.runes} min={0} max={36} onChange={(v) => setT({ runes: v })} />
+      <Slider label="Spin speed" value={target.speed} min={0.2} max={4} step={0.1} onChange={(v) => setT({ speed: v })} />
       <div className="flex gap-1 flex-wrap">
-        <Btn active={tool === 'spell'} onClick={() => set({ atmoTool: tool === 'spell' ? null : 'spell' })}>✦ Place circle</Btn>
-        <Btn onClick={() => setD({ seed: Math.floor(Math.random() * 99999) })}>🎲 New rune layout</Btn>
-        <Btn active={g('spellEditMode')} onClick={() => set({ spellEditMode: !g('spellEditMode') })}>✥ Move / resize / delete</Btn>
-        <Btn danger onClick={() => set({ spellCircles: [] })}>Clear ({circles.length})</Btn>
+        {!sel && <Btn active={tool === 'spell'} onClick={() => set({ atmoTool: tool === 'spell' ? null : 'spell' })}>✦ Place circle</Btn>}
+        <Btn onClick={reroll} title="Re-draws the rune symbols, the sparkle positions and the orbiting dots' starting angle. Size, rings, spokes and colour stay the same.">🎲 New rune symbols</Btn>
+        {sel && <Btn onClick={duplicate}>⧉ Duplicate</Btn>}
+        {sel && <Btn danger onClick={() => set({ spellCircles: circles.filter(c => c.id !== sel.id), selectedSpellId: null })}>Delete</Btn>}
+        {!sel && <Btn danger onClick={() => set({ spellCircles: [] })}>Clear all ({circles.length})</Btn>}
       </div>
-      {g('spellEditMode') && <div className="text-[9px] text-[#caa055]/45 font-mono">Drag a circle to move it, scroll over it to resize, × to delete.</div>}
 
       <div className="text-[10px] uppercase tracking-wider text-[#caa055]/60 font-mono pt-2">Combat marks (animated hits)</div>
       <div className="grid grid-cols-5 gap-1">
@@ -429,11 +454,11 @@ function GraphicsPanel() {
 export function AtmosphereSections({ sectionFilter }) {
   return (
     <>
-      <Section id="atmo-weather" title="Time & Weather" emoji="🌦️" sectionFilter={sectionFilter}><TimeWeather /></Section>
-      <Section id="atmo-fog" title="Fog of War" emoji="🌫️" sectionFilter={sectionFilter}><FogPanel /></Section>
-      <Section id="atmo-spells" title="Spell Circles & Hits" emoji="🔮" sectionFilter={sectionFilter}><SpellPanel /></Section>
-      <Section id="atmo-groups" title="Groups & Mass Edit" emoji="🗂️" sectionFilter={sectionFilter}><GroupsPanel /></Section>
-      <Section id="atmo-gfx" title="Graphics & Mouse Token" emoji="🖱️" sectionFilter={sectionFilter}><GraphicsPanel /></Section>
+      <Section id="atmo-weather" title="Time & Weather" icon={CloudSun} sectionFilter={sectionFilter}><TimeWeather /></Section>
+      <Section id="atmo-fog" title="Fog of War" icon={CloudFog} sectionFilter={sectionFilter}><FogPanel /></Section>
+      <Section id="atmo-spells" title="Spell Circles & Hits" icon={Wand2} sectionFilter={sectionFilter}><SpellPanel /></Section>
+      <Section id="atmo-groups" title="Groups & Mass Edit" icon={Layers} sectionFilter={sectionFilter}><GroupsPanel /></Section>
+      <Section id="atmo-gfx" title="Graphics & Mouse Token" icon={MousePointer2} sectionFilter={sectionFilter}><GraphicsPanel /></Section>
     </>
   );
 }
