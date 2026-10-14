@@ -94,18 +94,26 @@ try {
     env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
   });
 
-  // 6. Ensure timestamps on KrajdenGrid.exe and app.asar reflect the current build time
+  // 6. Ensure timestamps on all unpacked files (including KrajdenGrid.exe and app.asar) reflect the current build time
   const exePath = path.join(unpackedDir, 'KrajdenGrid.exe');
   const asarPath = path.join(unpackedDir, 'resources', 'app.asar');
   const buildDate = new Date();
-  if (fs.existsSync(exePath)) {
-    fs.utimesSync(exePath, buildDate, buildDate);
-    console.log(`Updated timestamp on ${exePath} to: ${buildDate.toISOString()}`);
+  
+  function touchRecursive(dir: string, date: Date) {
+    if (!fs.existsSync(dir)) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      try {
+        fs.utimesSync(fullPath, date, date);
+      } catch (e) {}
+      if (entry.isDirectory()) {
+        touchRecursive(fullPath, date);
+      }
+    }
   }
-  if (fs.existsSync(asarPath)) {
-    fs.utimesSync(asarPath, buildDate, buildDate);
-    console.log(`Updated timestamp on ${asarPath} to: ${buildDate.toISOString()}`);
-  }
+  touchRecursive(unpackedDir, buildDate);
+  console.log(`Updated timestamps on all files in ${unpackedDir} to: ${buildDate.toISOString()}`);
 
   // 7. Create portable ZIP file of the unpacked Windows application
   console.log(`Packaging unpacked binary into: ${portableZipPath}...`);
