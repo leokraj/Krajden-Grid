@@ -296,7 +296,7 @@ function FogCanvas({ settings, size, liveOp, isDm }) {
 }
 
 // ── Spell circles ───────────────────────────────────────────────────────────
-function SpellCircleSvg({ c, particles, glow }) {
+function SpellCircleSvg({ c, particles, glow, hit }) {
   const rand = useMemo(() => mulberry32(c.seed || 1), [c.seed]);
   const parts = useMemo(() => {
     const r = mulberry32(c.seed || 1);
@@ -330,8 +330,21 @@ function SpellCircleSvg({ c, particles, glow }) {
   return (
     <svg
       width={size} height={size} viewBox="-12 -12 224 224"
-      style={{ overflow: 'visible', filter: glow ? `drop-shadow(0 0 6px ${col}) drop-shadow(0 0 14px ${col}66)` : 'none' }}
+      style={{ overflow: 'visible', pointerEvents: 'none', filter: glow ? `drop-shadow(0 0 6px ${col}) drop-shadow(0 0 14px ${col}66)` : 'none' }}
     >
+      {/* Click targets: only the outer ring band and the centre are clickable,
+          so tokens sitting inside the circle stay clickable. */}
+      {hit && hit.on && (
+        <g fill="transparent" stroke="transparent" data-spell-hit="1">
+          <circle cx="100" cy="100" r="94" strokeWidth="26" style={{ pointerEvents: 'stroke', cursor: hit.locked ? 'default' : 'move' }}
+            onMouseDown={hit.onDown} onWheel={hit.onWheel} />
+          <circle cx="100" cy="100" r="22" style={{ pointerEvents: 'all', cursor: hit.locked ? 'default' : 'move' }}
+            onMouseDown={hit.onDown} onWheel={hit.onWheel} />
+        </g>
+      )}
+      {hit && hit.selected && (
+        <circle cx="100" cy="100" r="108" fill="none" stroke="#caa055" strokeWidth="2" strokeDasharray="7 5" style={{ pointerEvents: 'none' }} />
+      )}
       <g transform="translate(0 0)" fill="none" stroke={col} strokeWidth="1.6">
         <circle cx="100" cy="100" r="96" strokeWidth="2.4" />
         <circle cx="100" cy="100" r="91" strokeOpacity=".5" />
@@ -489,6 +502,8 @@ function MouseToken({ settings }) {
 export function AtmosphereLayer() {
   useStyleOnce();
   const { settings, updateSettings, isDmScreen } = useGrid();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   useEffect(() => {
     const on = () => setSize({ width: window.innerWidth, height: window.innerHeight });
@@ -508,7 +523,9 @@ export function AtmosphereLayer() {
   const blockers = S(settings, 'weatherBlockers') || [];
   const particles = !!S(settings, 'gfxParticles');
   const glow = !!S(settings, 'gfxGlow') && S(settings, 'gfxQuality') !== 'low';
-  const edit = !!S(settings, 'spellEditMode');
+  const selectedSpellId = settings.selectedSpellId || null;
+  const canPick = !tool && !settings.measureMode && !settings.drawingEnabled && !settings.eraserEnabled
+    && !settings.pingMode && !settings.maskEnabled && !settings.effectsEnabled;
 
   // Tick so fading marks disappear; the game window also prunes expired ones.
   useEffect(() => {
@@ -546,9 +563,12 @@ export function AtmosphereLayer() {
       dragRef.current = { start: p };
     } else if (tool === 'spell') {
       const d = S(settings, 'spellDraft');
+      const newId = uid('spell');
       updateSettings({
+        selectedSpellId: newId,
+        atmoTool: null,
         spellCircles: [...(S(settings, 'spellCircles') || []), {
-          id: uid('spell'), x: p.x, y: p.y, radius: d.radius, color: d.color, style: d.style,
+          id: newId, x: p.x, y: p.y, radius: d.radius, color: d.color, style: d.style,
           rings: d.rings, spokes: d.spokes, runes: d.runes, speed: d.speed,
           seed: d.seed || Math.floor(Math.random() * 99999),
         }],
@@ -610,15 +630,17 @@ export function AtmosphereLayer() {
   const brushCursor = tool === 'fog-brush' && cursor;
   const showBlockers = (tool || '').startsWith('blocker');
 
-  // ── Spell circle drag / resize while in edit mode ──
+  // ── Spell circles: click to select, drag to move, scroll to resize ──
   const circleDrag = useRef(null);
   const startCircleDrag = (e, c) => {
-    if (c.locked) return;
+    if (e.button !== 0) return;
     e.stopPropagation();
+    if (settings.selectedSpellId !== c.id) updateSettings({ selectedSpellId: c.id });
+    if (c.locked) return;
     circleDrag.current = { id: c.id, sx: e.clientX, sy: e.clientY, ox: c.x, oy: c.y };
     const mv = (ev) => {
       const cd = circleDrag.current; if (!cd) return;
-      const list = (S(settings, 'spellCircles') || []).map(x => x.id === cd.id ? { ...x, x: cd.ox + ev.clientX - cd.sx, y: cd.oy + ev.clientY - cd.sy } : x);
+      const list = (S(settingsRef.current, 'spellCircles') || []).map(x => x.id === cd.id ? { ...x, x: cd.ox + ev.clientX - cd.sx, y: cd.oy + ev.clientY - cd.sy } : x);
       updateSettings({ spellCircles: list });
     };
     const upH = () => { circleDrag.current = null; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', upH); };
@@ -628,36 +650,59 @@ export function AtmosphereLayer() {
   const wheelCircle = (e, c) => {
     if (c.locked) return;
     const r = Math.max(30, Math.min(900, (c.radius || 150) + (e.deltaY < 0 ? 10 : -10)));
-    updateSettings({ spellCircles: (S(settings, 'spellCircles') || []).map(x => x.id === c.id ? { ...x, radius: r } : x) });
+    updateSettings({ spellCircles: (S(settingsRef.current, 'spellCircles') || []).map(x => x.id === c.id ? { ...x, radius: r } : x) });
   };
+  const deleteCircle = (id) => {
+    updateSettings({ spellCircles: (S(settingsRef.current, 'spellCircles') || []).filter(x => x.id !== id), selectedSpellId: null });
+  };
+
+  // Clicking anywhere that is not a circle deselects; Delete removes the selected circle.
+  useEffect(() => {
+    if (!selectedSpellId) return undefined;
+    const onDown = (e) => {
+      if (e.target && e.target.closest && e.target.closest('[data-spell-hit], [data-spell-ui]')) return;
+      updateSettings({ selectedSpellId: null });
+    };
+    const onKey = (e) => {
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'Delete' || e.key === 'Backspace') deleteCircle(selectedSpellId);
+      if (e.key === 'Escape') updateSettings({ selectedSpellId: null });
+    };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', onDown, true); window.removeEventListener('keydown', onKey); };
+  }, [selectedSpellId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
       {/* Spell circles */}
-      {circles.map(c => (
-        <div
-          key={c.id}
-          className="fixed"
-          style={{
-            left: c.x, top: c.y, transform: 'translate(-50%, -50%)', zIndex: 16,
-            pointerEvents: edit ? 'auto' : 'none', cursor: edit && !c.locked ? 'move' : 'default',
-            outline: edit ? '1px dashed rgba(202,160,85,.7)' : 'none', borderRadius: '50%',
-          }}
-          onMouseDown={edit ? (e) => startCircleDrag(e, c) : undefined}
-          onWheel={edit ? (e) => wheelCircle(e, c) : undefined}
-          data-testid={`spell-circle-${c.id}`}
-        >
-          <SpellCircleSvg c={c} particles={particles} glow={glow} />
-          {edit && (
-            <button
-              className="absolute top-0 right-0 w-5 h-5 rounded-full bg-red-600 text-white text-[11px] leading-none"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); updateSettings({ spellCircles: (S(settings, 'spellCircles') || []).filter(x => x.id !== c.id) }); }}
-              title="Delete circle"
-            >×</button>
-          )}
-        </div>
-      ))}
+      {circles.map(c => {
+        const sel = selectedSpellId === c.id;
+        return (
+          <div
+            key={c.id}
+            className="fixed"
+            style={{ left: c.x, top: c.y, transform: 'translate(-50%, -50%)', zIndex: 16, pointerEvents: 'none' }}
+            data-testid={`spell-circle-${c.id}`}
+          >
+            <SpellCircleSvg
+              c={c} particles={particles} glow={glow}
+              hit={{ on: canPick, selected: sel && canPick, locked: !!c.locked, onDown: (e) => startCircleDrag(e, c), onWheel: (e) => wheelCircle(e, c) }}
+            />
+            {sel && canPick && (
+              <button
+                data-spell-ui="1"
+                className="absolute w-5 h-5 rounded-full bg-red-600 text-white text-[11px] leading-none pointer-events-auto"
+                style={{ right: '4%', top: '4%' }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); deleteCircle(c.id); }}
+                title="Delete circle"
+              >×</button>
+            )}
+          </div>
+        );
+      })}
 
       {/* Combat marks */}
       {marks.map(m => {
