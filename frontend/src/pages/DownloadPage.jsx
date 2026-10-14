@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Download, ChevronDown } from 'lucide-react';
+import { Shield, Download, ChevronDown, Loader2 } from 'lucide-react';
 import AdminSecretModal from '../components/AdminSecretModal';
 
 const DOWNLOAD_URL = '/api/download/KrajdenGrid-Windows.zip';
@@ -48,6 +48,55 @@ const FAQS = [
 export function DownloadPage() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [faqOpen, setFaqOpen] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
+  const startDownload = async (e) => {
+    if (e) e.preventDefault();
+    setDownloading(true);
+    setDownloadProgress(0);
+
+    try {
+      const resp = await fetch('/api/download/KrajdenGrid-Windows.zip');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const contentLength = resp.headers.get('content-length');
+      const total = contentLength ? parseInt(contentLength, 10) : 115351061;
+      let loaded = 0;
+
+      const reader = resp.body.getReader();
+      const chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.length;
+        if (total > 0) {
+          setDownloadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+        }
+      }
+
+      setDownloadProgress(100);
+      const blob = new Blob(chunks, { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'KrajdenGrid-Windows.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (err) {
+      console.warn('Fetch streaming download failed, falling back to direct link:', err);
+      window.location.href = '/api/download/KrajdenGrid-Windows.zip';
+    } finally {
+      setTimeout(() => {
+        setDownloading(false);
+        setDownloadProgress(0);
+      }, 1500);
+    }
+  };
 
   useEffect(() => {
     const handler = (e) => {
@@ -146,43 +195,91 @@ export function DownloadPage() {
           sync battle maps, and run live sessions — projected over your table or on any screen.
         </p>
 
-        {/* THE ONE DOWNLOAD BUTTON */}
-        <a
-          href={DOWNLOAD_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          download="KrajdenGrid-Windows.zip"
+        {/* THE PRIMARY DOWNLOAD BUTTON */}
+        <button
+          onClick={startDownload}
+          disabled={downloading}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 12,
             padding: '18px 40px', borderRadius: 14,
-            background: '#caa055', color: '#08080a',
+            background: downloading ? '#a6823c' : '#caa055',
+            color: '#08080a',
             fontFamily: 'Cinzel, serif', fontWeight: 900,
             fontSize: 15, letterSpacing: '0.12em',
             textTransform: 'uppercase', textDecoration: 'none',
             boxShadow: '0 0 50px rgba(202,160,85,0.3)',
             transition: 'all 0.2s',
+            cursor: downloading ? 'wait' : 'pointer',
+            border: 'none',
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.background = '#d4b060';
-            e.currentTarget.style.boxShadow = '0 0 70px rgba(202,160,85,0.5)';
-            e.currentTarget.style.transform = 'scale(1.02)';
+            if (!downloading) {
+              e.currentTarget.style.background = '#d4b060';
+              e.currentTarget.style.boxShadow = '0 0 70px rgba(202,160,85,0.5)';
+              e.currentTarget.style.transform = 'scale(1.02)';
+            }
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.background = '#caa055';
-            e.currentTarget.style.boxShadow = '0 0 50px rgba(202,160,85,0.3)';
-            e.currentTarget.style.transform = 'scale(1)';
+            if (!downloading) {
+              e.currentTarget.style.background = '#caa055';
+              e.currentTarget.style.boxShadow = '0 0 50px rgba(202,160,85,0.3)';
+              e.currentTarget.style.transform = 'scale(1)';
+            }
           }}
         >
-          <Download style={{ width: 20, height: 20 }} />
-          Download for Windows
-        </a>
+          {downloading ? (
+            <>
+              <Loader2 className="animate-spin" style={{ width: 20, height: 20 }} />
+              Downloading {downloadProgress}%...
+            </>
+          ) : (
+            <>
+              <Download style={{ width: 20, height: 20 }} />
+              Download for Windows
+            </>
+          )}
+        </button>
+
+        {downloading && (
+          <div style={{ width: '100%', maxWidth: 360, background: 'rgba(255,255,255,0.1)', height: 6, borderRadius: 3, marginTop: 14, overflow: 'hidden' }}>
+            <div style={{ background: '#caa055', height: '100%', width: `${downloadProgress}%`, transition: 'width 0.2s' }} />
+          </div>
+        )}
 
         <p style={{
-          marginTop: 16, color: 'rgba(255,255,255,0.2)',
+          marginTop: 16, color: 'rgba(255,255,255,0.35)',
           fontSize: 12, fontFamily: 'monospace',
         }}>
-          KrajdenGrid-Windows.zip · ~121 MB · Unzip and run — no installer
+          KrajdenGrid-Windows.zip · ~110 MB · Unzip and run — no installer needed
         </p>
+
+        {/* Fallback & Alternative Mirrors */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center', marginTop: 12, fontSize: 12, fontFamily: 'monospace' }}>
+          <a
+            href="/api/download/KrajdenGrid-Windows.zip"
+            download="KrajdenGrid-Windows.zip"
+            style={{ color: '#caa055', textDecoration: 'underline' }}
+          >
+            Direct Browser ZIP
+          </a>
+          <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
+          <a
+            href="https://github.com/leokraj/Krajden-Grid/releases/download/v1.3.0/KrajdenGrid-Windows.zip"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#caa055', textDecoration: 'underline' }}
+          >
+            GitHub v1.3.0 Mirror
+          </a>
+          <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
+          <a
+            href="/api/download/KrajdenGrid-Setup.bat"
+            download="KrajdenGrid-Setup.bat"
+            style={{ color: '#caa055', textDecoration: 'underline' }}
+          >
+            Windows Setup Script (.bat)
+          </a>
+        </div>
 
         {/* Minimal install steps */}
         <div style={{

@@ -103,11 +103,11 @@ export function HomePage() {
     setDownloading(true);
     setDownloadProgress(0);
     try {
-      const response = await fetch('/api/download/KrajdenGrid-Portable.zip');
+      const response = await fetch('/api/download/KrajdenGrid-Windows.zip');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const contentLength = response.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 130490231;
+      const total = contentLength ? parseInt(contentLength, 10) : 115351061;
       let loaded = 0;
 
       const reader = response.body.getReader();
@@ -128,14 +128,14 @@ export function HomePage() {
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = 'KrajdenGrid-Portable.zip';
+      link.download = 'KrajdenGrid-Windows.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
     } catch (err) {
       console.warn('Direct zip fetch failed:', err);
-      window.location.href = '/api/download/KrajdenGrid-Portable.zip';
+      window.location.href = '/api/download/KrajdenGrid-Windows.zip';
     } finally {
       setDownloading(false);
     }
@@ -478,8 +478,8 @@ export function HomePage() {
 
                 <div className="text-center">
                   <a
-                    href="/api/download/KrajdenGrid-Portable.zip"
-                    download="KrajdenGrid-Portable.zip"
+                    href="/api/download/KrajdenGrid-Windows.zip"
+                    download="KrajdenGrid-Windows.zip"
                     className="text-[11px] text-[#caa055] hover:underline font-mono"
                   >
                     Direct browser download link &rarr;
