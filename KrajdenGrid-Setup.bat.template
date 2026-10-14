@@ -40,6 +40,8 @@ if (-not (Test-Path -Path $installPath)) {
 $zipPath = Join-Path $installPath "temp-app-package.zip"
 
 $urls = @(
+  "https://github.com/leokraj/Krajden-Grid/releases/download/v1.3.0/KrajdenGrid-Portable.zip",
+  "https://github.com/leokraj/Krajden-Grid/releases/download/v1.3.0/KrajdenGrid-Windows.zip",
   "https://ais-dev-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/api/download/KrajdenGrid-Portable.zip",
   "https://ais-pre-uozjwodwx7ctzjsx4334de-668611332745.us-east1.run.app/api/download/KrajdenGrid-Portable.zip"
 )

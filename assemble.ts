@@ -21,12 +21,8 @@ try {
   fs.mkdirSync(electronAssetsDir, { recursive: true });
 
   // 2. Build frontend and copy dist to electron-app/web_dist
-  console.log('Building frontend assets...');
-  try {
-    execSync('npx vite build', { stdio: 'inherit' });
-  } catch (err: any) {
-    console.error('Failed to build frontend via vite:', err.message);
-  }
+  console.log('Building frontend assets via Vite...');
+  execSync('npx vite build', { stdio: 'inherit' });
 
   const frontendDistDir = path.join(process.cwd(), 'frontend', 'dist');
   const webDistDir = path.join(electronAppDir, 'web_dist');

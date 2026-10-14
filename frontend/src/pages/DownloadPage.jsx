@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Shield, Download, ChevronDown } from 'lucide-react';
 import AdminSecretModal from '../components/AdminSecretModal';
 
-const DOWNLOAD_URL = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.0.0/KrajdenGrid-Windows.zip';
+const DOWNLOAD_URL = '/api/download/KrajdenGrid-Windows.zip';
+const GITHUB_DOWNLOAD_URL = 'https://github.com/leokraj/Krajden-Grid/releases/download/v1.3.0/KrajdenGrid-Windows.zip';
 
 function KrajdenCrest({ className = 'w-6 h-6' }) {
   return (
