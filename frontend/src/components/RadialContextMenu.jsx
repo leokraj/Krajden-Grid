@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useGrid, TOKEN_SIZE_PRESETS, DND_CONDITIONS } from '../context/GridContext';
 import { toast } from 'sonner';
 import { getBuiltinEffectsForCategory, effectSelectionPatch } from './EffectsLayer';
@@ -264,8 +265,25 @@ export function RadialContextMenu() {
   const clampedX = Math.max(menuWidth / 2 + 10, Math.min(window.innerWidth - menuWidth / 2 - 10, radialMenuPos.x));
   const clampedY = Math.max(menuHeight / 2 + 10, Math.min(window.innerHeight - menuHeight / 2 - 10, radialMenuPos.y));
 
-  return (
-    <div className="fixed inset-0 z-[9999] pointer-events-auto bg-black/20 backdrop-blur-[2px] flex items-center justify-center animate-in fade-in duration-150">
+  // All buttons are the same size and sit evenly spaced on one ring.
+  const RING_R = 108;
+  const BTN = 52;
+  const slotKeys = ['measure', 'group', 'beacon', 'effects', 'library', 'maps', 'fog', 'draw', 'mask', ...(activeToken ? ['token'] : [])];
+  const slot = (key) => {
+    const i = Math.max(0, slotKeys.indexOf(key));
+    const ang = (i / slotKeys.length) * Math.PI * 2 - Math.PI / 2;
+    return {
+      width: BTN, height: BTN,
+      left: `calc(50% + ${(Math.cos(ang) * RING_R).toFixed(1)}px - ${BTN / 2}px)`,
+      top: `calc(50% + ${(Math.sin(ang) * RING_R).toFixed(1)}px - ${BTN / 2}px)`,
+    };
+  };
+
+  // Portal to <body> so the menu sits above the fog / weather / spell layers
+  // (they are fixed overlays; inside the grid canvas this menu was trapped
+  // under their stacking context).
+  return createPortal(
+    <div style={{ zIndex: 100000 }} className="fixed inset-0 pointer-events-auto bg-black/20 backdrop-blur-[2px] flex items-center justify-center animate-in fade-in duration-150">
       <div 
         ref={menuRef}
         className="absolute select-none transform -translate-x-1/2 -translate-y-1/2"
@@ -276,72 +294,70 @@ export function RadialContextMenu() {
           
           {/* Decorative Ring Slices & Pattern */}
           <div className="absolute inset-2 rounded-full border border-[#caa055]/15 pointer-events-none" />
-          <div className="absolute inset-16 rounded-full border border-[#caa055]/20 pointer-events-none" />
+          <div className="absolute rounded-full border border-[#caa055]/20 pointer-events-none" style={{ width: RING_R * 2, height: RING_R * 2, left: `calc(50% - ${RING_R}px)`, top: `calc(50% - ${RING_R}px)` }} />
 
           {/* Quadrant Crosshair Lines */}
-          <div className="absolute w-full h-[1px] bg-[#caa055]/20 pointer-events-none" />
-          <div className="absolute h-full w-[1px] bg-[#caa055]/20 pointer-events-none" />
 
           {/* MAIN QUADRANT 1: TOP (Measure Submenu) */}
           <div 
-            className="absolute top-2 left-1/2 -translate-x-1/2 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('measure')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('measure')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'measure' ? null : 'measure')}
             data-testid="radial-top-measure"
           >
-            <div className={`w-14 h-14 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${activeSubMenu === 'measure' ? 'bg-[#caa055]/30 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110' : 'bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20'}`}>
-              <Ruler className="w-6 h-6 text-[#caa055]" />
-              <span className="text-[9px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Measure</span>
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${activeSubMenu === 'measure' ? 'bg-[#caa055]/30 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110' : 'bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20'}`}>
+              <Ruler className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Measure</span>
             </div>
           </div>
 
           {/* MAIN QUADRANT 2: RIGHT (Beacon / Ping) */}
           <div 
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('beacon')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('beacon')}
             onClick={handleBeaconSelect}
             data-testid="radial-right-beacon"
           >
-            <div className="w-14 h-14 rounded-full border bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 flex flex-col items-center justify-center transition-all duration-200 hover:scale-110 hover:shadow-[0_0_15px_#caa055]">
-              <Radio className="w-6 h-6 text-[#caa055] animate-pulse" />
-              <span className="text-[9px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Beacon</span>
+            <div className="w-full h-full rounded-full border bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 flex flex-col items-center justify-center transition-all duration-200 hover:scale-110 hover:shadow-[0_0_15px_#caa055]">
+              <Radio className="w-5 h-5 text-[#caa055] animate-pulse" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Beacon</span>
             </div>
           </div>
 
           {/* MAIN QUADRANT 3: BOTTOM (Token & Clipart Library) */}
           <div 
-            className="absolute bottom-2 left-1/2 -translate-x-1/2 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('library')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('library')}
             onClick={handleLibrarySelect}
             data-testid="radial-bottom-library"
           >
-            <div className="w-14 h-14 rounded-full border bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 flex flex-col items-center justify-center transition-all duration-200 hover:scale-110 hover:shadow-[0_0_15px_#caa055]">
-              <Image className="w-6 h-6 text-[#caa055]" />
-              <span className="text-[9px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Library</span>
+            <div className="w-full h-full rounded-full border bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 flex flex-col items-center justify-center transition-all duration-200 hover:scale-110 hover:shadow-[0_0_15px_#caa055]">
+              <Image className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Library</span>
             </div>
           </div>
 
           {/* MAIN QUADRANT 4: LEFT (Draw Submenu) */}
           <div 
-            className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('draw')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('draw')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'draw' ? null : 'draw')}
             data-testid="radial-left-draw"
           >
-            <div className={`w-14 h-14 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${activeSubMenu === 'draw' ? 'bg-[#caa055]/30 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110' : 'bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20'}`}>
-              <PenTool className="w-6 h-6 text-[#caa055]" />
-              <span className="text-[9px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Draw</span>
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${activeSubMenu === 'draw' ? 'bg-[#caa055]/30 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110' : 'bg-black/60 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20'}`}>
+              <PenTool className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Draw</span>
             </div>
           </div>
 
           {/* CORNER: TOP-LEFT — Token options (visible when right-clicking a token) */}
           {activeToken && (
             <div
-              className="absolute top-6 left-6 flex flex-col items-center cursor-pointer z-10"
+              style={slot('token')} className="absolute flex flex-col items-center cursor-pointer z-10"
               onClick={() => setActiveSubMenu(activeSubMenu === 'token' ? null : 'token')}
               title="Token Options"
             >
-              <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+              <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
                 activeSubMenu === 'token'
                   ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
                   : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
@@ -354,22 +370,22 @@ export function RadialContextMenu() {
 
           {/* CORNER ACTION: TOP-RIGHT (Group / Ungroup Tokens) */}
           <div 
-            className="absolute top-6 right-6 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('group')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onClick={handleGroupToggle}
             data-testid="radial-corner-group"
             title={isGrouped ? "Ungroup Selected Tokens" : "Group Selected Tokens"}
           >
-            <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 relative ${
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 relative ${
               selectedClipartIds.length > 1 || isGrouped 
                 ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110' 
                 : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
             }`}>
               <Layers className={`w-5 h-5 ${isGrouped ? 'text-amber-300' : 'text-[#caa055]'}`} />
-              <span className="text-[7.5px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">
                 {isGrouped ? 'Ungroup' : 'Group'}
               </span>
               {selectedClipartIds.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-[#caa055] text-black text-[9px] font-bold px-1.5 py-0.2 rounded-full shadow border border-white">
+                <span className="absolute -top-1 -right-1 bg-[#caa055] text-black text-[7px] font-bold px-1.5 py-0.2 rounded-full shadow border border-white">
                   {selectedClipartIds.length}
                 </span>
               )}
@@ -378,13 +394,13 @@ export function RadialContextMenu() {
 
           {/* CORNER: BOTTOM-RIGHT — Effects Painting Mode (opens category submenu) */}
           <div
-            className="absolute bottom-6 right-6 flex flex-col items-center group cursor-pointer z-10"
+            style={slot('effects')} className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('effects')}
             onClick={() => setActiveSubMenu(['effects', 'effectsTool', 'effectsList'].includes(activeSubMenu) ? null : 'effects')}
             data-testid="radial-corner-effects"
             title="Effects Painting Mode"
           >
-            <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
               settings.effectsEnabled
                 ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
                 : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
@@ -397,46 +413,46 @@ export function RadialContextMenu() {
           {/* OUTER RING: GRID MASK (between Measure and the Token corner) */}
           <div
             className="absolute flex flex-col items-center cursor-pointer z-10"
-            style={{ left: 'calc(50% - 54px - 20px)', top: 'calc(50% - 129px - 20px)' }}
+            style={slot('mask')}
             onMouseEnter={() => setActiveSubMenu('mask')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'mask' ? null : 'mask')}
             data-testid="radial-mask"
             title="Grid Mask"
           >
-            <div className={`w-10 h-10 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
               settings.maskEnabled || activeSubMenu === 'mask'
                 ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_12px_#caa055] scale-110'
                 : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
             }`}>
-              <Grid className="w-4 h-4 text-[#caa055]" />
-              <span className="text-[6px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Mask</span>
+              <Grid className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Mask</span>
             </div>
           </div>
 
           {/* OUTER RING: MAP IMPORTER (between Library and the Fog corner) */}
           <div
             className="absolute flex flex-col items-center cursor-pointer z-10"
-            style={{ left: 'calc(50% - 54px - 20px)', top: 'calc(50% + 129px - 20px)' }}
+            style={slot('maps')}
             onMouseEnter={() => setActiveSubMenu('mapimport')}
             onClick={handleMapImporterSelect}
             data-testid="radial-map-importer"
             title="Map Importer"
           >
-            <div className="w-10 h-10 rounded-full border bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105 flex flex-col items-center justify-center transition-all duration-200">
-              <MapIcon className="w-4 h-4 text-[#caa055]" />
-              <span className="text-[6px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Maps</span>
+            <div className="w-full h-full rounded-full border bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105 flex flex-col items-center justify-center transition-all duration-200">
+              <MapIcon className="w-5 h-5 text-[#caa055]" />
+              <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider leading-none mt-0.5">Maps</span>
             </div>
           </div>
 
           {/* CORNER: BOTTOM-LEFT — Fog of War */}
           <div
-            className="absolute bottom-6 left-6 flex flex-col items-center cursor-pointer z-10"
+            style={slot('fog')} className="absolute flex flex-col items-center cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('fog')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'fog' ? null : 'fog')}
             data-testid="radial-corner-fog"
             title="Fog of War"
           >
-            <div className={`w-12 h-12 rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+            <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
               settings.fogEnabled || activeSubMenu === 'fog'
                 ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
                 : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
@@ -783,6 +799,7 @@ export function RadialContextMenu() {
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
