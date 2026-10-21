@@ -1154,6 +1154,10 @@ export const GridProvider = ({ children }) => {
   // broadcast correctly, so backgroundLayers is read straight from
   // `settings` instead — no snapshot needed for it.
   useEffect(() => {
+    // The DM Screen is an isolated copy that shares localStorage with the
+    // game window; it must not write the shared mirror (it would overwrite
+    // the game's) and reads its own settings instead (see captureCanvasData).
+    if (IS_DM_SCREEN) return;
     try {
       localStorage.setItem('overgrid_live_snapshot', JSON.stringify({
         placedCliparts: settings.placedCliparts || [],
@@ -1181,11 +1185,28 @@ export const GridProvider = ({ children }) => {
     let liveSnapshot = null;
     try {
       const raw = localStorage.getItem('overgrid_live_snapshot');
-      if (raw) liveSnapshot = JSON.parse(raw);
+      if (raw && !IS_DM_SCREEN) liveSnapshot = JSON.parse(raw);
     } catch (e) {}
     const src = liveSnapshot || settings;
 
+    // Every other grid setting (grid look, snap, subdivisions, drawing/mask/
+    // effect tool settings, fog/weather/spell/graphics settings...) so a
+    // scene restores the grid exactly as it was. Per-window tool state and
+    // window/monitor settings are left out.
+    const NOT_IN_SCENE = new Set([
+      ...DM_LOCAL_KEYS,
+      'screenWidth', 'screenHeight', 'selectedMonitor', 'showControls',
+      'hiddenSceneIds', 'activeEffectId', 'activeEffectUrl',
+      'placedCliparts', 'drawingPaths', 'maskPaths', 'maskRects',
+      'backgroundLayers', 'backgroundImage', 'backgroundImageData', 'effectPaths',
+    ]);
+    const gridSettings = {};
+    for (const [k, v] of Object.entries(settings)) {
+      if (!NOT_IN_SCENE.has(k) && v !== undefined && typeof v !== 'function') gridSettings[k] = v;
+    }
+
     return {
+      gridSettings: JSON.parse(JSON.stringify(gridSettings)),
       placedCliparts: JSON.parse(JSON.stringify(src.placedCliparts || [])),
       drawingPaths: JSON.parse(JSON.stringify(backfillIds(src.drawingPaths, 'draw'))),
       maskPaths: JSON.parse(JSON.stringify(backfillIds(src.maskPaths, 'mask'))),
@@ -1456,6 +1477,8 @@ export const GridProvider = ({ children }) => {
     setSettings((prev) => {
       const nextSettings = {
         ...prev,
+        // Full grid settings saved with the scene (older scenes have none)
+        ...(d.gridSettings ? d.gridSettings : {}),
         placedCliparts: d.placedCliparts || [],
         drawingPaths: d.drawingPaths || [],
         maskPaths: d.maskPaths || [],
