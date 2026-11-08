@@ -425,7 +425,11 @@ export function FullscreenContent() {
               style={{ WebkitAppRegion: 'no-drag' }} data-testid="dm-screen-bar">
               <span className="text-[10px] font-bold text-[#caa055] tracking-widest uppercase">🎭 DM Screen — players can't see edits</span>
               <button
-                onClick={() => { pushToGame() ? toast.success('Game screen updated') : toast.error('Could not reach the game screen'); }}
+                onClick={async () => {
+                  const ack = await pushToGame();
+                  if (ack) toast.success(`Game screen updated — it now has ${ack.paths ?? 0} effects, ${ack.layers ?? 0} effect layers, ${ack.cliparts ?? 0} tokens`);
+                  else toast.error('The game screen did not confirm the update. Click Re-sync, or restart the app.');
+                }}
                 className="text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-[3px] bg-[#caa055] text-black hover:bg-[#e2b563] cursor-pointer"
                 data-testid="dm-push-btn"
               >
