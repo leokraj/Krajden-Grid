@@ -1216,6 +1216,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const [flowPoints, setFlowPoints]       = useState([]);
   const [mousePos, setMousePos]           = useState(null); // for cursor preview
   const debugInfoRef = useRef([]);
+  const fxStatRef = useRef({ frames: 0, last: 0 });
 
   const canvasRef       = useRef(null);
   const layerMaskCacheRef = useRef(new Map());
@@ -1738,6 +1739,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     const render = () => {
       if (!alive) return;
+      fxStatRef.current.frames++; fxStatRef.current.last = performance.now();
       try {
         ctx.clearRect(0, 0, cW, cH);
 
@@ -2082,6 +2084,30 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // `document` isn't affected by that: it always fires first, regardless of
   // which element ends up as the actual target.
   const dragEffectRef = useRef(null); // { id, startX, startY, origRect, origPoints }
+  // Debug hook: the DM Screen can ask the game window what this overlay is doing
+  useEffect(() => {
+    window.__effectsDebug = () => {
+      const c = canvasRef.current;
+      let cs = null, rect = null;
+      if (c) {
+        const st = window.getComputedStyle(c); const r = c.getBoundingClientRect();
+        cs = { display: st.display, opacity: st.opacity, visibility: st.visibility, zIndex: st.zIndex, mixBlendMode: st.mixBlendMode };
+        rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), attrW: c.width, attrH: c.height };
+      }
+      const hiddenIds = Array.from(hiddenItemKeys?.effects || []);
+      return {
+        overlayMounted: true,
+        effectsEnabled, effectPaths: effectPaths.length, effectLayers: effectLayers.length,
+        hiddenEffectIds: hiddenIds.length,
+        pathSummary: effectPaths.slice(0, 6).map(e => ({ id: e.id, type: e.type, shader: e.shaderName || null, url: (e.effectUrl || '').slice(0, 50), cat: e.category || null, pts: (e.points || []).length, hidden: hiddenIds.includes(e.id) })),
+        layerSummary: effectLayers.slice(0, 6).map(l => ({ name: l.name, shader: l.shaderName || null, url: (l.effectUrl || '').slice(0, 50), ops: (l.ops || []).length, hidden: !!l.hidden })),
+        renderStatus: debugInfoRef.current.slice(0, 8),
+        frames: fxStatRef.current.frames,
+        msSinceLastFrame: fxStatRef.current.last ? Math.round(performance.now() - fxStatRef.current.last) : null,
+        canvasCss: cs, canvasRect: rect, logicalCanvas: `${cW}x${cH}`,
+      };
+    };
+  });
   const lastLoggedHiddenSetRef = useRef(null); // tracks last-logged hiddenItemKeys.effects contents, to avoid logging every single frame
   const lastLoggedTimeRef = useRef(null); // guarantees a periodic log even if the change-comparison above has a bug
   const placingLightRotateRef = useRef(null); // { id, apexX, apexY } — while holding mousedown right after placing a light
