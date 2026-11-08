@@ -19,6 +19,7 @@ if (typeof window !== "undefined") { window.__renderVisibilityAnchor = "render-v
  * - Firebase Firestore synchronization & local caching.
  */
 
+import { layerIdentity, buildLayerMask, opsBounds, layerEffectFields, makeLayer, pasteOps } from '../lib/effectLayers';
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useGrid } from '../context/GridContext';
 import { subscribeEffects, saveEffectToFirebase, deleteEffectFromFirebase } from '../lib/firebase';
@@ -174,7 +175,7 @@ import { toast } from 'sonner';
 import {
   Sparkles, Flame, Droplets, Compass, Zap, Shield, Eye, EyeOff,
   Trash2, Undo, Plus, Upload, Play, Pause, Grid, Layers, RefreshCw,
-  Maximize2, Crop, Move, Sliders, Check
+  Maximize2, Crop, Move, Sliders, Check, Copy, ClipboardPaste
 } from 'lucide-react';
 
 // ── Built-in High Performance Animated Shader/SVG Vector Presets ─────────────
@@ -1181,6 +1182,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     removeEffectPath,
     updateEffectPath,
     hiddenItemKeys,
+    commitEffectLayerOp,
   } = useGrid();
 
   // ── Self-measured canvas size ─────────────────────────────────────────────
@@ -1216,6 +1218,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const debugInfoRef = useRef([]);
 
   const canvasRef       = useRef(null);
+  const layerMaskCacheRef = useRef(new Map());
   const mediaRef        = useRef(new Map()); // url → HTMLVideoElement | HTMLImageElement
   const rafRef          = useRef(null);
 
@@ -1251,6 +1254,24 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
   const hasActiveEffect = !!(activeEffectUrl || activeShader);
 
+  // ── Effect layers ─────────────────────────────────────────────────────────
+  // Area effects paint into ONE merged mask per effect (a "layer") instead of
+  // creating a separate object per stroke. Rivers/flow strokes and placed
+  // lights keep working as individual paths.
+  const effectLayers = settings.effectLayers || [];
+  const activeLayer = effectLayers.find(l => l.id === settings.activeEffectLayerId) || null;
+  const layerPaintMode = hasActiveEffect && !flowModeActive && !activePreset?.isLight
+    && effectTool !== 'eraser';
+  // Eraser trims the SELECTED layer's mask pixels. With no layer selected it
+  // falls back to the old behaviour (deleting whole loose strokes).
+  const eraserOnLayer = effectTool === 'eraser' && !!activeLayer;
+  const layerTemplate = {
+    effectId: activeEffectId, effectUrl: activeEffectUrl, isShader: !!activeShader,
+    shaderName: activeShader || null, category: settings.activeEffectCategory || undefined,
+    label: activePreset?.name || (activeShader ? activeShader : 'Effect'),
+    opacity, tile, tileScale, blendMode,
+  };
+
   // ── Canvas size ───────────────────────────────────────────────────────────
   const cW = canvasSize?.width  || (typeof window !== 'undefined' ? window.innerWidth  : 1920);
   const cH = canvasSize?.height || (typeof window !== 'undefined' ? window.innerHeight : 1080);
@@ -1266,6 +1287,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       // detection and already falls back to real URL/extension clues safely.
       const cat = ep.category || (ep.effectUrl === activeEffectUrl ? settings.activeEffectCategory : '') || '';
       neededMap.set(ep.effectUrl, cat);
+    });
+    (settings.effectLayers || []).forEach(l => {
+      if (l.effectUrl) neededMap.set(l.effectUrl, l.category || '');
     });
     if (activeEffectUrl) {
       neededMap.set(activeEffectUrl, settings.activeEffectCategory || '');
@@ -1322,7 +1346,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         mediaRef.current.delete(url);
       }
     });
-  }, [effectPaths, activeEffectUrl, settings.activeEffectCategory]);
+  }, [effectPaths, settings.effectLayers, activeEffectUrl, settings.activeEffectCategory]);
 
   // ── Render loop ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1332,7 +1356,37 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     let alive = true;
 
     // Build a white-on-black mask canvas for the effect shape
+    // Layer masks are cached by their ops array (immutable updates) so a layer
+    // with many strokes isn't re-rasterised every frame.
+    const layerMaskCache = layerMaskCacheRef.current; // layerId -> { ops, fade, w, h, canvas }
+    const buildLayerMaskFor = (effect, w, h) => {
+      const fade = effect.edgeFade != null ? effect.edgeFade : 4;
+      const hit = layerMaskCache.get(effect.id);
+      let base;
+      if (hit && hit.ops === effect.layerOps && hit.fade === fade && hit.w === w && hit.h === h) {
+        base = hit.canvas;
+      } else {
+        const raw = buildLayerMask(effect.layerOps, w, h);
+        if (fade > 0) {
+          base = document.createElement('canvas');
+          base.width = w; base.height = h;
+          const bc = base.getContext('2d');
+          bc.filter = `blur(${fade}px)`;
+          bc.drawImage(raw, 0, 0);
+        } else {
+          base = raw;
+        }
+        if (!effect.layerLive) layerMaskCache.set(effect.id, { ops: effect.layerOps, fade, w, h, canvas: base });
+      }
+      // The caller composites a texture INTO the returned canvas, so hand back a copy
+      const out = document.createElement('canvas');
+      out.width = w; out.height = h;
+      out.getContext('2d').drawImage(base, 0, 0);
+      return out;
+    };
+
     const buildMask = (effect, w, h) => {
+      if (effect.layerOps) return buildLayerMaskFor(effect, w, h);
       const { type = 'brush', points = [], rect,
               width: sw = 60, marqueeShape = 'rect' } = effect;
       const off = document.createElement('canvas');
@@ -1511,7 +1565,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         const tc = tmp.getContext('2d');
 
         let bx = 0, by = 0, bw = cW, bh = cH;
-        if (type === 'marquee' && rect) { bx=rect.x; by=rect.y; bw=rect.width; bh=rect.height; }
+        if (effect.layerBounds) { bx=effect.layerBounds.x; by=effect.layerBounds.y; bw=effect.layerBounds.w; bh=effect.layerBounds.h; }
+        else if (type === 'marquee' && rect) { bx=rect.x; by=rect.y; bw=rect.width; bh=rect.height; }
         else if (points.length > 0) {
           const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
           bx=Math.min(...xs)-sw/2; by=Math.min(...ys)-sw/2;
@@ -1631,9 +1686,10 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         // Lasso is a closed, filled polygon like marquee (its own points are
         // the exact boundary) — no outward stroke-width padding needed,
         // unlike a brush/bezier stroke which extends sw/2 beyond its points.
-        const isClosedArea = type === 'marquee' || type === 'lasso';
-        const xs = type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
-        const ys = type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
+        const isClosedArea = type === 'marquee' || type === 'lasso' || !!effect.layerBounds;
+        const lb = effect.layerBounds;
+        const xs = lb ? [lb.x, lb.x + lb.w] : type==='marquee'?[rect.x,rect.x+rect.width]:points.map(p=>p.x);
+        const ys = lb ? [lb.y, lb.y + lb.h] : type==='marquee'?[rect.y,rect.y+rect.height]:points.map(p=>p.y);
         const bx=Math.min(...xs)-(isClosedArea?0:sw/2);
         const by=Math.min(...ys)-(isClosedArea?0:sw/2);
         const bw=Math.max(...xs)-Math.min(...xs)+(isClosedArea?0:sw);
@@ -1768,6 +1824,62 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           }
         });
 
+        // ── Effect layers: one merged mask per layer ──────────────────────
+        // While a stroke is in progress it's previewed as a pending op on the
+        // layer it will land in (or a temporary layer if none exists yet), so
+        // painting/erasing shows the real result live.
+        {
+          const pend = (() => {
+            if (!isDrawing) return null;
+            if (effectTool === 'eraser') {
+              if (!eraserOnLayer || currentStroke.length < 1) return null;
+              return { type: 'brush', points: currentStroke, width: brushSize, erase: true };
+            }
+            if (!layerPaintMode) return null;
+            if (effectTool === 'marquee') {
+              if (marqueeStart && marqueeCurrent) {
+                const r = { x: Math.min(marqueeStart.x, marqueeCurrent.x), y: Math.min(marqueeStart.y, marqueeCurrent.y),
+                  width: Math.abs(marqueeCurrent.x - marqueeStart.x), height: Math.abs(marqueeCurrent.y - marqueeStart.y) };
+                if (r.width > 4 && r.height > 4) return { type: 'marquee', rect: r, marqueeShape: settings.effectMarqueeShape || 'rect' };
+              }
+              return null;
+            }
+            if (effectTool === 'lasso') return null; // lasso has its own outline preview below
+            return currentStroke.length >= 1 ? { type: 'brush', points: currentStroke, width: brushSize } : null;
+          })();
+          // which layer would receive it
+          let pendTargetId = null;
+          if (pend) {
+            if (pend.erase) pendTargetId = activeLayer?.id || null;
+            else if (activeLayer && layerIdentity(activeLayer) === layerIdentity(layerTemplate)) pendTargetId = activeLayer.id;
+            else {
+              const same = [...effectLayers].reverse().find(l => layerIdentity(l) === layerIdentity(layerTemplate));
+              pendTargetId = same ? same.id : '__temp__';
+            }
+          }
+          const drawLayers = [...effectLayers];
+          if (pendTargetId === '__temp__') {
+            drawLayers.push({ id: '__temp__', ...layerEffectFields(layerTemplate), edgeFade: 4, ops: [] });
+          }
+          drawLayers.forEach(l => {
+            if (l.hidden) return;
+            const withPend = pend && l.id === pendTargetId;
+            const ops = withPend ? [...(l.ops || []), pend] : (l.ops || []);
+            if (ops.length === 0) return;
+            try {
+              renderEffect({
+                id: l.id, type: 'layer', layerOps: ops, layerLive: !!withPend,
+                layerBounds: opsBounds(ops, cW, cH),
+                effectUrl: l.effectUrl, effectId: l.effectId, isShader: l.isShader, shaderName: l.shaderName,
+                category: l.category, opacity: l.opacity, tile: l.tile, tileScale: l.tileScale,
+                blendMode: l.blendMode, edgeFade: l.edgeFade,
+              });
+            } catch (err) {
+              console.warn('[EffectsLayer] Failed to render effect layer', l.id, err);
+            }
+          });
+        }
+
         // Post-render scan: sample a grid of points across the whole canvas to see
         // if ANY non-transparent pixels exist anywhere, regardless of where effects
         // think they drew. This catches cases where drawing happened at the wrong
@@ -1818,7 +1930,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
         const mShape = settings.effectMarqueeShape || 'rect';
         if (liveType === 'marquee' && liveRect && liveRect.width > 4) {
-          renderEffect({
+          if (!layerPaintMode) renderEffect({
             type: 'marquee', rect: liveRect,
             effectUrl: activeEffectUrl, isShader: !!activeShader, shaderName: activeShader,
             width: brushSize, opacity: opacity * 0.6, tile: tile, tileScale: tileScale,
@@ -1874,7 +1986,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
             ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
           }
           ctx.restore();
-        } else if (currentStroke.length >= 2) {
+        } else if (currentStroke.length >= 2 && !layerPaintMode && !eraserOnLayer) {
           renderEffect({
             type: liveType, points: currentStroke,
             effectUrl: activeEffectUrl, isShader: !!activeShader, shaderName: activeShader,
@@ -1938,7 +2050,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       activeEffectUrl, activeShader, effectMode, effectTool, brushSize,
       opacity, tile, tileScale, blendMode, hasActiveEffect, effectsEnabled,
       mousePos, cW, cH, settings.selectedEffectPathId, settings.effectMarqueeShape,
-      hiddenItemKeys]);
+      hiddenItemKeys, effectLayers, activeLayer, layerPaintMode, eraserOnLayer]);
 
 
   // Flush debug info to the shared store periodically (not every frame — too expensive)
@@ -2255,6 +2367,15 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     if (effectTool === 'marquee') {
       setMarqueeCurrent(pt);
+    } else if (effectTool === 'eraser' && eraserOnLayer) {
+      // Trim the selected layer's mask: collect the stroke, commit on release
+      setCurrentStroke(prev => {
+        if (prev.length > 0) {
+          const last = prev[prev.length - 1];
+          if (Math.hypot(pt.x - last.x, pt.y - last.y) < 3) return prev;
+        }
+        return [...prev, pt];
+      });
     } else if (effectTool === 'eraser') {
       const r = brushSize / 2;
       const remaining = effectPaths.filter(ep => {
@@ -2294,7 +2415,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
         return [...prev, pt];
       });
     }
-  }, [isDrawing, effectTool, brushSize, effectPaths, getCoords, updateSettings, updateEffectPath]);
+  }, [isDrawing, effectTool, brushSize, effectPaths, getCoords, updateSettings, updateEffectPath, eraserOnLayer]);
 
   const handleMouseDown = useCallback((e) => {
     if (!effectsEnabled || (e.button !== undefined && e.button !== 0)) return;
@@ -2382,7 +2503,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (effectTool === 'marquee') {
       setMarqueeStart(pt); setMarqueeCurrent(pt);
     } else if (effectTool === 'eraser') {
-      // handled in mousemove
+      // Legacy eraser is handled in mousemove; a layer eraser starts a stroke
+      if (eraserOnLayer) setCurrentStroke([pt]);
     } else if (effectTool === 'lasso') {
       if (lassoSessionActiveRef.current) {
         // Resuming after an Alt+click paused the session — the straight
@@ -2399,7 +2521,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   }, [effectsEnabled, effectMode, effectTool, flowModeActive, flowPoints, hasActiveEffect,
       activeEffectUrl, activeEffectId, activeShader, brushSize, opacity,
       tile, tileScale, blendMode, getCoords, addEffectPath,
-      effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId]);
+      effectPaths, settings.selectedEffectPathId, updateSettings, configuringLightId, eraserOnLayer]);
 
   const handleMouseUp = useCallback((e) => {
     // Direct, unmissable log of EVERY invocation, before the guard check —
@@ -2462,12 +2584,23 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     if (!isDrawing) return;
     setIsDrawing(false);
 
+    // Layer eraser: commit the stroke as an erase op on the selected layer
+    if (effectTool === 'eraser' && eraserOnLayer) {
+      if (currentStroke.length >= 1) {
+        commitEffectLayerOp({ type: 'brush', points: [...currentStroke], width: brushSize, erase: true }, layerTemplate, true);
+      }
+      setCurrentStroke([]);
+      return;
+    }
+
     if (effectTool === 'marquee' && marqueeStart && marqueeCurrent) {
       const x = Math.min(marqueeStart.x, marqueeCurrent.x);
       const y = Math.min(marqueeStart.y, marqueeCurrent.y);
       const w = Math.abs(marqueeCurrent.x - marqueeStart.x);
       const h = Math.abs(marqueeCurrent.y - marqueeStart.y);
-      if (w > 10 && h > 10 && hasActiveEffect) {
+      if (w > 10 && h > 10 && hasActiveEffect && layerPaintMode) {
+        commitEffectLayerOp({ type: 'marquee', rect: { x, y, width: w, height: h }, marqueeShape: settings.effectMarqueeShape || 'rect' }, layerTemplate);
+      } else if (w > 10 && h > 10 && hasActiveEffect) {
         addEffectPath({
           type: 'marquee', rect: { x, y, width: w, height: h },
           effectUrl: activeEffectUrl, effectId: activeEffectId,
@@ -2492,7 +2625,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       // distance throttle may have dropped a point this close to the last
       // sample), then close the polygon into a filled area.
       const finalPoints = [...currentStroke, pt];
-      if (finalPoints.length >= 3 && hasActiveEffect) {
+      if (finalPoints.length >= 3 && hasActiveEffect && layerPaintMode) {
+        commitEffectLayerOp({ type: 'lasso', points: finalPoints }, layerTemplate);
+      } else if (finalPoints.length >= 3 && hasActiveEffect) {
         addEffectPath({
           type: 'lasso',
           points: finalPoints,
@@ -2505,6 +2640,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       lassoSessionActiveRef.current = false;
       setCurrentStroke([]);
       return;
+    } else if (currentStroke.length >= 1 && hasActiveEffect && layerPaintMode) {
+      commitEffectLayerOp({ type: 'brush', points: [...currentStroke], width: brushSize }, layerTemplate);
     } else if (currentStroke.length >= 2 && hasActiveEffect) {
       const isFlow = effectMode === 'flow';
       addEffectPath({
@@ -2519,7 +2656,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     setCurrentStroke([]);
   }, [isDrawing, effectMode, effectTool, marqueeStart, marqueeCurrent, currentStroke,
       hasActiveEffect, activeEffectUrl, activeEffectId, activeShader,
-      brushSize, opacity, tile, tileScale, blendMode, addEffectPath, getCoords]);
+      brushSize, opacity, tile, tileScale, blendMode, addEffectPath, getCoords,
+      eraserOnLayer, layerPaintMode, layerTemplate, commitEffectLayerOp, settings.effectMarqueeShape]);
 
   // Keeps latestHandleMouseUpRef pointing at the current handleMouseUp on
   // every render — separate from the listener-attachment effect below,
@@ -2914,8 +3052,16 @@ export function EffectsControlPanel({ onClose }) {
     updateEffectPath,
     removeEffectPath,
     undoLastEffectPath,
-    clearEffectPaths
+    clearEffectPaths,
+    updateEffectLayers
   } = useGrid();
+
+  // Effect layers (merged, erasable masks — see lib/effectLayers.js)
+  const effectLayers = settings.effectLayers || [];
+  const activeLayerId = settings.activeEffectLayerId || null;
+  const [maskClip, setMaskClip] = useState(null); // { name, ops } copied mask
+  const patchLayer = (id, patch) =>
+    updateEffectLayers(ls => ls.map(l => l.id === id ? { ...l, ...(typeof patch === 'function' ? patch(l) : patch) } : l));
 
   const [activeTab, setActiveTab] = useState('builtin'); // 'builtin' | 'vault' | 'community' | 'mine'
   const [firebaseEffects, setFirebaseEffects] = useState([]);
@@ -3608,6 +3754,172 @@ export function EffectsControlPanel({ onClose }) {
             </div>
           );
         })()}
+      </div>
+
+
+      {/* Effect Layers — one merged, erasable mask per effect */}
+      <div className="space-y-1.5 border-t border-white/10 pt-2" data-testid="effect-layers-section">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            Effect Layers ({effectLayers.length})
+          </span>
+          <div className="flex items-center gap-1.5">
+            {activeLayerId && (
+              <button
+                onClick={() => updateSettings({ activeEffectLayerId: null })}
+                className="text-[9px] text-gray-300 hover:text-white px-1.5 py-0.5 rounded bg-white/5 border border-white/10"
+                title="Deselect the layer (the eraser then deletes whole loose strokes)"
+              >
+                Deselect
+              </button>
+            )}
+            <button
+              onClick={() => {
+                const sel = BUILTIN_EFFECT_PRESETS.find(p => p.id === settings.activeEffectId);
+                const hasEffect = !!(settings.activeEffectUrl || settings.activeEffectShader);
+                if (!hasEffect) { toast.info('Pick an effect first, then start a new layer.'); return; }
+                const layer = makeLayer({
+                  effectId: settings.activeEffectId, effectUrl: settings.activeEffectUrl || null,
+                  isShader: !!settings.activeEffectShader, shaderName: settings.activeEffectShader || null,
+                  category: settings.activeEffectCategory || undefined,
+                  label: sel?.name || 'Effect',
+                  opacity: settings.effectOpacity ?? 0.9, tile: settings.effectTile !== false,
+                  tileScale: settings.effectTileScale || 100, blendMode: settings.effectBlendMode || 'normal',
+                }, effectLayers);
+                updateEffectLayers(ls => [...ls, layer], { activeEffectLayerId: layer.id, effectsEnabled: true });
+              }}
+              className="text-[9px] text-[#caa055] hover:text-[#f1d9a0] flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#caa055]/10 border border-[#caa055]/40"
+              title="Close the current layer and start a fresh one for the selected effect"
+              data-testid="new-effect-layer-btn"
+            >
+              <Plus className="w-2.5 h-2.5" /> New layer
+            </button>
+          </div>
+        </div>
+
+        {effectLayers.length === 0 ? (
+          <p className="text-[9px] text-gray-500 leading-snug">
+            Paint an area effect and its strokes merge into one layer here. The eraser then trims
+            only the selected layer, pixel by pixel.
+          </p>
+        ) : (
+          <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+            {effectLayers.map((l) => {
+              const isActive = l.id === activeLayerId;
+              return (
+                <div key={l.id}>
+                  <div
+                    className={`flex items-center justify-between p-1.5 rounded border text-[9px] cursor-pointer transition-all ${isActive ? 'bg-[#caa055]/15 border-[#caa055]/50' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
+                    onClick={() => updateSettings({ activeEffectLayerId: isActive ? null : l.id })}
+                    data-testid={`effect-layer-${l.id}`}
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); patchLayer(l.id, { hidden: !l.hidden }); }}
+                        className={l.hidden ? 'text-gray-500' : 'text-[#caa055]'}
+                        title={l.hidden ? 'Show layer' : 'Hide layer'}
+                      >
+                        {l.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                      <span className="text-gray-200 truncate">{l.name}</span>
+                      <span className="text-gray-500 font-mono">{(l.ops || []).length} ops</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setMaskClip({ name: l.name, ops: JSON.parse(JSON.stringify(l.ops || [])) }); toast.success(`Copied mask of "${l.name}"`); }}
+                        className="text-gray-300 hover:text-[#caa055] p-0.5" title="Copy this layer's mask"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateEffectLayers(ls => ls.filter(x => x.id !== l.id), isActive ? { activeEffectLayerId: null } : undefined);
+                        }}
+                        className="text-red-400 hover:text-red-300 p-0.5" title="Delete layer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {isActive && (
+                    <div className="bg-black/40 border border-[#caa055]/20 rounded p-2 mt-0.5 space-y-2">
+                      <input
+                        value={l.name}
+                        onChange={(e) => patchLayer(l.id, { name: e.target.value })}
+                        className="w-full bg-black/50 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-gray-100"
+                        title="Rename layer"
+                      />
+                      <div>
+                        <div className="flex justify-between mb-0.5">
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Opacity</span>
+                          <span className="text-[8px] text-white/40 font-mono">{Math.round((l.opacity ?? 0.9) * 100)}%</span>
+                        </div>
+                        <input type="range" min="0" max="1" step="0.05" value={l.opacity ?? 0.9}
+                          onChange={e => patchLayer(l.id, { opacity: parseFloat(e.target.value) })}
+                          className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between mb-0.5">
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Edge Softness</span>
+                          <span className="text-[8px] text-white/40 font-mono">{l.edgeFade ?? 4}px</span>
+                        </div>
+                        <input type="range" min="0" max="30" step="1" value={l.edgeFade ?? 4}
+                          onChange={e => patchLayer(l.id, { edgeFade: parseInt(e.target.value) })}
+                          className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button
+                          onClick={() => patchLayer(l.id, (cur) => ({ ops: (cur.ops || []).slice(0, -1) }))}
+                          className="text-[9px] text-gray-300 hover:text-white flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/5 border border-white/10"
+                          title="Undo the last stroke on this layer"
+                        >
+                          <Undo className="w-2.5 h-2.5" /> Undo stroke
+                        </button>
+                        <button
+                          onClick={() => patchLayer(l.id, { ops: [] })}
+                          className="text-[9px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded bg-red-950/20 border border-red-900/30"
+                          title="Empty this layer's mask"
+                        >
+                          Clear mask
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[8px] text-white/50 uppercase tracking-wider flex items-center gap-1">
+                          <ClipboardPaste className="w-2.5 h-2.5" />
+                          {maskClip ? `Paste mask of "${maskClip.name}"` : 'Copy a mask (copy icon) to paste it here'}
+                        </div>
+                        {maskClip && (
+                          <div className="grid grid-cols-3 gap-1">
+                            {[
+                              { m: 'replace', label: 'Replace', tip: 'Make this layer show exactly the copied area' },
+                              { m: 'add', label: 'Add', tip: 'Add the copied area to what this layer already shows' },
+                              { m: 'invert', label: 'Invert', tip: 'Show the opposite of the copied area' },
+                            ].map(o => (
+                              <button key={o.m} title={o.tip}
+                                onClick={() => { patchLayer(l.id, (cur) => ({ ops: pasteOps(o.m, maskClip.ops, cur.ops) })); toast.success(`${o.label}: pasted onto "${l.name}"`); }}
+                                className="text-[9px] font-bold py-1 rounded border border-[#caa055]/40 text-[#caa055] hover:bg-[#caa055]/20"
+                                data-testid={`paste-mask-${o.m}`}
+                              >
+                                {o.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {effectLayers.length > 0 && (
+          <p className="text-[8px] text-gray-500 leading-snug">
+            Brush, Lasso and Marquee add to the selected layer; the Eraser trims it. Click a layer to select it, click again to deselect.
+          </p>
+        )}
       </div>
 
       {/* Active Placed Effect Masks Manager */}
