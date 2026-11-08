@@ -1639,6 +1639,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           videoWidth: isVid ? media.videoWidth : null,
           naturalWidth: !isVid ? media.naturalWidth : null,
           complete: !isVid ? media.complete : null,
+          networkState: isVid ? media.networkState : null,
+          paused: isVid ? media.paused : null,
+          mediaError: isVid && media.error ? `code ${media.error.code}` : null,
         });
         // Show placeholder dashed outline while loading
         ctx.save(); ctx.strokeStyle = '#caa055'; ctx.lineWidth = sw;
@@ -1650,7 +1653,18 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
           ctx.stroke();
         } else if (rect) { ctx.strokeRect(rect.x, rect.y, rect.width, rect.height); }
         ctx.setLineDash([]); ctx.restore();
-        if (isVid) { media.load(); media.play().catch(() => {}); }
+        // NOTE: never call media.load() every frame here — each call RESTARTS the
+        // download, so a video that takes longer than one frame to fetch (any
+        // window that doesn't already have it cached, e.g. the projector after a
+        // DM push) would stay stuck at readyState 0 forever. Only kick it again
+        // if the element is idle/failed, and at most every 4 seconds.
+        if (isVid) {
+          const nowMs = performance.now();
+          if ((media.networkState === 0 || media.networkState === 3) && nowMs - (media._kgKick || 0) > 4000) {
+            media._kgKick = nowMs; media.load();
+          }
+          if (media.paused) media.play().catch(() => {});
+        }
         return;
       }
 
