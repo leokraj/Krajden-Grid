@@ -63,5 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openDmWindow: () => ipcRenderer.send('open-dm-window'),
   dmRequestSnapshot: () => ipcRenderer.send('dm-request-snapshot'),
   dmSendSnapshot: (snapshot) => ipcRenderer.send('dm-send-snapshot', snapshot),
-  dmPush: (snapshot) => ipcRenderer.send('dm-push', snapshot)
+  dmPush: (snapshot) => ipcRenderer.send('dm-push', snapshot),
+  // Game window reports its size so the DM Screen can match its proportions
+  dmGameViewport: (v) => ipcRenderer.send('dm-game-viewport', v)
 });
