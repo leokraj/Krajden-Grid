@@ -529,6 +529,7 @@ export const GridProvider = ({ children }) => {
   useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
   const [dmGameViewport, setDmGameViewport] = useState(null);
   const [dmLastSync, setDmLastSync] = useState(null);
+  const [dmGameDebug, setDmGameDebug] = useState(null);
 
   // Game side: answer the DM's snapshot request, and apply pushed updates.
   // Applying goes through updateSettings so the change also mirrors to the
@@ -551,9 +552,23 @@ export const GridProvider = ({ children }) => {
         });
       }, 400);
     });
+    // DM Screen asked: report what this window's effects overlay is doing
+    const offDbg = window.electronAPI.on('dm-debug-request', () => {
+      const cur = settingsRef.current || {};
+      let fx = null;
+      try { fx = window.__effectsDebug ? window.__effectsDebug() : { overlayMounted: false }; } catch (e) { fx = { error: String(e) }; }
+      window.electronAPI.dmDebugInfo?.({
+        at: new Date().toLocaleTimeString(),
+        window: `${window.innerWidth}x${window.innerHeight}`,
+        screen: `${window.screen.width}x${window.screen.height}`,
+        visibility: document.visibilityState, focused: document.hasFocus(),
+        settings: { effectPaths: (cur.effectPaths || []).length, effectLayers: (cur.effectLayers || []).length, effectsEnabled: !!cur.effectsEnabled, hiddenSceneIds: (cur.hiddenSceneIds || []).length },
+        fx,
+      });
+    });
     // DM Screen -> projector: show/hide the table-photo calibration markers
     const offCalib = window.electronAPI.on('calib-markers', (on) => updateSettings({ calibMarkersOn: !!on }));
-    return () => { offReq?.(); offPush?.(); offCalib?.(); };
+    return () => { offReq?.(); offPush?.(); offCalib?.(); offDbg?.(); };
   }, [updateSettings]);
 
   // DM side: receive the game's snapshot (on open, and on "Re-sync").
@@ -570,8 +585,9 @@ export const GridProvider = ({ children }) => {
     const offVp = window.electronAPI.on('dm-viewport', (v) => {
       if (v && v.w > 0 && v.h > 0) setDmGameViewport({ w: v.w, h: v.h });
     });
+    const offDbgInfo = window.electronAPI.on('dm-debug-info', (info) => setDmGameDebug(info));
     window.electronAPI.dmRequestSnapshot();
-    return () => { off?.(); offVp?.(); };
+    return () => { off?.(); offVp?.(); offDbgInfo?.(); };
   }, []);
 
   // Resolves with the game window's confirmation ({layers, paths, cliparts}),
@@ -590,6 +606,7 @@ export const GridProvider = ({ children }) => {
     }, 3000);
     window.electronAPI.dmPush(buildDmSnapshot(settingsRef.current, measurementsRef.current));
   }), []);
+  const requestGameDebug = useCallback(() => { window.electronAPI?.dmDebugRequest?.(); }, []);
   const pullFromGame = useCallback(() => {
     window.electronAPI?.dmRequestSnapshot?.();
   }, []);
@@ -2420,6 +2437,9 @@ export const GridProvider = ({ children }) => {
     setShowClipartLibrary,
     isDmScreen: IS_DM_SCREEN,
     pushToGame,
+    dmGameDebug,
+    setDmGameDebug,
+    requestGameDebug,
     pullFromGame,
     dmGameViewport,
     dmLastSync,
