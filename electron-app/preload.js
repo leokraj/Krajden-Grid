@@ -69,5 +69,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // DM Screen asks the game window to show/hide the calibration markers
   dmCalibMarkers: (on) => ipcRenderer.send('dm-calib-markers', !!on),
   // Game window confirms to the DM Screen that a push arrived and was applied
-  dmPushAck: (info) => ipcRenderer.send('dm-push-ack', info)
+  dmPushAck: (info) => ipcRenderer.send('dm-push-ack', info),
+  // DM Screen debug: ask the game window what its effects overlay is doing, and the reply
+  dmDebugRequest: () => ipcRenderer.send('dm-debug-request'),
+  dmDebugInfo: (info) => ipcRenderer.send('dm-debug-info', info)
 });
