@@ -10,6 +10,8 @@ import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
 import { EffectsDrawingOverlay, EffectsControlPanel } from '../components/EffectsLayer';
 import { AtmosphereLayer } from '../components/AtmosphereLayer';
+import { TablePhotoLayer, CalibrationMarkers, TablePhotoCalibrator, useTablePhotoPersistence } from '../components/TablePhoto';
+import { applyStageFit, removeStageFit } from '../lib/stageFit';
 
 export function FullscreenContent() {
   const { 
@@ -28,6 +30,30 @@ export function FullscreenContent() {
     dmLastSync,
   } = useGrid();
   const [showControls, setShowControls] = useState(true);
+
+  // DM Screen: behave like a window of exactly the game screen's size, scaled
+  // to fit this monitor (bars on the right/bottom), so every position matches
+  // the projector one-to-one. Re-fits automatically when the game window changes.
+  useEffect(() => {
+    if (!isDmScreen) return undefined;
+    if (dmGameViewport?.w > 0 && dmGameViewport?.h > 0) applyStageFit(dmGameViewport.w, dmGameViewport.h);
+    return undefined;
+  }, [isDmScreen, dmGameViewport?.w, dmGameViewport?.h]);
+  useEffect(() => () => { if (isDmScreen) removeStageFit(); }, [isDmScreen]);
+
+  // Game (main grid) window: tell the DM Screen our size whenever it changes
+  useEffect(() => {
+    const qp = new URLSearchParams(window.location.search);
+    if (isDmScreen || qp.get('mode') || !window.electronAPI?.dmGameViewport) return undefined;
+    let t = null;
+    const send = () => window.electronAPI.dmGameViewport({ w: window.innerWidth, h: window.innerHeight });
+    const on = () => { clearTimeout(t); t = setTimeout(send, 250); };
+    send();
+    window.addEventListener('resize', on);
+    return () => { clearTimeout(t); window.removeEventListener('resize', on); };
+  }, [isDmScreen]);
+
+  useTablePhotoPersistence(isDmScreen);
 
   // Parse mode and electron status from URL search parameters / electron API
   const queryParams = new URLSearchParams(window.location.search);
@@ -313,10 +339,19 @@ export function FullscreenContent() {
         className="absolute inset-0 z-10" 
       />
 
+      {/* DM-only table photo reference (straightened to the screen), under the painting */}
+      {isDmScreen && <TablePhotoLayer />}
+
       {/* Effects drawing layer — video/GIF effects along drawn paths */}
       <EffectsDrawingOverlay
-        canvasSize={{ width: window.screen.width || 1920, height: window.screen.height || 1080 }}
+        canvasSize={isDmScreen && dmGameViewport?.w > 0
+          ? { width: dmGameViewport.w, height: dmGameViewport.h }
+          : { width: window.screen.width || 1920, height: window.screen.height || 1080 }}
       />
+
+      {/* Numbered calibration markers for the table photo */}
+      <CalibrationMarkers />
+      {isDmScreen && settings.tablePhotoCalibrating && <TablePhotoCalibrator />}
 
       {/* Atmosphere: time of day, weather, fog of war, spell circles, mouse token */}
       <AtmosphereLayer />
@@ -380,8 +415,9 @@ export function FullscreenContent() {
       {/* DM Screen chrome: makes it unmistakable this is the private copy, and
           holds the explicit "send to players" action. */}
       {isDmScreen && (() => {
-        const mismatch = dmGameViewport
-          && (Math.abs(dmGameViewport.w - window.innerWidth) > 2 || Math.abs(dmGameViewport.h - window.innerHeight) > 2);
+        const fitPct = dmGameViewport
+          ? Math.round(Math.min(document.documentElement.clientWidth / dmGameViewport.w, document.documentElement.clientHeight / dmGameViewport.h) * 100)
+          : 100;
         return (
           <>
             <div className="pointer-events-none fixed inset-0 z-[60] border-2 border-[#caa055]/50" />
@@ -409,9 +445,9 @@ export function FullscreenContent() {
               </button>
               {!dmLastSync && <span className="text-[9px] text-white/50 font-mono">waiting for game screen…</span>}
             </div>
-            {mismatch && (
-              <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[70] bg-amber-900/90 border border-amber-500/60 rounded-[4px] px-3 py-1 text-[9px] text-amber-100 font-mono">
-                ⚠ Game screen is {dmGameViewport.w}×{dmGameViewport.h}, this window is {window.innerWidth}×{window.innerHeight} — positions will be offset when pushed
+            {dmGameViewport && (
+              <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[70] bg-black/70 border border-[#caa055]/30 rounded-[4px] px-3 py-0.5 text-[9px] text-[#caa055]/80 font-mono pointer-events-none" data-testid="dm-fit-info">
+                Matched to game screen {dmGameViewport.w}×{dmGameViewport.h} · shown at {fitPct}%
               </div>
             )}
           </>
