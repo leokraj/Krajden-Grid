@@ -25,6 +25,9 @@ export function FullscreenContent() {
     addPlacedClipart,
     isDmScreen,
     pushToGame,
+    dmGameDebug,
+    setDmGameDebug,
+    requestGameDebug,
     pullFromGame,
     dmGameViewport,
     dmLastSync,
@@ -447,8 +450,26 @@ export function FullscreenContent() {
               >
                 ⟲ Re-sync from Game
               </button>
+              <button
+                onClick={() => { setDmGameDebug(null); requestGameDebug(); setTimeout(() => setDmGameDebug((d) => d || { error: 'No reply from the game window' }), 2500); }}
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-[3px] border border-[#caa055]/40 text-[#caa055] hover:bg-[#caa055]/15 cursor-pointer"
+                data-testid="dm-debug-btn"
+              >
+                🐞 Game debug
+              </button>
               {!dmLastSync && <span className="text-[9px] text-white/50 font-mono">waiting for game screen…</span>}
             </div>
+            {dmGameDebug && (
+              <div className="fixed top-24 right-4 z-[80] w-[460px] max-h-[70vh] overflow-auto bg-black/90 border border-[#caa055]/60 rounded-[4px] p-3 text-[10px] text-[#f1d9a0] font-mono" style={{ WebkitAppRegion: 'no-drag' }} data-testid="dm-debug-panel">
+                <div className="flex gap-2 mb-2">
+                  <span className="font-bold uppercase tracking-wider text-[#caa055]">Game window debug</span>
+                  <button className="ml-auto px-2 border border-[#caa055]/40 rounded cursor-pointer" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(dmGameDebug, null, 2)); toast.success('Copied'); } catch (e) {} }}>Copy</button>
+                  <button className="px-2 border border-[#caa055]/40 rounded cursor-pointer" onClick={requestGameDebug}>Refresh</button>
+                  <button className="px-2 border border-[#caa055]/40 rounded cursor-pointer" onClick={() => setDmGameDebug(null)}>Close</button>
+                </div>
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(dmGameDebug, null, 2)}</pre>
+              </div>
+            )}
             {dmGameViewport && (
               <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[70] bg-black/70 border border-[#caa055]/30 rounded-[4px] px-3 py-0.5 text-[9px] text-[#caa055]/80 font-mono pointer-events-none" data-testid="dm-fit-info">
                 Matched to game screen {dmGameViewport.w}×{dmGameViewport.h} · shown at {fitPct}%
