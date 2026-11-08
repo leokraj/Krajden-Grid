@@ -22,7 +22,8 @@ import {
   Grid,
   Flame,
   CloudFog,
-  Map as MapIcon
+  Map as MapIcon,
+  Camera
 } from 'lucide-react';
 
 export function RadialContextMenu() {
@@ -32,7 +33,7 @@ export function RadialContextMenu() {
     broadcastPing, sessionCode, selectedClipartIds = [],
     groupSelectedCliparts, ungroupSelectedCliparts,
     setTokenLabel, toggleTokenStatus, bringTokenToFront, sendTokenToBack,
-    updatePlacedClipart,
+    updatePlacedClipart, isDmScreen,
   } = useGrid();
 
   const [activeSubMenu, setActiveSubMenu] = useState(null);
@@ -268,7 +269,9 @@ export function RadialContextMenu() {
   // All buttons are the same size and sit evenly spaced on one ring.
   const RING_R = 108;
   const BTN = 52;
-  const slotKeys = ['measure', 'group', 'beacon', 'effects', 'library', 'maps', 'fog', 'draw', 'mask', ...(activeToken ? ['token'] : [])];
+  // DM Screen only: a quick show/hide for the aligned table photo
+  const hasTablePhoto = !!(isDmScreen && settings.tablePhoto?.src && settings.tablePhoto?.pts && Object.keys(settings.tablePhoto.pts).length >= 4);
+  const slotKeys = ['measure', 'group', 'beacon', 'effects', 'library', 'maps', 'fog', 'draw', 'mask', ...(hasTablePhoto ? ['photo'] : []), ...(activeToken ? ['token'] : [])];
   const slot = (key) => {
     const i = Math.max(0, slotKeys.indexOf(key));
     const ang = (i / slotKeys.length) * Math.PI * 2 - Math.PI / 2;
@@ -283,7 +286,7 @@ export function RadialContextMenu() {
   // (they are fixed overlays; inside the grid canvas this menu was trapped
   // under their stacking context).
   return createPortal(
-    <div style={{ zIndex: 100000 }} className="fixed inset-0 pointer-events-auto bg-black/20 backdrop-blur-[2px] flex items-center justify-center animate-in fade-in duration-150">
+    <div style={{ zIndex: 100000 }} className={`fixed inset-0 pointer-events-auto bg-black/20 ${isDmScreen ? '' : 'backdrop-blur-[2px]'} flex items-center justify-center animate-in fade-in duration-150`}>
       <div 
         ref={menuRef}
         className="absolute select-none transform -translate-x-1/2 -translate-y-1/2"
@@ -461,6 +464,27 @@ export function RadialContextMenu() {
               <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider">Fog</span>
             </div>
           </div>
+
+          {/* DM SCREEN ONLY: show / hide the aligned table photo */}
+          {hasTablePhoto && (
+            <div
+              className="absolute flex flex-col items-center cursor-pointer z-10"
+              style={slot('photo')}
+              onMouseEnter={() => setActiveSubMenu(null)}
+              onClick={() => { updateSettings({ tablePhotoOn: !settings.tablePhotoOn }); closeRadialMenu(); }}
+              data-testid="radial-table-photo"
+              title="Show / hide table photo"
+            >
+              <div className={`w-full h-full rounded-full border flex flex-col items-center justify-center transition-all duration-200 ${
+                settings.tablePhotoOn
+                  ? 'bg-[#caa055]/40 border-[#caa055] shadow-[0_0_15px_#caa055] scale-110'
+                  : 'bg-black/80 border-[#caa055]/40 hover:border-[#caa055] hover:bg-[#caa055]/20 hover:scale-105'
+              }`}>
+                <Camera className="w-5 h-5 text-[#caa055]" />
+                <span className="text-[7px] font-cinzel font-bold text-[#caa055] uppercase tracking-wider mt-0.5">Photo</span>
+              </div>
+            </div>
+          )}
 
           {/* CENTER HUB EMBLEM */}
           <div 
