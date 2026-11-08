@@ -552,6 +552,10 @@ ipcMain.on('dm-game-viewport', (event, v) => {
     dmWindow.webContents.send('dm-viewport', { w: Math.round(v.w), h: Math.round(v.h) });
   }
 });
+// DM Screen toggles the calibration markers, which must show on the projector.
+ipcMain.on('dm-calib-markers', (event, on) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('calib-markers', !!on);
+});
 // DM pressed "Update Game Screen": hand the snapshot to the game window.
 // It applies it via its normal settings path, which then mirrors the change
 // to the Controls window and any other game-side windows.
