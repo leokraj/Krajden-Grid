@@ -1,5 +1,6 @@
 console.info("freshScenes");
 if (typeof window !== "undefined") { window.__freshScenesAnchor = "freshScenes"; }
+import { makeLayer, layerIdentity } from '../lib/effectLayers';
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { appDebugStore } from '../lib/debugStore';
@@ -147,6 +148,9 @@ const defaultSettings = {
   // Effects Reverse-Mask Painting tool
   effectsEnabled: false,
   effectPaths: [],
+  // Effect layers: one merged mask per effect (see lib/effectLayers.js)
+  effectLayers: [],
+  activeEffectLayerId: null,
   activeEffectId: null,
   activeEffectUrl: null,
   effectTool: 'brush', // 'brush' | 'marquee' | 'bezier' | 'eraser'
@@ -174,7 +178,7 @@ const DM_LOCAL_KEYS = new Set([
   'controlsDetached', 'effectsEnabled', 'effectTool', 'selectedEffectPathId',
   'effectsRadialTarget', 'measureMode', 'drawingEnabled', 'eraserEnabled',
   'pingMode', 'maskEnabled', 'liveMeasurement',
-  'atmoTool', 'spellEditMode', 'selectedSpellId',
+  'atmoTool', 'spellEditMode', 'selectedSpellId', 'activeEffectLayerId',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
@@ -467,7 +471,8 @@ export const GridProvider = ({ children }) => {
           "maskRects",
           "atmoTool",
           "spellEditMode",
-          "selectedSpellId"
+          "selectedSpellId",
+          "activeEffectLayerId"
         ]);
         for (const [key, val] of Object.entries(settings)) {
           if (!excludeKeys.has(key)) {
@@ -1011,6 +1016,52 @@ export const GridProvider = ({ children }) => {
     });
   }, []);
 
+  // ── Effect layers ────────────────────────────────────────────────────────
+  // Generic updater: fn(layers) -> layers. `extra` merges other settings in
+  // the same update (e.g. activeEffectLayerId). Broadcast like effectPaths.
+  const updateEffectLayers = useCallback((fn, extra) => {
+    setSettings((prev) => {
+      const nextLayers = fn(prev.effectLayers || []);
+      const patch = { effectLayers: nextLayers, ...(extra || {}) };
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: patch });
+      }
+      return { ...prev, ...patch };
+    });
+  }, []);
+
+  // Append a mask op to the right layer. `template` carries the active effect
+  // fields. onlyActive (eraser): never create/switch, only trim the active layer.
+  const commitEffectLayerOp = useCallback((op, template, onlyActive = false) => {
+    setSettings((prev) => {
+      const layers = prev.effectLayers || [];
+      let targetId = null;
+      const active = layers.find((l) => l.id === prev.activeEffectLayerId);
+      if (onlyActive) {
+        if (!active) return prev;
+        targetId = active.id;
+      } else if (active && layerIdentity(active) === layerIdentity(template)) {
+        targetId = active.id;
+      } else {
+        // Reuse the most recent layer of the same effect, else start one
+        const same = [...layers].reverse().find((l) => layerIdentity(l) === layerIdentity(template));
+        targetId = same ? same.id : null;
+      }
+      let nextLayers = layers;
+      if (!targetId) {
+        const created = makeLayer(template, layers);
+        targetId = created.id;
+        nextLayers = [...layers, created];
+      }
+      nextLayers = nextLayers.map((l) => l.id === targetId ? { ...l, ops: [...(l.ops || []), op] } : l);
+      const patch = { effectLayers: nextLayers, activeEffectLayerId: targetId };
+      if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
+        window.electronAPI.broadcast("settings-update", { settings: patch });
+      }
+      return { ...prev, ...patch };
+    });
+  }, []);
+
   const undoLastEffectPath = useCallback(() => {
     setSettings((prev) => {
       const paths = prev.effectPaths || [];
@@ -1026,9 +1077,9 @@ export const GridProvider = ({ children }) => {
   const clearEffectPaths = useCallback(() => {
     setSettings((prev) => {
       if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
-        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: [] } });
+        window.electronAPI.broadcast("settings-update", { settings: { effectPaths: [], effectLayers: [], activeEffectLayerId: null } });
       }
-      return { ...prev, effectPaths: [] };
+      return { ...prev, effectPaths: [], effectLayers: [], activeEffectLayerId: null };
     });
   }, []);
 
@@ -1199,6 +1250,7 @@ export const GridProvider = ({ children }) => {
       'hiddenSceneIds', 'activeEffectId', 'activeEffectUrl',
       'placedCliparts', 'drawingPaths', 'maskPaths', 'maskRects',
       'backgroundLayers', 'backgroundImage', 'backgroundImageData', 'effectPaths',
+      'effectLayers',
     ]);
     const gridSettings = {};
     for (const [k, v] of Object.entries(settings)) {
@@ -1230,6 +1282,8 @@ export const GridProvider = ({ children }) => {
       opacity: settings.opacity,
       // Effects and pings are part of the scene
       effectPaths: JSON.parse(JSON.stringify(backfillIds(src.effectPaths, 'eff'))),
+      // Effect layers (merged, erasable masks) are part of the scene too
+      effectLayers: JSON.parse(JSON.stringify(settings.effectLayers || [])),
       pingsSnapshot: JSON.parse(JSON.stringify(pings || [])),
       // Atmosphere: fog of war, spell circles, weather, time of day
       atmo: JSON.parse(JSON.stringify({
@@ -1441,6 +1495,7 @@ export const GridProvider = ({ children }) => {
           maskRects: [...(prev.maskRects || []), ...tag(d.maskRects)],
           backgroundLayers: [...(prev.backgroundLayers || []), ...tag(d.backgroundLayers)],
           effectPaths: [...(prev.effectPaths || []), ...tag(d.effectPaths)],
+          effectLayers: [...(prev.effectLayers || []), ...(d.effectLayers || []).map((l) => ({ ...l, id: `${l.id}_m${Date.now().toString(36)}` }))],
         };
         if (!isUpdatingFromRemoteRef.current && window.electronAPI?.isElectron) {
           window.electronAPI.broadcast("settings-update", { settings: nextSettings });
@@ -1492,6 +1547,8 @@ export const GridProvider = ({ children }) => {
         backgroundImageRotation: d.backgroundImageRotation ?? prev.backgroundImageRotation,
         useBackgroundImage: d.useBackgroundImage ?? prev.useBackgroundImage,
         effectPaths: d.effectPaths || [],
+        effectLayers: d.effectLayers || [],
+        activeEffectLayerId: null,
         // Older scenes have no atmo block: leave the current atmosphere alone.
         ...(d.atmo ? d.atmo : {}),
       };
@@ -2252,6 +2309,8 @@ export const GridProvider = ({ children }) => {
     removeEffectPath,
     undoLastEffectPath,
     clearEffectPaths,
+    updateEffectLayers,
+    commitEffectLayerOp,
     clearAllCliparts,
     selectedClipartId,
     setSelectedClipartId,
