@@ -544,6 +544,14 @@ ipcMain.on('dm-send-snapshot', (event, snapshot) => {
     dmWindow.webContents.send('dm-snapshot', snapshot);
   }
 });
+// The game window reports its size (on open and whenever it is resized or moved
+// to another display); the DM Screen refits its stage to match.
+ipcMain.on('dm-game-viewport', (event, v) => {
+  if (!v || !(v.w > 0) || !(v.h > 0)) return;
+  if (dmWindow && !dmWindow.isDestroyed()) {
+    dmWindow.webContents.send('dm-viewport', { w: Math.round(v.w), h: Math.round(v.h) });
+  }
+});
 // DM pressed "Update Game Screen": hand the snapshot to the game window.
 // It applies it via its normal settings path, which then mirrors the change
 // to the Controls window and any other game-side windows.
