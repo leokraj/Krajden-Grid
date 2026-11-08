@@ -1498,6 +1498,9 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
           mapX: canvasCoords.x,
           mapY: canvasCoords.y
         });
+        // The menu opens on press (marking-menu gesture), so the 'contextmenu'
+        // that Windows fires on RELEASE must not re-open it at the release point.
+        suppressNextContextMenuRef.current = true;
       }
       return;
     }
