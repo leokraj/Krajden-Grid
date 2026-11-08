@@ -65,5 +65,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dmSendSnapshot: (snapshot) => ipcRenderer.send('dm-send-snapshot', snapshot),
   dmPush: (snapshot) => ipcRenderer.send('dm-push', snapshot),
   // Game window reports its size so the DM Screen can match its proportions
-  dmGameViewport: (v) => ipcRenderer.send('dm-game-viewport', v)
+  dmGameViewport: (v) => ipcRenderer.send('dm-game-viewport', v),
+  // DM Screen asks the game window to show/hide the calibration markers
+  dmCalibMarkers: (on) => ipcRenderer.send('dm-calib-markers', !!on)
 });
