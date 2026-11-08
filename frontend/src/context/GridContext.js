@@ -541,6 +541,15 @@ export const GridProvider = ({ children }) => {
     const offPush = window.electronAPI.on('dm-push', (snap) => {
       if (snap?.settings) updateSettings(snap.settings);
       if (Array.isArray(snap?.measurements)) setMeasurements(snap.measurements);
+      // Confirm to the DM Screen what the game actually holds after applying
+      setTimeout(() => {
+        const cur = settingsRef.current || {};
+        window.electronAPI.dmPushAck?.({
+          layers: (cur.effectLayers || []).length,
+          paths: (cur.effectPaths || []).length,
+          cliparts: (cur.placedCliparts || []).length,
+        });
+      }, 400);
     });
     // DM Screen -> projector: show/hide the table-photo calibration markers
     const offCalib = window.electronAPI.on('calib-markers', (on) => updateSettings({ calibMarkersOn: !!on }));
@@ -565,11 +574,22 @@ export const GridProvider = ({ children }) => {
     return () => { off?.(); offVp?.(); };
   }, []);
 
-  const pushToGame = useCallback(() => {
-    if (!window.electronAPI?.dmPush) return false;
+  // Resolves with the game window's confirmation ({layers, paths, cliparts}),
+  // or null when there is no way to reach it / it never answered.
+  const pushToGame = useCallback(() => new Promise((resolve) => {
+    if (!window.electronAPI?.dmPush) return resolve(null);
+    let done = false;
+    let timer = null;
+    const off = window.electronAPI.on?.('dm-push-ack', (info) => {
+      if (done) return;
+      done = true; clearTimeout(timer); off?.(); resolve(info || {});
+    });
+    timer = setTimeout(() => {
+      if (done) return;
+      done = true; off?.(); resolve(null);
+    }, 3000);
     window.electronAPI.dmPush(buildDmSnapshot(settingsRef.current, measurementsRef.current));
-    return true;
-  }, []);
+  }), []);
   const pullFromGame = useCallback(() => {
     window.electronAPI?.dmRequestSnapshot?.();
   }, []);
