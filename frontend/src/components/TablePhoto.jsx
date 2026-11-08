@@ -46,9 +46,10 @@ export function fileToPhoto(file, max = 2400) {
 
 // Markers drawn on the projector (and mirrored on the DM screen if switched on there)
 export function CalibrationMarkers() {
-  const { settings } = useGrid();
+  const { settings, isDmScreen } = useGrid();
   const { w, h } = useStageSize();
-  if (!settings.calibMarkersOn) return null;
+  // Markers belong on the projector (they're what the phone photographs), not the DM screen
+  if (!settings.calibMarkersOn || isDmScreen) return null;
   const u = Math.max(0.6, Math.min(w, h) / 1080);
   const arm = 34 * u, gap = 7 * u;
   return (
@@ -254,11 +255,11 @@ export function TablePhotoPanel() {
   return (
     <>
       <label className="flex items-center gap-2 text-[10px] text-[#caa055]/80 font-mono cursor-pointer">
-        <input type="checkbox" checked={!!settings.calibMarkersOn} onChange={(e) => updateSettings({ calibMarkersOn: e.target.checked })} className="accent-[#caa055]" />
-        Show calibration markers (3×3, numbered)
+        <input type="checkbox" checked={!!settings.calibMarkersOn} onChange={(e) => { updateSettings({ calibMarkersOn: e.target.checked }); if (isDmScreen) window.electronAPI?.dmCalibMarkers?.(e.target.checked); }} className="accent-[#caa055]" />
+        Show calibration markers on the projector (3×3, numbered)
       </label>
       <p className="text-[10px] text-[#caa055]/50 font-mono leading-snug">
-        1) Turn markers on at the game screen. 2) Take a top-down photo of the table with your phone. 3) Load it on the DM Screen and tap the markers you can see.
+        1) Turn markers on (they appear on the projector). 2) Take a top-down photo of the table with your phone. 3) Load it on the DM Screen and tap the markers you can see.
       </p>
       {!isDmScreen ? (
         <p className="text-[10px] text-amber-300/80 font-mono leading-snug">Loading and aligning the photo happens on the DM Screen — players never see it.</p>
