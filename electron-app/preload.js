@@ -67,5 +67,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Game window reports its size so the DM Screen can match its proportions
   dmGameViewport: (v) => ipcRenderer.send('dm-game-viewport', v),
   // DM Screen asks the game window to show/hide the calibration markers
-  dmCalibMarkers: (on) => ipcRenderer.send('dm-calib-markers', !!on)
+  dmCalibMarkers: (on) => ipcRenderer.send('dm-calib-markers', !!on),
+  // Game window confirms to the DM Screen that a push arrived and was applied
+  dmPushAck: (info) => ipcRenderer.send('dm-push-ack', info)
 });
