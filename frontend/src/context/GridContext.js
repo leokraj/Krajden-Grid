@@ -542,7 +542,9 @@ export const GridProvider = ({ children }) => {
       if (snap?.settings) updateSettings(snap.settings);
       if (Array.isArray(snap?.measurements)) setMeasurements(snap.measurements);
     });
-    return () => { offReq?.(); offPush?.(); };
+    // DM Screen -> projector: show/hide the table-photo calibration markers
+    const offCalib = window.electronAPI.on('calib-markers', (on) => updateSettings({ calibMarkersOn: !!on }));
+    return () => { offReq?.(); offPush?.(); offCalib?.(); };
   }, [updateSettings]);
 
   // DM side: receive the game's snapshot (on open, and on "Re-sync").
