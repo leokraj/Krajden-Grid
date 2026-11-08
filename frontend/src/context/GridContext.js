@@ -179,6 +179,8 @@ const DM_LOCAL_KEYS = new Set([
   'effectsRadialTarget', 'measureMode', 'drawingEnabled', 'eraserEnabled',
   'pingMode', 'maskEnabled', 'liveMeasurement',
   'atmoTool', 'spellEditMode', 'selectedSpellId', 'activeEffectLayerId',
+  // Table photo + calibration markers are per-window (the photo is DM-only)
+  'tablePhoto', 'tablePhotoOn', 'tablePhotoOpacity', 'tablePhotoCalibrating', 'calibMarkersOn',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
@@ -472,7 +474,11 @@ export const GridProvider = ({ children }) => {
           "atmoTool",
           "spellEditMode",
           "selectedSpellId",
-          "activeEffectLayerId"
+          "activeEffectLayerId",
+          "tablePhoto",
+          "tablePhotoOn",
+          "tablePhotoCalibrating",
+          "calibMarkersOn"
         ]);
         for (const [key, val] of Object.entries(settings)) {
           if (!excludeKeys.has(key)) {
@@ -549,8 +555,12 @@ export const GridProvider = ({ children }) => {
       setDmGameViewport(snap.viewport || null);
       setDmLastSync(Date.now());
     });
+    // The game window reports its size whenever it is resized/moved to another display
+    const offVp = window.electronAPI.on('dm-viewport', (v) => {
+      if (v && v.w > 0 && v.h > 0) setDmGameViewport({ w: v.w, h: v.h });
+    });
     window.electronAPI.dmRequestSnapshot();
-    return () => off?.();
+    return () => { off?.(); offVp?.(); };
   }, []);
 
   const pushToGame = useCallback(() => {
