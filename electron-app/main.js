@@ -565,6 +565,11 @@ ipcMain.on('dm-push', (event, snapshot) => {
   }
 });
 
+// Game window confirms it received + applied a DM push: tell the DM Screen.
+ipcMain.on('dm-push-ack', (event, info) => {
+  if (dmWindow && !dmWindow.isDestroyed()) dmWindow.webContents.send('dm-push-ack', info || {});
+});
+
 ipcMain.on('close-controls-window', () => {
   const win = childWindows['controls'];
   if (win && !win.isDestroyed()) win.close();
