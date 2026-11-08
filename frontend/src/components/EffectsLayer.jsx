@@ -2761,7 +2761,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
     }
   }, [effectTool]);
 
-  if (!effectPaths.length && !effectsEnabled) return null;
+  if (!effectPaths.length && !effectLayers.length && !effectsEnabled) return null;
 
   // ── Cursor ────────────────────────────────────────────────────────────────
   const cursorStyle = !effectsEnabled    ? 'default'
