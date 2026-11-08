@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, MapPin, CloudSun, CloudFog, Wand2, Layers, MousePointer2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, MapPin, CloudSun, CloudFog, Wand2, Layers, MousePointer2, Camera } from 'lucide-react';
+import { TablePhotoPanel } from './TablePhoto';
 import { toast } from 'sonner';
 import { useGrid } from '../context/GridContext';
 import {
@@ -458,6 +459,7 @@ export function AtmosphereSections({ sectionFilter }) {
       <Section id="atmo-fog" title="Fog of War" icon={CloudFog} sectionFilter={sectionFilter}><FogPanel /></Section>
       <Section id="atmo-spells" title="Spell Circles & Hits" icon={Wand2} sectionFilter={sectionFilter}><SpellPanel /></Section>
       <Section id="atmo-groups" title="Groups & Mass Edit" icon={Layers} sectionFilter={sectionFilter}><GroupsPanel /></Section>
+      <Section id="table-photo" title="Table Photo" icon={Camera} sectionFilter={sectionFilter}><TablePhotoPanel /></Section>
     </>
   );
 }
