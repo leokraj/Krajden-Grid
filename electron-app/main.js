@@ -570,6 +570,13 @@ ipcMain.on('dm-push-ack', (event, info) => {
   if (dmWindow && !dmWindow.isDestroyed()) dmWindow.webContents.send('dm-push-ack', info || {});
 });
 
+ipcMain.on('dm-debug-request', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('dm-debug-request');
+});
+ipcMain.on('dm-debug-info', (event, info) => {
+  if (dmWindow && !dmWindow.isDestroyed()) dmWindow.webContents.send('dm-debug-info', info || {});
+});
+
 ipcMain.on('close-controls-window', () => {
   const win = childWindows['controls'];
   if (win && !win.isDestroyed()) win.close();
