@@ -271,23 +271,43 @@ export const SessionProvider = ({ children }) => {
     };
   }, []);
 
-  // Inactivity tracking
+  // Inactivity tracking — only for GUESTS in a live session (hosts and solo
+  // use never time out). Any mouse, key or wheel activity anywhere in the
+  // window counts, not just clicks on the grid canvas.
   const resetInactivityTimer = useCallback(() => {
-    if (isHost) return; // Hosts don't timeout
-    setShowInactivityWarning(false);
     if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    if (isHost || !sessionCode) {
+      setShowInactivityWarning(false);
+      return;
+    }
+    setShowInactivityWarning(false);
     inactivityTimerRef.current = setTimeout(() => {
       setShowInactivityWarning(true);
       setWarningCountdown(60);
     }, 15 * 60 * 1000); // 15 mins
-  }, [isHost]);
+  }, [isHost, sessionCode]);
 
   useEffect(() => {
     resetInactivityTimer();
+    if (isHost || !sessionCode) {
+      return () => {
+        if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+      };
+    }
+    let last = 0;
+    const onActivity = () => {
+      const now = Date.now();
+      if (now - last < 5000) return; // throttle
+      last = now;
+      resetInactivityTimer();
+    };
+    const evs = ['pointerdown', 'pointermove', 'keydown', 'wheel'];
+    evs.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => {
+      evs.forEach((e) => window.removeEventListener(e, onActivity));
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
-  }, [resetInactivityTimer]);
+  }, [resetInactivityTimer, isHost, sessionCode]);
 
   const leaveSession = useCallback(() => {
     if (socketRef.current && socketRef.current.connected) {
