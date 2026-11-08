@@ -84,6 +84,68 @@ export function RadialContextMenu() {
     };
   }, [radialMenuOpen, closeRadialMenu]);
 
+  // ── Maya-style marking gesture ──────────────────────────────────────────
+  // Right-button press opens the menu (GridCanvas). While the button is still
+  // held, moving toward a button highlights it and auto-opens its submenu;
+  // releasing selects it (or the submenu item under the pointer). A quick
+  // release near the centre leaves the menu open for normal click use.
+  const rightDownRef = useRef(false);
+  useEffect(() => {
+    const down = (e) => { if (e.button === 2) rightDownRef.current = true; };
+    window.addEventListener('mousedown', down, true);
+    return () => window.removeEventListener('mousedown', down, true);
+  }, []);
+  useEffect(() => {
+    if (!radialMenuOpen) return;
+    const DEAD = 36;
+    const SUB_FOR = { measure: 'measure', beacon: 'beacon', library: 'library', draw: 'draw', effects: 'effects', mask: 'mask', maps: 'mapimport', fog: 'fog', token: 'token', photo: null, group: null };
+    const LEAF = ['beacon', 'library', 'maps', 'group', 'photo'];
+    const pick = (e) => {
+      const m = menuRef.current;
+      if (!m) return null;
+      const r = m.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const dx = e.clientX - cx, dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < DEAD) return { dist, kind: 'none' };
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const slotEl = el && el.closest && el.closest('[data-slot]');
+      if (slotEl && m.contains(slotEl)) return { dist, kind: 'slot', key: slotEl.getAttribute('data-slot'), el: slotEl };
+      const btn = el && el.closest && el.closest('button');
+      if (btn && m.contains(btn)) return { dist, kind: 'sub', el: btn };
+      // Not over anything: choose the slot whose direction best matches.
+      let best = null, bestD = 1e9;
+      const a = Math.atan2(dy, dx);
+      m.querySelectorAll('[data-slot]').forEach((n) => {
+        const b = n.getBoundingClientRect();
+        const ang = Math.atan2(b.top + b.height / 2 - cy, b.left + b.width / 2 - cx);
+        let d = Math.abs(a - ang); if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d < bestD) { bestD = d; best = n; }
+      });
+      if (best && bestD < Math.PI / 4) return { dist, kind: 'slot', key: best.getAttribute('data-slot'), el: best, byAngle: true };
+      return { dist, kind: 'keep' };
+    };
+    const onMove = (e) => {
+      if (!(e.buttons & 2)) return;
+      const c = pick(e);
+      if (c && c.kind === 'slot' && c.byAngle && c.key in SUB_FOR) setActiveSubMenu(SUB_FOR[c.key]);
+    };
+    const onUp = (e) => {
+      if (e.button !== 2 || !rightDownRef.current) return;
+      rightDownRef.current = false;
+      const c = pick(e);
+      if (!c) return;
+      if (c.kind === 'sub') { c.el.click(); return; }
+      if (c.kind === 'slot' && LEAF.includes(c.key)) c.el.click();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [radialMenuOpen]);
+
   if (!radialMenuOpen || !radialMenuPos) return null;
 
   // Actions execution helpers
@@ -303,7 +365,7 @@ export function RadialContextMenu() {
 
           {/* MAIN QUADRANT 1: TOP (Measure Submenu) */}
           <div 
-            style={slot('measure')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('measure')} data-slot="measure" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('measure')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'measure' ? null : 'measure')}
             data-testid="radial-top-measure"
@@ -316,7 +378,7 @@ export function RadialContextMenu() {
 
           {/* MAIN QUADRANT 2: RIGHT (Beacon / Ping) */}
           <div 
-            style={slot('beacon')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('beacon')} data-slot="beacon" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('beacon')}
             onClick={handleBeaconSelect}
             data-testid="radial-right-beacon"
@@ -329,7 +391,7 @@ export function RadialContextMenu() {
 
           {/* MAIN QUADRANT 3: BOTTOM (Token & Clipart Library) */}
           <div 
-            style={slot('library')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('library')} data-slot="library" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('library')}
             onClick={handleLibrarySelect}
             data-testid="radial-bottom-library"
@@ -342,7 +404,7 @@ export function RadialContextMenu() {
 
           {/* MAIN QUADRANT 4: LEFT (Draw Submenu) */}
           <div 
-            style={slot('draw')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('draw')} data-slot="draw" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('draw')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'draw' ? null : 'draw')}
             data-testid="radial-left-draw"
@@ -356,7 +418,7 @@ export function RadialContextMenu() {
           {/* CORNER: TOP-LEFT — Token options (visible when right-clicking a token) */}
           {activeToken && (
             <div
-              style={slot('token')} className="absolute flex flex-col items-center cursor-pointer z-10"
+              style={slot('token')} data-slot="token" className="absolute flex flex-col items-center cursor-pointer z-10"
               onClick={() => setActiveSubMenu(activeSubMenu === 'token' ? null : 'token')}
               title="Token Options"
             >
@@ -373,7 +435,7 @@ export function RadialContextMenu() {
 
           {/* CORNER ACTION: TOP-RIGHT (Group / Ungroup Tokens) */}
           <div 
-            style={slot('group')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('group')} data-slot="group" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onClick={handleGroupToggle}
             data-testid="radial-corner-group"
             title={isGrouped ? "Ungroup Selected Tokens" : "Group Selected Tokens"}
@@ -397,7 +459,7 @@ export function RadialContextMenu() {
 
           {/* CORNER: BOTTOM-RIGHT — Effects Painting Mode (opens category submenu) */}
           <div
-            style={slot('effects')} className="absolute flex flex-col items-center group cursor-pointer z-10"
+            style={slot('effects')} data-slot="effects" className="absolute flex flex-col items-center group cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('effects')}
             onClick={() => setActiveSubMenu(['effects', 'effectsTool', 'effectsList'].includes(activeSubMenu) ? null : 'effects')}
             data-testid="radial-corner-effects"
@@ -416,7 +478,7 @@ export function RadialContextMenu() {
           {/* OUTER RING: GRID MASK (between Measure and the Token corner) */}
           <div
             className="absolute flex flex-col items-center cursor-pointer z-10"
-            style={slot('mask')}
+            style={slot('mask')} data-slot="mask"
             onMouseEnter={() => setActiveSubMenu('mask')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'mask' ? null : 'mask')}
             data-testid="radial-mask"
@@ -435,7 +497,7 @@ export function RadialContextMenu() {
           {/* OUTER RING: MAP IMPORTER (between Library and the Fog corner) */}
           <div
             className="absolute flex flex-col items-center cursor-pointer z-10"
-            style={slot('maps')}
+            style={slot('maps')} data-slot="maps"
             onMouseEnter={() => setActiveSubMenu('mapimport')}
             onClick={handleMapImporterSelect}
             data-testid="radial-map-importer"
@@ -449,7 +511,7 @@ export function RadialContextMenu() {
 
           {/* CORNER: BOTTOM-LEFT — Fog of War */}
           <div
-            style={slot('fog')} className="absolute flex flex-col items-center cursor-pointer z-10"
+            style={slot('fog')} data-slot="fog" className="absolute flex flex-col items-center cursor-pointer z-10"
             onMouseEnter={() => setActiveSubMenu('fog')}
             onClick={() => setActiveSubMenu(activeSubMenu === 'fog' ? null : 'fog')}
             data-testid="radial-corner-fog"
@@ -469,7 +531,7 @@ export function RadialContextMenu() {
           {hasTablePhoto && (
             <div
               className="absolute flex flex-col items-center cursor-pointer z-10"
-              style={slot('photo')}
+              style={slot('photo')} data-slot="photo"
               onMouseEnter={() => setActiveSubMenu(null)}
               onClick={() => { updateSettings({ tablePhotoOn: !settings.tablePhotoOn }); closeRadialMenu(); }}
               data-testid="radial-table-photo"
