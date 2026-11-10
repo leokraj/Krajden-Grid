@@ -18,6 +18,9 @@ import SceneEditorPanel from './SceneEditorPanel';
 import { FloatingWindow } from './FloatingWindow';
 import { EffectsControlPanel } from './EffectsLayer';
 import { AtmosphereSections } from './AtmospherePanel';
+import { CampaignSections } from './CampaignPanel';
+import { useInitiative } from '../lib/useInitiative';
+import { getActiveCampaign } from '../lib/campaign';
 import { CustomizationModal } from './CustomizationModal';
 import { 
   Grid3X3, 
@@ -148,8 +151,11 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [localCurrentTurnIndex, setLocalCurrentTurnIndex] = useState(-1);
 
   const finalDiceRolls = sessionCode ? diceRolls : localDiceRolls;
-  const finalInitiativeList = sessionCode ? initiativeList : localInitiativeList;
-  const finalCurrentTurnIndex = sessionCode ? currentTurnIndex : localCurrentTurnIndex;
+  // Turn order: session list when in a session, otherwise shared grid settings
+  // (so the sigils on the projector follow it)
+  const initiativeState = useInitiative();
+  const finalInitiativeList = initiativeState.list;
+  const finalCurrentTurnIndex = initiativeState.turn;
 
   const handleRollDice = useCallback((rollData) => {
     if (sessionCode && broadcastRollDice) {
@@ -173,14 +179,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     }
   }, [sessionCode, broadcastClearDiceRolls]);
 
-  const handleUpdateInitiative = useCallback((list, turnIndex) => {
-    if (sessionCode && broadcastUpdateInitiative) {
-      broadcastUpdateInitiative(list, turnIndex);
-    } else {
-      setLocalInitiativeList(list);
-      setLocalCurrentTurnIndex(turnIndex);
-    }
-  }, [sessionCode, broadcastUpdateInitiative]);
+  const handleUpdateInitiative = initiativeState.setInit;
   
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
@@ -318,6 +317,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     'grp-fx': true,
     'grp-env': true,
     'grp-scene': true,
+    'grp-campaign': true,
     ...(sectionFilter ? { [sectionFilter]: false } : {}),
   });
   // The radial menu's Effects flow can send a category pick here
@@ -2049,7 +2049,8 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
         </GroupShell>
 
-        {/* Initiative Tracker */}
+        {/* Campaign Settings: turn order, party roster, table seats, sigils */}
+        <GroupShell id="grp-campaign" title="Campaign Settings" icon={Sword} sectionFilter={sectionFilter} open={!collapsedSections['grp-campaign']} onToggle={() => toggleSection('grp-campaign')}>
         <div id="section-initiative" className={`space-y-3 ${sectionFilter && sectionFilter !== 'initiative' ? 'hidden' : ''}`}>
           <div className="flex items-center gap-1 w-full">
               <div className="flex-1 min-w-0">
@@ -2079,12 +2080,16 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                 broadcastUpdateInitiative={handleUpdateInitiative}
                 userName={userName}
                 isHost={isHost}
+                party={getActiveCampaign(settings)?.party || []}
               />
             </div>
           )}
         </div>
 
         <Separator className="bg-[#caa055]/15" />
+
+          <CampaignSections sectionFilter={sectionFilter} />
+        </GroupShell>
 
         {/* Collaborative Session */}
         <div id="section-session" className={`space-y-3 ${sectionFilter && sectionFilter !== 'session' ? 'hidden' : ''}`}>
