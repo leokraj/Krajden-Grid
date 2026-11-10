@@ -9,7 +9,8 @@ export const InitiativeTrackerPanel = ({
   currentTurnIndex = -1,
   broadcastUpdateInitiative,
   userName = 'Adventurer',
-  isHost = true
+  isHost = true,
+  party = [],
 }) => {
   const [combatantName, setCombatantName] = useState('');
   const [initiativeVal, setInitiativeVal] = useState('');
@@ -18,19 +19,24 @@ export const InitiativeTrackerPanel = ({
     e.preventDefault();
     if (!combatantName.trim()) return;
 
+    // Typing a party member's name links the combatant to their seat
+    const nm = combatantName.trim();
+    const member = party.find((p) => p.name.toLowerCase().trim() === nm.toLowerCase());
     const newCombatant = {
       id: `combatant_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      name: combatantName.trim(),
+      name: nm,
       value: parseInt(initiativeVal) || 0,
-      addedBy: userName
+      addedBy: userName,
+      ...(member ? { charId: member.id } : {}),
     };
 
+    const curId = initiativeList[currentTurnIndex]?.id;
     const updatedList = [...initiativeList, newCombatant]
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
 
-    // Keep active turn aligned if we added someone
-    let newTurnIndex = currentTurnIndex;
-    if (currentTurnIndex === -1 && updatedList.length > 0) {
+    // Keep the active turn on the same combatant after re-sorting
+    let newTurnIndex = curId ? updatedList.findIndex((c) => c.id === curId) : currentTurnIndex;
+    if (newTurnIndex === -1 && updatedList.length > 0) {
       newTurnIndex = 0;
     }
 
@@ -53,6 +59,14 @@ export const InitiativeTrackerPanel = ({
     }
 
     broadcastUpdateInitiative?.(updatedList, newTurnIndex);
+  };
+
+  const editValue = (id, raw) => {
+    const curId = initiativeList[currentTurnIndex]?.id;
+    const value = parseInt(raw, 10) || 0;
+    const updated = initiativeList.map((c) => (c.id === id ? { ...c, value } : c))
+      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+    broadcastUpdateInitiative?.(updated, curId ? updated.findIndex((c) => c.id === curId) : currentTurnIndex);
   };
 
   const handleNextTurn = () => {
@@ -167,9 +181,22 @@ export const InitiativeTrackerPanel = ({
                   </div>
                   
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs font-bold text-white bg-black/40 px-2 py-0.5 rounded border border-white/5">
-                      {item.value}
-                    </span>
+                    {isHost ? (
+                      <input
+                        type="number"
+                        defaultValue={item.value}
+                        key={`${item.id}_${item.value}`}
+                        onBlur={(e) => { if (parseInt(e.target.value, 10) !== item.value) editValue(item.id, e.target.value); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                        title="Edit initiative roll"
+                        className="w-11 text-center font-mono text-xs font-bold text-white bg-black/40 px-1 py-0.5 rounded border border-white/5 focus:border-[#c3a35a] outline-none"
+                        data-testid={`init-value-${item.id}`}
+                      />
+                    ) : (
+                      <span className="font-mono text-xs font-bold text-white bg-black/40 px-2 py-0.5 rounded border border-white/5">
+                        {item.value}
+                      </span>
+                    )}
                     {isHost && (
                       <button
                         onClick={() => removeCombatant(item.id)}
