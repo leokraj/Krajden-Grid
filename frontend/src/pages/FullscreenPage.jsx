@@ -10,6 +10,7 @@ import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
 import { EffectsDrawingOverlay, EffectsControlPanel } from '../components/EffectsLayer';
 import { AtmosphereLayer } from '../components/AtmosphereLayer';
+import { SeatSigils, InitiativeStepper } from '../components/SeatSigils';
 import { TablePhotoLayer, CalibrationMarkers, TablePhotoCalibrator, useTablePhotoPersistence } from '../components/TablePhoto';
 import { applyStageFit, removeStageFit } from '../lib/stageFit';
 
@@ -186,6 +187,7 @@ export function FullscreenContent() {
             <FloatingControls onClose={() => window.close()} sectionFilter={sectionFilter} />
           </div>
         </div>
+        <InitiativeStepper />
         <Toaster position="top-right" />
       </div>
     );
@@ -351,6 +353,10 @@ export function FullscreenContent() {
           ? { width: dmGameViewport.w, height: dmGameViewport.h }
           : { width: window.screen.width || 1920, height: window.screen.height || 1080 }}
       />
+
+      {/* Table seats + glowing turn sigils (projector shows sigils only; DM sees seat dots) */}
+      <InitiativeStepper />
+      <SeatSigils canvasSize={isDmScreen && dmGameViewport?.w > 0 ? { width: dmGameViewport.w, height: dmGameViewport.h } : undefined} />
 
       {/* Numbered calibration markers for the table photo */}
       <CalibrationMarkers />
