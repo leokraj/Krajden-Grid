@@ -13,7 +13,7 @@ import {
 
 const gv = (settings, key) => (settings[key] === undefined ? ATMOSPHERE_DEFAULTS[key] : settings[key]);
 
-const Btn = ({ active, danger, className = '', ...p }) => (
+export const Btn = ({ active, danger, className = '', ...p }) => (
   <button
     {...p}
     className={`px-2 py-1 rounded text-[10px] font-mono border transition-colors ${
@@ -23,7 +23,7 @@ const Btn = ({ active, danger, className = '', ...p }) => (
   />
 );
 
-const Slider = ({ label, value, min, max, step = 1, onChange, fmt }) => (
+export const Slider = ({ label, value, min, max, step = 1, onChange, fmt }) => (
   <label className="block text-[10px] text-[#caa055]/70 font-mono">
     <div className="flex justify-between"><span>{label}</span><span>{fmt ? fmt(value) : value}</span></div>
     <input type="range" min={min} max={max} step={step} value={value}
@@ -31,21 +31,21 @@ const Slider = ({ label, value, min, max, step = 1, onChange, fmt }) => (
   </label>
 );
 
-const Check = ({ label, checked, onChange }) => (
+export const Check = ({ label, checked, onChange }) => (
   <label className="flex items-center gap-2 text-[10px] text-[#caa055]/80 font-mono cursor-pointer">
     <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} className="accent-[#caa055]" />
     {label}
   </label>
 );
 
-const ColorInput = ({ label, value, onChange }) => (
+export const ColorInput = ({ label, value, onChange }) => (
   <label className="flex items-center justify-between text-[10px] text-[#caa055]/70 font-mono">
     {label}
     <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="w-8 h-5 bg-transparent border border-[#caa055]/30 rounded" />
   </label>
 );
 
-function Section({ id, title, icon: Icon, sectionFilter, children, defaultOpen = false }) {
+export function Section({ id, title, icon: Icon, sectionFilter, children, defaultOpen = false }) {
   const [open, setOpen] = useState(sectionFilter === id ? true : defaultOpen);
   if (sectionFilter && sectionFilter !== id) return null;
   return (
@@ -452,14 +452,15 @@ function GraphicsPanel() {
   );
 }
 
-export function AtmosphereSections({ sectionFilter }) {
+export function AtmosphereSections({ sectionFilter, only }) {
+  const show = (id) => !only || only.includes(id);
   return (
     <>
-      <Section id="atmo-weather" title="Time & Weather" icon={CloudSun} sectionFilter={sectionFilter}><TimeWeather /></Section>
-      <Section id="atmo-fog" title="Fog of War" icon={CloudFog} sectionFilter={sectionFilter}><FogPanel /></Section>
-      <Section id="atmo-spells" title="Spell Circles & Hits" icon={Wand2} sectionFilter={sectionFilter}><SpellPanel /></Section>
-      <Section id="atmo-groups" title="Groups & Mass Edit" icon={Layers} sectionFilter={sectionFilter}><GroupsPanel /></Section>
-      <Section id="table-photo" title="Table Photo" icon={Camera} sectionFilter={sectionFilter}><TablePhotoPanel /></Section>
+      {show('atmo-weather') && <Section id="atmo-weather" title="Time & Weather" icon={CloudSun} sectionFilter={sectionFilter}><TimeWeather /></Section>}
+      {show('atmo-fog') && <Section id="atmo-fog" title="Fog of War" icon={CloudFog} sectionFilter={sectionFilter}><FogPanel /></Section>}
+      {show('atmo-spells') && <Section id="atmo-spells" title="Spell Circles & Hits" icon={Wand2} sectionFilter={sectionFilter}><SpellPanel /></Section>}
+      {show('atmo-groups') && <Section id="atmo-groups" title="Groups & Mass Edit" icon={Layers} sectionFilter={sectionFilter}><GroupsPanel /></Section>}
+      {show('table-photo') && <Section id="table-photo" title="Table Photo" icon={Camera} sectionFilter={sectionFilter}><TablePhotoPanel /></Section>}
     </>
   );
 }
