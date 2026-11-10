@@ -5,7 +5,6 @@ import { appDebugStore } from '../lib/debugStore';
 import SessionContext from '../context/SessionContext';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { DiceRollerPanel } from './DiceRollerPanel';
 import { InitiativeTrackerPanel } from './InitiativeTrackerPanel';
 import { Slider } from './ui/slider';
 import { Switch } from './ui/switch';
@@ -19,6 +18,9 @@ import SceneEditorPanel from './SceneEditorPanel';
 import { FloatingWindow } from './FloatingWindow';
 import { EffectsControlPanel } from './EffectsLayer';
 import { AtmosphereSections } from './AtmospherePanel';
+import { CampaignSections } from './CampaignPanel';
+import { useInitiative } from '../lib/useInitiative';
+import { getActiveCampaign } from '../lib/campaign';
 import { CustomizationModal } from './CustomizationModal';
 import { 
   Grid3X3, 
@@ -60,7 +62,32 @@ import {
   Radio,
   MapPin,
   Film,
+  Sparkles,
+  CloudSun,
 } from 'lucide-react';
+
+// Collapsible parent that nests several related sections. In a torn-off window
+// (sectionFilter set) it renders only its children so the tear-off still works.
+function GroupShell({ id, title, icon: Icon, sectionFilter, open, onToggle, children }) {
+  if (sectionFilter) return <>{children}</>;
+  return (
+    <div className="space-y-3" id={`group-${id}`}>
+      <button
+        onClick={onToggle}
+        className="flex items-center justify-between w-full text-left border border-[#caa055]/25 bg-[#caa055]/5 hover:bg-[#caa055]/10 rounded-[4px] px-2.5 py-2 transition-colors"
+        data-testid={`group-${id}`}
+      >
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+          <Icon className="w-3.5 h-3.5 text-[#caa055]/80" />
+          {title}
+        </span>
+        {open ? <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" />}
+      </button>
+      {open && <div className="space-y-4 pl-2 ml-1 border-l border-[#caa055]/20">{children}</div>}
+      <Separator className="bg-[#caa055]/15" />
+    </div>
+  );
+}
 
 export const FloatingControls = ({ onClose, sectionFilter }) => {
   const { 
@@ -124,8 +151,11 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [localCurrentTurnIndex, setLocalCurrentTurnIndex] = useState(-1);
 
   const finalDiceRolls = sessionCode ? diceRolls : localDiceRolls;
-  const finalInitiativeList = sessionCode ? initiativeList : localInitiativeList;
-  const finalCurrentTurnIndex = sessionCode ? currentTurnIndex : localCurrentTurnIndex;
+  // Turn order: session list when in a session, otherwise shared grid settings
+  // (so the sigils on the projector follow it)
+  const initiativeState = useInitiative();
+  const finalInitiativeList = initiativeState.list;
+  const finalCurrentTurnIndex = initiativeState.turn;
 
   const handleRollDice = useCallback((rollData) => {
     if (sessionCode && broadcastRollDice) {
@@ -149,14 +179,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     }
   }, [sessionCode, broadcastClearDiceRolls]);
 
-  const handleUpdateInitiative = useCallback((list, turnIndex) => {
-    if (sessionCode && broadcastUpdateInitiative) {
-      broadcastUpdateInitiative(list, turnIndex);
-    } else {
-      setLocalInitiativeList(list);
-      setLocalCurrentTurnIndex(turnIndex);
-    }
-  }, [sessionCode, broadcastUpdateInitiative]);
+  const handleUpdateInitiative = initiativeState.setInit;
   
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
@@ -290,6 +313,11 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     dice: true,
     initiative: true,
     session: true,
+    'grp-grid': true,
+    'grp-fx': true,
+    'grp-env': true,
+    'grp-scene': true,
+    'grp-campaign': true,
     ...(sectionFilter ? { [sectionFilter]: false } : {}),
   });
   // The radial menu's Effects flow can send a category pick here
@@ -300,7 +328,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   // effectsRadialTarget itself once it has consumed it.
   useEffect(() => {
     if (settings.effectsRadialTarget) {
-      setCollapsedSections(prev => (prev.effects ? { ...prev, effects: false } : prev));
+      setCollapsedSections(prev => ((prev.effects || prev['grp-fx']) ? { ...prev, effects: false, 'grp-fx': false } : prev));
     }
   }, [settings.effectsRadialTarget]);
 
@@ -724,7 +752,7 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
           </div>
         )}
 
-        {/* Host-only Top Sections: Resolution, Grid Layout, Grid Appearance, Grid Mask */}
+        {/* Screen Setup (host only) */}
         {!isGuest && (
           <>
             {/* Resolution */}
@@ -734,16 +762,16 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
               <button onClick={() => toggleSection('resolution')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
                   <Monitor className="w-3.5 h-3.5 text-[#caa055]/80" />
-                  Resolution
+                  Screen Setup
                 </span>
                 {collapsedSections.resolution ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
               </button>
               </div>
               {!sectionFilter && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('resolution', 'Resolution'); }}
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('resolution', 'Screen Setup'); }}
                   className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Resolution into its own window"
+                  title="Tear off Screen Setup into its own window"
                 >
                   <MapPin className="w-3 h-3" />
                 </button>
@@ -837,6 +865,12 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
               <Separator className="bg-[#caa055]/15" />
             </div>
 
+          </>
+        )}
+
+        <GroupShell id="grp-grid" title="Grid Setup" icon={Grid3X3} sectionFilter={sectionFilter} open={!collapsedSections['grp-grid']} onToggle={() => toggleSection('grp-grid')}>
+          {!isGuest && (
+            <>
             {/* Grid Layout */}
             <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'geometry' ? 'hidden' : ''}`} id="section-geometry">
               <div className="flex items-center gap-1 w-full">
@@ -1032,6 +1066,87 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
               <Separator className="bg-[#caa055]/15" />
             </div>
 
+            </>
+          )}
+        {/* Background Color */}
+        {!isGuest && (
+          <div className={`space-y-2 ${sectionFilter && sectionFilter !== 'bgcolor' ? 'hidden' : ''}`} id="section-bgcolor">
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                <Palette className="w-3.5 h-3.5 text-[#caa055]/80" />
+                Background Color
+              </span>
+              <div className="flex items-center gap-1.5">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateSettings({ backgroundEnabled: !settings.backgroundEnabled });
+                  }}
+                  className={`h-6 w-6 rounded flex items-center justify-center transition-colors cursor-pointer ${settings.backgroundEnabled !== false ? 'text-[#caa055]' : 'text-slate-muted'}`}
+                  title={settings.backgroundEnabled !== false ? 'Hide background' : 'Show background'}
+                  data-testid="bg-toggle"
+                >
+                  {settings.backgroundEnabled !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </div>
+                {collapsedSections.bgcolor ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </div>
+            </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgcolor', 'Background Color'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Background Color into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {!collapsedSections.bgcolor && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  <Input
+                    type="color"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
+                    data-testid="bg-color-picker"
+                  />
+                  <Input
+                    type="text"
+                    value={settings.backgroundColor}
+                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
+                    data-testid="bg-color-hex"
+                  />
+                </div>
+                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  {backgroundPresets.map((preset) => (
+                    <button
+                      key={preset.color}
+                      onClick={() => updateSettings({ backgroundColor: preset.color })}
+                      className={`w-7 h-7 rounded-[4px] border transition-all ${
+                        settings.backgroundColor === preset.color 
+                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
+                          : 'border-white/20 hover:border-white/40'
+                      }`}
+                      style={{ backgroundColor: preset.color }}
+                      title={preset.label}
+                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+          {!isGuest && (
+            <>
             {/* Grid Mask */}
             <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'mask' ? 'hidden' : ''}`} id="section-mask">
               <div className="flex items-center gap-1 w-full">
@@ -1188,38 +1303,10 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
               <Separator className="bg-[#caa055]/15" />
             </div>
 
-            {/* Effects Tool */}
-            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'effects' ? 'hidden' : ''}`} id="section-effects">
-              <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('effects')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                  <span className="text-base leading-none">✨</span>
-                  Effects Tool
-                </span>
-                {collapsedSections.effects ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-              </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('effects', 'Effects Tool'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Effects Tool into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-              {!collapsedSections.effects && (
-                <EffectsControlPanel />
-              )}
-              <Separator className="bg-[#caa055]/15" />
-            </div>
-          </>
-        )}
-
-        {/* Atmosphere: time & weather, fog of war, spell circles, groups, graphics */}
-        <AtmosphereSections sectionFilter={sectionFilter} />
+            </>
+          )}
+          <AtmosphereSections only={['table-photo']} sectionFilter={sectionFilter} />
+        </GroupShell>
 
         {/* Measure Tools */}
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'measure' ? 'hidden' : ''}`} id="section-measure">
@@ -1340,6 +1427,210 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
         </div>
 
         <Separator className="bg-[#caa055]/15" />
+
+        {/* Token Library */}
+        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'clipart' ? 'hidden' : ''}`} id="section-clipart">
+          <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('clipart')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+              <Sticker className="w-3.5 h-3.5 text-[#caa055]/80" />
+              Token Library
+            </span>
+            {collapsedSections.clipart ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+          </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('clipart', 'Token Library'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Token Library into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          {!collapsedSections.clipart && (
+            <div className="space-y-3.5 pt-1">
+              {undockedPanels.clipart ? (
+                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (window.electronAPI?.openClipartWindow) {
+                        try {
+                          window.electronAPI.openClipartWindow();
+                        } catch (e) {
+                          setShowClipartLibrary(true);
+                        }
+                      } else {
+                        setShowClipartLibrary(true);
+                      }
+                    }}
+                    className="w-full h-9 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
+                    data-testid="open-clipart-library-btn"
+                  >
+                    <Sticker className="w-3.5 h-3.5 mr-2" />
+                    Open Token Library (Floating)
+                  </Button>
+                  <div className="flex justify-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setUndockedPanels(prev => ({ ...prev, clipart: false }));
+                        setShowClipartLibrary(false);
+                      }}
+                      className="h-7 text-[10px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel"
+                    >
+                      <Minimize2 className="w-3 h-3 mr-1" /> Dock Token Library
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ClipartLibrary
+                  isOpen={true}
+                  isDocked={true}
+                  onDockChange={(docked) => {
+                    if (window.electronAPI?.isElectron) {
+                      try {
+                        window.electronAPI.openClipartWindow();
+                        setUndockedPanels(prev => ({ ...prev, clipart: true }));
+                      } catch (e) {
+                        setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
+                        if (!docked) {
+                          setShowClipartLibrary(true);
+                        }
+                      }
+                    } else {
+                      setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
+                      if (!docked) {
+                        setShowClipartLibrary(true);
+                      }
+                    }
+                  }}
+                  onClose={() => {}}
+                  onSelectClipart={(item) => {
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+                    const centerX = Math.max(400, viewportWidth / 2);
+                    const centerY = viewportHeight / 2;
+                    
+                    const newClipart = {
+                      ...item,
+                      x: centerX,
+                      y: centerY,
+                      scale: 50,
+                      rotation: 0,
+                    };
+                    const instanceId = addPlacedClipart(newClipart);
+                    
+                    if (sessionCode && broadcastAddClipart) {
+                      broadcastAddClipart({ ...newClipart, instanceId });
+                    }
+                  }}
+                  favorites={clipartFavorites}
+                  onToggleFavorite={toggleClipartFavorite}
+                  customCliparts={customCliparts}
+                  onAddCustomClipart={addCustomClipart}
+                  onRemoveCustomClipart={removeCustomClipart}
+                />
+              )}
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (window.electronAPI?.openCommunityWindow) {
+                    window.electronAPI.openCommunityWindow();
+                  } else {
+                    setShowCommunityBrowser(true);
+                  }
+                }}
+                className="w-full h-8 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
+                data-testid="open-community-browser-btn"
+              >
+                <Globe className="w-3.5 h-3.5 mr-2" />
+                Browse Community
+              </Button>
+              
+              {/* Snap to Grid toggle */}
+              <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
+                <div className="flex items-center gap-2">
+                  <Grid2X2 className="w-4 h-4 text-[#caa055]" />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-cool font-outfit font-semibold">Snap to Grid</span>
+                </div>
+                <Switch
+                  checked={settings.snapClipartsToGrid}
+                  onCheckedChange={(checked) => updateSettings({ snapClipartsToGrid: checked })}
+                  data-testid="snap-to-grid-toggle"
+                />
+              </div>
+              
+              {settings.placedCliparts?.length > 0 && (
+                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-2.5">
+                  <div className="flex items-center justify-between text-[10px] text-slate-muted">
+                    <span>{settings.placedCliparts.length} token(s) on grid</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      clearAllCliparts();
+                      if (sessionCode && broadcastClearAllCliparts) {
+                        broadcastClearAllCliparts();
+                      }
+                    }}
+                    className="w-full h-8 text-xs text-red-400 border-red-500/20 hover:border-red-500/50 hover:bg-red-500/10 font-cinzel tracking-wider"
+                    data-testid="clear-all-cliparts-btn"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-2" />
+                    Clear All Tokens
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <Separator className="bg-[#caa055]/15" />
+
+        <GroupShell id="grp-fx" title="Effects & Spells" icon={Sparkles} sectionFilter={sectionFilter} open={!collapsedSections['grp-fx']} onToggle={() => toggleSection('grp-fx')}>
+          {!isGuest && (
+            <>
+            {/* Effects Tool */}
+            <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'effects' ? 'hidden' : ''}`} id="section-effects">
+              <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+              <button onClick={() => toggleSection('effects')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-[#caa055]/80" />
+                  Effects Tool
+                </span>
+                {collapsedSections.effects ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
+              </button>
+              </div>
+              {!sectionFilter && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('effects', 'Effects Tool'); }}
+                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
+                  title="Tear off Effects Tool into its own window"
+                >
+                  <MapPin className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+              {!collapsedSections.effects && (
+                <EffectsControlPanel />
+              )}
+              <Separator className="bg-[#caa055]/15" />
+            </div>
+            </>
+          )}
+          <AtmosphereSections only={['atmo-spells']} sectionFilter={sectionFilter} />
+        </GroupShell>
+
+        <GroupShell id="grp-env" title="Environment Tools" icon={CloudSun} sectionFilter={sectionFilter} open={!collapsedSections['grp-env']} onToggle={() => toggleSection('grp-env')}>
+          <AtmosphereSections only={['atmo-weather','atmo-fog']} sectionFilter={sectionFilter} />
+        </GroupShell>
 
         {/* Map Beacons & Pings Section */}
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'ping' ? 'hidden' : ''}`} id="section-ping">
@@ -1593,248 +1884,6 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
-        {/* Background Color */}
-        {!isGuest && (
-          <div className={`space-y-2 ${sectionFilter && sectionFilter !== 'bgcolor' ? 'hidden' : ''}`} id="section-bgcolor">
-            <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('bgcolor')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-              <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-                <Palette className="w-3.5 h-3.5 text-[#caa055]/80" />
-                Background Color
-              </span>
-              <div className="flex items-center gap-1.5">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    updateSettings({ backgroundEnabled: !settings.backgroundEnabled });
-                  }}
-                  className={`h-6 w-6 rounded flex items-center justify-center transition-colors cursor-pointer ${settings.backgroundEnabled !== false ? 'text-[#caa055]' : 'text-slate-muted'}`}
-                  title={settings.backgroundEnabled !== false ? 'Hide background' : 'Show background'}
-                  data-testid="bg-toggle"
-                >
-                  {settings.backgroundEnabled !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </div>
-                {collapsedSections.bgcolor ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-              </div>
-            </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('bgcolor', 'Background Color'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Background Color into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-            {!collapsedSections.bgcolor && (
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center gap-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Input
-                    type="color"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="w-10 h-8 p-0.5 cursor-pointer bg-black/40 border-[#caa055]/20"
-                    data-testid="bg-color-picker"
-                  />
-                  <Input
-                    type="text"
-                    value={settings.backgroundColor}
-                    onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                    className="flex-1 h-8 text-xs font-mono bg-black/40 border-[#caa055]/20 text-[#F3EEE7]"
-                    data-testid="bg-color-hex"
-                  />
-                </div>
-                <div className="flex gap-1.5 flex-wrap bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  {backgroundPresets.map((preset) => (
-                    <button
-                      key={preset.color}
-                      onClick={() => updateSettings({ backgroundColor: preset.color })}
-                      className={`w-7 h-7 rounded-[4px] border transition-all ${
-                        settings.backgroundColor === preset.color 
-                          ? 'border-[#caa055] scale-110 ring-2 ring-[#caa055]/30' 
-                          : 'border-white/20 hover:border-white/40'
-                      }`}
-                      style={{ backgroundColor: preset.color }}
-                      title={preset.label}
-                      data-testid={`bg-preset-${preset.label.toLowerCase()}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Token Library */}
-        <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'clipart' ? 'hidden' : ''}`} id="section-clipart">
-          <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('clipart')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-            <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-              <Sticker className="w-3.5 h-3.5 text-[#caa055]/80" />
-              Token Library
-            </span>
-            {collapsedSections.clipart ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-          </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('clipart', 'Token Library'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Token Library into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          {!collapsedSections.clipart && (
-            <div className="space-y-3.5 pt-1">
-              {undockedPanels.clipart ? (
-                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (window.electronAPI?.openClipartWindow) {
-                        try {
-                          window.electronAPI.openClipartWindow();
-                        } catch (e) {
-                          setShowClipartLibrary(true);
-                        }
-                      } else {
-                        setShowClipartLibrary(true);
-                      }
-                    }}
-                    className="w-full h-9 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
-                    data-testid="open-clipart-library-btn"
-                  >
-                    <Sticker className="w-3.5 h-3.5 mr-2" />
-                    Open Token Library (Floating)
-                  </Button>
-                  <div className="flex justify-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setUndockedPanels(prev => ({ ...prev, clipart: false }));
-                        setShowClipartLibrary(false);
-                      }}
-                      className="h-7 text-[10px] text-[#caa055] hover:text-[#d5b271] hover:bg-white/5 font-cinzel"
-                    >
-                      <Minimize2 className="w-3 h-3 mr-1" /> Dock Token Library
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <ClipartLibrary
-                  isOpen={true}
-                  isDocked={true}
-                  onDockChange={(docked) => {
-                    if (window.electronAPI?.isElectron) {
-                      try {
-                        window.electronAPI.openClipartWindow();
-                        setUndockedPanels(prev => ({ ...prev, clipart: true }));
-                      } catch (e) {
-                        setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
-                        if (!docked) {
-                          setShowClipartLibrary(true);
-                        }
-                      }
-                    } else {
-                      setUndockedPanels(prev => ({ ...prev, clipart: !docked }));
-                      if (!docked) {
-                        setShowClipartLibrary(true);
-                      }
-                    }
-                  }}
-                  onClose={() => {}}
-                  onSelectClipart={(item) => {
-                    const viewportWidth = window.innerWidth;
-                    const viewportHeight = window.innerHeight;
-                    const centerX = Math.max(400, viewportWidth / 2);
-                    const centerY = viewportHeight / 2;
-                    
-                    const newClipart = {
-                      ...item,
-                      x: centerX,
-                      y: centerY,
-                      scale: 50,
-                      rotation: 0,
-                    };
-                    const instanceId = addPlacedClipart(newClipart);
-                    
-                    if (sessionCode && broadcastAddClipart) {
-                      broadcastAddClipart({ ...newClipart, instanceId });
-                    }
-                  }}
-                  favorites={clipartFavorites}
-                  onToggleFavorite={toggleClipartFavorite}
-                  customCliparts={customCliparts}
-                  onAddCustomClipart={addCustomClipart}
-                  onRemoveCustomClipart={removeCustomClipart}
-                />
-              )}
-
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (window.electronAPI?.openCommunityWindow) {
-                    window.electronAPI.openCommunityWindow();
-                  } else {
-                    setShowCommunityBrowser(true);
-                  }
-                }}
-                className="w-full h-8 text-xs border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/5 font-cinzel tracking-wider"
-                data-testid="open-community-browser-btn"
-              >
-                <Globe className="w-3.5 h-3.5 mr-2" />
-                Browse Community
-              </Button>
-              
-              {/* Snap to Grid toggle */}
-              <div className="flex items-center justify-between p-3 rounded-[4px] bg-black/25 border border-[#caa055]/10">
-                <div className="flex items-center gap-2">
-                  <Grid2X2 className="w-4 h-4 text-[#caa055]" />
-                  <span className="text-[10px] uppercase tracking-wider text-slate-cool font-outfit font-semibold">Snap to Grid</span>
-                </div>
-                <Switch
-                  checked={settings.snapClipartsToGrid}
-                  onCheckedChange={(checked) => updateSettings({ snapClipartsToGrid: checked })}
-                  data-testid="snap-to-grid-toggle"
-                />
-              </div>
-              
-              {settings.placedCliparts?.length > 0 && (
-                <div className="space-y-2 bg-black/15 border border-[#caa055]/5 rounded-[4px] p-2.5">
-                  <div className="flex items-center justify-between text-[10px] text-slate-muted">
-                    <span>{settings.placedCliparts.length} token(s) on grid</span>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      clearAllCliparts();
-                      if (sessionCode && broadcastClearAllCliparts) {
-                        broadcastClearAllCliparts();
-                      }
-                    }}
-                    className="w-full h-8 text-xs text-red-400 border-red-500/20 hover:border-red-500/50 hover:bg-red-500/10 font-cinzel tracking-wider"
-                    data-testid="clear-all-cliparts-btn"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-2" />
-                    Clear All Tokens
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <Separator className="bg-[#caa055]/15" />
-
         {/* Map Importer */}
         {!isGuest && (
         <div className={`space-y-3 ${sectionFilter && sectionFilter !== 'bgimage' ? 'hidden' : ''}`} id="section-bgimage">
@@ -1911,6 +1960,8 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
+        <GroupShell id="grp-scene" title="Scene Editor" icon={Film} sectionFilter={sectionFilter} open={!collapsedSections['grp-scene']} onToggle={() => toggleSection('grp-scene')}>
+          <AtmosphereSections only={['atmo-groups']} sectionFilter={sectionFilter} />
         {/* Scene Editor & Manager */}
         <div id="section-scenes" className={`space-y-3 ${sectionFilter && sectionFilter !== 'scenes' ? 'hidden' : ''}`}>
           <div className="flex items-center gap-1 w-full">
@@ -1996,44 +2047,10 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
 
         <Separator className="bg-[#caa055]/15" />
 
-        {/* Dice Roller */}
-        <div id="section-dice" className={`space-y-3 ${sectionFilter && sectionFilter !== 'dice' ? 'hidden' : ''}`}>
-          <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 min-w-0">
-              <button onClick={() => toggleSection('dice')} className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity">
-            <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
-              <Dices className="w-3.5 h-3.5 text-[#caa055]/80" />
-              Virtual Dice Roller
-            </span>
-            {collapsedSections.dice ? <ChevronRight className="w-3.5 h-3.5 text-[#caa055]/60" /> : <ChevronDown className="w-3.5 h-3.5 text-[#caa055]/60" />}
-          </button>
-              </div>
-              {!sectionFilter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); window.electronAPI?.openSectionWindow?.('dice', 'Virtual Dice Roller'); }}
-                  className="shrink-0 p-1 rounded text-[#caa055]/40 hover:text-[#caa055] hover:bg-[#caa055]/10 transition-colors"
-                  title="Tear off Virtual Dice Roller into its own window"
-                >
-                  <MapPin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          {!collapsedSections.dice && (
-            <div className="pt-1">
-              <DiceRollerPanel
-                diceRolls={finalDiceRolls}
-                broadcastRollDice={handleRollDice}
-                broadcastClearDiceRolls={handleClearDiceRolls}
-                userName={userName}
-                isHost={isHost}
-              />
-            </div>
-          )}
-        </div>
+        </GroupShell>
 
-        <Separator className="bg-[#caa055]/15" />
-
-        {/* Initiative Tracker */}
+        {/* Campaign Settings: turn order, party roster, table seats, sigils */}
+        <GroupShell id="grp-campaign" title="Campaign Settings" icon={Sword} sectionFilter={sectionFilter} open={!collapsedSections['grp-campaign']} onToggle={() => toggleSection('grp-campaign')}>
         <div id="section-initiative" className={`space-y-3 ${sectionFilter && sectionFilter !== 'initiative' ? 'hidden' : ''}`}>
           <div className="flex items-center gap-1 w-full">
               <div className="flex-1 min-w-0">
@@ -2063,12 +2080,16 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                 broadcastUpdateInitiative={handleUpdateInitiative}
                 userName={userName}
                 isHost={isHost}
+                party={getActiveCampaign(settings)?.party || []}
               />
             </div>
           )}
         </div>
 
         <Separator className="bg-[#caa055]/15" />
+
+          <CampaignSections sectionFilter={sectionFilter} />
+        </GroupShell>
 
         {/* Collaborative Session */}
         <div id="section-session" className={`space-y-3 ${sectionFilter && sectionFilter !== 'session' ? 'hidden' : ''}`}>
