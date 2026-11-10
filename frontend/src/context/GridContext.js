@@ -40,8 +40,8 @@ export const DEFAULT_ACTIONS = [
   { id: 'clear_background', name: 'Clear Background Image', category: 'Tokens & Map', defaultHotkey: 'Ctrl+Shift+B', description: 'Remove active background map' },
   
   { id: 'roll_d20', name: 'Quick Roll 1d20', category: 'Dice & Combat', defaultHotkey: 'R', description: 'Roll a d20 in virtual dice roller' },
-  { id: 'next_turn', name: 'Next Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'N', description: 'Advance turn in initiative tracker' },
-  { id: 'prev_turn', name: 'Previous Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'P', description: 'Go back one turn in initiative tracker' },
+  { id: 'next_turn', name: 'Next Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'Right', description: 'Advance turn in initiative tracker' },
+  { id: 'prev_turn', name: 'Previous Initiative Turn', category: 'Dice & Combat', defaultHotkey: 'Left', description: 'Go back one turn in initiative tracker' },
   
   { id: 'toggle_controls', name: 'Toggle Control Dashboard', category: 'System & View', defaultHotkey: 'Ctrl+Shift+C', description: 'Show or hide floating control panel' },
   { id: 'reset_settings', name: 'Reset Grid Settings', category: 'System & View', defaultHotkey: 'Alt+R', description: 'Restore default grid settings' },
@@ -181,6 +181,8 @@ const DM_LOCAL_KEYS = new Set([
   'atmoTool', 'spellEditMode', 'selectedSpellId', 'activeEffectLayerId',
   // Table photo + calibration markers are per-window (the photo is DM-only)
   'tablePhoto', 'tablePhotoOn', 'tablePhotoOpacity', 'tablePhotoCalibrating', 'calibMarkersOn',
+  // Seat-placement click mode is transient UI state
+  'placingSeat',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
@@ -478,6 +480,7 @@ export const GridProvider = ({ children }) => {
           "tablePhoto",
           "tablePhotoOn",
           "tablePhotoCalibrating",
+          "placingSeat",
           "calibMarkersOn"
         ]);
         for (const [key, val] of Object.entries(settings)) {
@@ -2007,7 +2010,13 @@ export const GridProvider = ({ children }) => {
   const [customHotkeys, setCustomHotkeys] = useState(() => {
     try {
       const saved = localStorage.getItem('overgrid_hotkeys');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Old defaults (N / P) clashed with Ping Mode — move turn stepping to the arrow keys
+        if (parsed.next_turn === 'N') parsed.next_turn = 'Right';
+        if (parsed.prev_turn === 'P') parsed.prev_turn = 'Left';
+        return parsed;
+      }
     } catch (e) {
       console.error(e);
     }
@@ -2223,10 +2232,10 @@ export const GridProvider = ({ children }) => {
         });
         break;
       case 'next_turn':
-        toast.info('⏩ Next turn in initiative order');
+        window.dispatchEvent(new CustomEvent('kg-init-step', { detail: 1 }));
         break;
       case 'prev_turn':
-        toast.info('⏪ Previous turn in initiative order');
+        window.dispatchEvent(new CustomEvent('kg-init-step', { detail: -1 }));
         break;
       case 'toggle_controls':
         updateSettings({ showControls: !settings.showControls });
