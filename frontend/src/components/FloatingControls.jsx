@@ -74,7 +74,7 @@ function GroupShell({ id, title, icon: Icon, sectionFilter, open, onToggle, chil
     <div className="space-y-3" id={`group-${id}`}>
       <button
         onClick={onToggle}
-        className="flex items-center justify-between w-full text-left border border-[#caa055]/25 bg-[#caa055]/5 hover:bg-[#caa055]/10 rounded-[4px] px-2.5 py-2 transition-colors"
+        className="flex items-center justify-between w-full text-left border-b border-[#caa055]/12 pb-2 mt-1 bg-transparent hover:opacity-90 transition-opacity"
         data-testid={`group-${id}`}
       >
         <span className="text-[11px] font-bold uppercase tracking-[0.14em] font-cinzel text-[#caa055] flex items-center gap-2">
