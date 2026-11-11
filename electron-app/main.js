@@ -325,6 +325,22 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
 
   childWindows[mode] = win;
 
+  // Keep tool windows above everything (including the fullscreen grid and
+  // other always-on-top apps) unless the user minimizes them.
+  const raise = () => {
+    if (win.isDestroyed() || win.isMinimized()) return;
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.moveTop();
+  };
+  raise();
+  win.on('restore', raise);
+  win.on('show', raise);
+  win.on('blur', () => setTimeout(raise, 0));
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.on('focus', raise);
+    win.on('closed', () => { try { mainWindow.removeListener('focus', raise); } catch (e) {} });
+  }
+
   win.on('closed', () => {
     delete childWindows[mode];
     // If the detached controls window closes for any reason (OS close button,
