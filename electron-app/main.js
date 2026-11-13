@@ -266,6 +266,13 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     return;
   }
 
+  // Never open bigger than the display it lands on
+  {
+    const wa0 = (senderBounds ? screen.getDisplayMatching(senderBounds) : screen.getPrimaryDisplay()).workArea;
+    width = Math.min(width, wa0.width - 24);
+    height = Math.min(height, wa0.height - 24);
+  }
+
   // Position on same monitor as the sender (controls window), not the grid
   let winX, winY;
   if (senderBounds) {
@@ -303,6 +310,8 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     },
     movable: true,
     resizable: true,
+    minWidth: mode === 'layers' ? 420 : undefined,
+    minHeight: mode === 'layers' ? 400 : undefined,
     // The main grid window has no always-on-top setting, so without this,
     // clicking into the grid to place a token or draw would bring it to
     // the front and bury the Controls/Effects/Tokens/Maps windows behind
@@ -514,7 +523,7 @@ ipcMain.on('open-community-window', (event) => {
 ipcMain.on('open-layers-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
-  createChildWindow('layers', 'Krajden Grid - Battle Maps & Layers', 450, 650, bounds);
+  createChildWindow('layers', 'Krajden Grid - Battle Maps', 860, 860, bounds);
 });
 
 ipcMain.on('open-effects-window', (event) => {
