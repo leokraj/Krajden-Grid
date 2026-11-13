@@ -32,7 +32,7 @@ export const getFallbackMapSvg = (name = 'Battle Map') => {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 };
 
-export function BackgroundLayersPanel({ onUndock }) {
+export function BackgroundLayersPanel({ onUndock, standalone = false }) {
   const {
     settings,
     addBackgroundLayer,
@@ -430,16 +430,17 @@ export function BackgroundLayersPanel({ onUndock }) {
   const themes = ['ALL', 'Dungeon', 'Cavern', 'Wilderness', 'Urban', 'Lava', 'Snow', 'Water', 'Arcane', 'Custom'];
 
   return (
-    <div className="space-y-4 p-4 bg-[#0d0f12] border border-white/10 rounded-2xl text-white select-none" data-testid="layers-panel">
+    <div className={`space-y-4 text-white select-none ${standalone ? '' : 'p-4 bg-[#0d0f12] border border-white/10 rounded-2xl'}`} data-testid="layers-panel">
       {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+      <div className={`flex items-center ${standalone ? 'justify-end' : 'justify-between border-b border-white/10 pb-3'}`}>
+        {!standalone && (
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-[#caa055]" />
           <div>
-            <h3 className="text-xs font-bold tracking-wide uppercase text-[#caa055]">Battle Maps & Background Layers</h3>
-            <p className="text-[10px] text-gray-400">Position high-res tactical VTT battle maps & video backgrounds</p>
+            <h3 className="text-xs font-bold tracking-wide uppercase text-[#caa055]">Battle Maps</h3>
           </div>
         </div>
+        )}
         <div className="flex items-center gap-1.5">
           {onUndock && (
             <button
@@ -466,66 +467,165 @@ export function BackgroundLayersPanel({ onUndock }) {
         </div>
       </div>
 
-      {/* Action Buttons: Add Image / Video / Library */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* BATTLEMAP LIBRARY: thumbnails first, responsive grid (3 across in the Maps window) */}
+      <div className="space-y-2.5" data-testid="vtt-map-library-panel">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[140px]">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search maps…"
+              className="h-8 pl-8 text-xs bg-black/60 border-white/10 text-white placeholder:text-gray-500"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs">✕</button>
+            )}
+          </div>
+          <div className="flex rounded-md overflow-hidden border border-white/10 bg-black/40 text-[10px] font-medium">
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'vault', label: 'Vault' },
+              { id: 'community', label: 'Cloud' },
+              { id: 'mine', label: 'Mine' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-2.5 py-1.5 transition-all ${activeTab === tab.id ? 'bg-[#caa055]/30 text-[#caa055] font-bold' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={selectedTheme}
+            onChange={(e) => setSelectedTheme(e.target.value)}
+            className="h-8 text-[11px] bg-black/60 border border-white/10 text-gray-200 rounded-md px-2 outline-none"
+            title="Filter by theme"
+            data-testid="map-theme-select"
+          >
+            {themes.map((t) => <option key={t} value={t}>{t === 'ALL' ? 'All themes' : t}</option>)}
+          </select>
+          <button
+            onClick={() => libraryUploadInputRef.current?.click()}
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-[#caa055]/40 hover:bg-[#caa055]/15 text-[#caa055]"
+            title="Upload and save a custom battle map"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleSyncAllFromFirebase}
+            disabled={isSyncingFirebase}
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-[#caa055]/40 hover:bg-[#caa055]/15 text-[#caa055] disabled:opacity-50"
+            title="Load all battle maps from the cloud vault"
+            data-testid="load-firebase-maps-btn"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFirebase ? 'animate-spin' : ''}`} />
+          </button>
+          <span className="text-[10px] text-gray-500 font-mono">{filteredMaps.length}</span>
+        </div>
+
+        {filteredMaps.length === 0 ? (
+          <div className="py-8 text-center border border-dashed border-white/10 rounded-lg bg-black/30 space-y-2">
+            <p className="text-xs text-gray-400">No battle maps match.</p>
+            <Button
+              onClick={() => { setSearchQuery(''); setSelectedTheme('ALL'); setActiveTab('all'); }}
+              size="sm" variant="outline" className="h-7 text-[10px] border-white/10 text-gray-300"
+            >
+              Reset filters
+            </Button>
+          </div>
+        ) : (
+          <div
+            className={`grid gap-2.5 pr-1 ${standalone ? '' : 'max-h-[300px] overflow-y-auto'}`}
+            style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${standalone ? 230 : 140}px, 1fr))` }}
+            data-testid="map-grid"
+          >
+            {filteredMaps.map((map) => (
+              <div
+                key={map.id}
+                draggable
+                onDragStart={(e) => {
+                  // isMap:true routes the drop to addBackgroundLayer (see GridCanvas.jsx)
+                  e.dataTransfer.setData('application/json', JSON.stringify({ isMap: true, url: map.url, name: map.name }));
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                onClick={() => {
+                  addBackgroundLayer(map.url, map.name);
+                  toast.success(`Loaded "${map.name}" onto tabletop grid!`);
+                }}
+                title={`${map.name}${map.theme ? ' · ' + map.theme : ''}`}
+                className="group relative bg-zinc-950 border border-white/10 hover:border-[#caa055] rounded-lg overflow-hidden transition-colors cursor-pointer"
+                data-testid="map-card"
+              >
+                <div className="relative w-full aspect-[4/3] bg-black overflow-hidden">
+                  <img
+                    src={map.url}
+                    alt={map.name}
+                    referrerPolicy="no-referrer"
+                    draggable={false}
+                    loading="lazy"
+                    onError={(e) => { e.target.onerror = null; e.target.src = getFallbackMapSvg(map.name); }}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  {map.source === 'vault' && (
+                    <div className="absolute top-1 left-1 bg-[#caa055] text-black text-[8px] font-black px-1.5 py-0.5 rounded">VAULT</div>
+                  )}
+                  {map.source === 'community' && (
+                    <div className="absolute top-1 left-1 bg-sky-500/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded">CLOUD</div>
+                  )}
+                  <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/75 rounded p-0.5">
+                    <button onClick={(e) => { e.stopPropagation(); setPreviewMap(map); }} className="p-1 hover:text-[#caa055] text-gray-300" title="Preview">
+                      <Maximize2 className="w-3 h-3" />
+                    </button>
+                    <button onClick={(e) => handleStartEdit(map, e)} className="p-1 hover:text-[#caa055] text-gray-300" title="Edit">
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                    <button onClick={(e) => handleDeleteMap(map, e)} className="p-1 hover:text-red-400 text-gray-300" title="Delete">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 px-2 pt-6 pb-1.5 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
+                    <div className="text-[11px] font-semibold text-white group-hover:text-[#caa055] transition-colors truncate">{map.name}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add custom media */}
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           onClick={() => fileInputRef.current?.click()}
           variant="outline"
-          className="h-8 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center justify-center gap-1.5 bg-black/40 text-gray-200"
+          className="h-7 px-2.5 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center gap-1.5 bg-black/40 text-gray-200"
           data-testid="add-image-layer-btn"
         >
-          <Upload className="w-3.5 h-3.5 text-[#caa055]" /> Add Custom Image
+          <Upload className="w-3.5 h-3.5 text-[#caa055]" /> Custom image
         </Button>
         <Button
           onClick={() => videoFileInputRef.current?.click()}
           variant="outline"
-          className="h-8 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center justify-center gap-1.5 bg-black/40 text-gray-200"
+          className="h-7 px-2.5 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center gap-1.5 bg-black/40 text-gray-200"
           data-testid="add-video-file-btn"
         >
-          <Upload className="w-3.5 h-3.5 text-[#caa055]" /> Add Local Video (MP4/WebM)
+          <Upload className="w-3.5 h-3.5 text-[#caa055]" /> Local video
         </Button>
         <Button
           onClick={() => setShowVideoInput(!showVideoInput)}
           variant="outline"
-          className="col-span-2 h-8 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center justify-center gap-1.5 bg-black/40 text-gray-200"
+          className="h-7 px-2.5 text-[11px] font-medium border-white/10 hover:bg-white/10 hover:border-[#caa055]/40 flex items-center gap-1.5 bg-black/40 text-gray-200"
           data-testid="toggle-video-input-btn"
         >
-          <Video className="w-3.5 h-3.5 text-[#caa055]" /> Add Video Stream Link (YouTube / URL)
+          <Video className="w-3.5 h-3.5 text-[#caa055]" /> Video link
         </Button>
-        <Button
-          onClick={() => setShowMapLibrary(!showMapLibrary)}
-          variant="outline"
-          className={`col-span-2 h-9 text-[11px] font-bold tracking-wide flex items-center justify-center gap-2 transition-all ${
-            showMapLibrary 
-              ? 'bg-[#caa055]/25 text-[#caa055] border border-[#caa055]' 
-              : 'border-white/10 bg-white/5 hover:bg-white/10 text-gray-200'
-          }`}
-          data-testid="toggle-map-library-btn"
-        >
-          <MapPin className="w-3.5 h-3.5 text-[#caa055]" />
-          {showMapLibrary ? 'Hide VTT Battlemap Library' : 'Open VTT Battlemap Library'}
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,image/gif,.gif,.webp"
-          className="hidden"
-          onChange={handleFileUpload}
-        />
-        <input
-          ref={libraryUploadInputRef}
-          type="file"
-          accept="image/*,image/gif,.gif,.webp"
-          className="hidden"
-          onChange={handleFileUpload}
-        />
-        <input
-          ref={videoFileInputRef}
-          type="file"
-          accept="video/mp4,video/webm,video/ogg"
-          className="hidden"
-          onChange={handleVideoFileUpload}
-        />
+        <input ref={fileInputRef} type="file" accept="image/*,image/gif,.gif,.webp" className="hidden" onChange={handleFileUpload} />
+        <input ref={libraryUploadInputRef} type="file" accept="image/*,image/gif,.gif,.webp" className="hidden" onChange={handleFileUpload} />
+        <input ref={videoFileInputRef} type="file" accept="video/mp4,video/webm,video/ogg" className="hidden" onChange={handleVideoFileUpload} />
       </div>
 
       {/* Video URL Input Panel */}
@@ -549,227 +649,6 @@ export function BackgroundLayersPanel({ onUndock }) {
               Add Layer
             </Button>
           </div>
-        </div>
-      )}
-
-      {/* MODERN BATTLEMAP LIBRARY BROWSER WITH FIREBASE SYNC & MANAGEMENT */}
-      {showMapLibrary && (
-        <div className="p-3.5 bg-black/70 border border-[#caa055]/30 rounded-xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200" data-testid="vtt-map-library-panel">
-          {/* Header with Search, Source Tabs, and Cloud Sync Button */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#caa055] flex items-center gap-1.5 font-cinzel">
-                <span>🗺️</span> VTT Battlemap Library
-              </span>
-              <span className="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded-full font-mono">
-                {filteredMaps.length} Maps
-              </span>
-            </div>
-
-            {/* Load All from Firebase Cloud Vault Button */}
-            <div className="flex items-center gap-1.5">
-              <Button
-                onClick={handleSyncAllFromFirebase}
-                disabled={isSyncingFirebase}
-                size="sm"
-                className="h-7 text-[10px] font-bold bg-[#caa055] hover:bg-[#d5b271] text-black shadow-md flex items-center gap-1.5"
-                title="Load all battle maps from Firebase Firestore database into local library"
-                data-testid="load-firebase-maps-btn"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSyncingFirebase ? 'animate-spin' : ''}`} />
-                <span>{isSyncingFirebase ? 'Syncing...' : 'Load All from Firebase'}</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Search bar & Tabs */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <Input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search maps by name, theme, or tags..."
-                className="h-8 pl-8 text-xs bg-black/60 border-white/10 text-white placeholder:text-gray-500"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <div className="flex rounded-lg overflow-hidden border border-white/10 bg-black/40 text-[10px] font-medium">
-              {[
-                { id: 'all', label: 'All Maps' },
-                { id: 'vault', label: '⭐ Vault Presets' },
-                { id: 'community', label: '🌐 Cloud' },
-                { id: 'mine', label: '👤 My Uploads' }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-2.5 py-1 transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-[#caa055]/30 text-[#caa055] font-bold'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <Button
-              onClick={() => libraryUploadInputRef.current?.click()}
-              size="sm"
-              variant="outline"
-              className="h-8 text-[11px] font-semibold border-[#caa055]/40 hover:bg-[#caa055]/15 text-[#caa055] flex items-center gap-1 shrink-0"
-              title="Upload and save a custom battle map"
-            >
-              <Plus className="w-3.5 h-3.5" /> Upload Map
-            </Button>
-          </div>
-
-          {/* Theme Filter Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-            {themes.map((theme) => (
-              <button
-                key={theme}
-                onClick={() => setSelectedTheme(theme)}
-                className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide whitespace-nowrap transition-all ${
-                  selectedTheme === theme
-                    ? 'bg-[#caa055]/30 text-[#caa055] border border-[#caa055]'
-                    : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200 border border-white/5'
-                }`}
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-
-          {/* Map Grid Cards */}
-          {filteredMaps.length === 0 ? (
-            <div className="py-8 text-center border border-dashed border-white/10 rounded-xl bg-black/40 space-y-2">
-              <p className="text-xs text-gray-400">No battle maps match your search or filter.</p>
-              <Button
-                onClick={() => { setSearchQuery(''); setSelectedTheme('ALL'); setActiveTab('all'); }}
-                size="sm"
-                variant="outline"
-                className="h-7 text-[10px] border-white/10 text-gray-300"
-              >
-                Reset Filters
-              </Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1">
-              {filteredMaps.map((map) => (
-                <div
-                  key={map.id}
-                  draggable
-                  onDragStart={(e) => {
-                    // Marked isMap:true so GridCanvas.jsx's drop handler routes
-                    // this to addBackgroundLayer (full map scaling, up to
-                    // 5000px) instead of the token/clipart placement path.
-                    e.dataTransfer.setData('application/json', JSON.stringify({
-                      isMap: true,
-                      url: map.url,
-                      name: map.name,
-                    }));
-                    e.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onClick={() => {
-                    addBackgroundLayer(map.url, map.name);
-                    toast.success(`Loaded "${map.name}" onto tabletop grid!`);
-                  }}
-                  className="group relative flex flex-col text-left bg-zinc-950/80 border border-white/10 hover:border-[#caa055] rounded-xl overflow-hidden transition-all duration-200 focus:outline-none cursor-pointer shadow-md hover:shadow-lg hover:shadow-[#caa055]/10"
-                >
-                  {/* Thumbnail Image */}
-                  <div className="relative w-full h-28 bg-black overflow-hidden">
-                    <img
-                      src={map.url}
-                      alt={map.name}
-                      referrerPolicy="no-referrer"
-                      draggable={false}
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = getFallbackMapSvg(map.name);
-                      }}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    
-                    {/* Theme Badge */}
-                    <div className="absolute top-1.5 left-1.5 bg-black/85 backdrop-blur-sm border border-white/15 text-[#caa055] text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
-                      {map.theme}
-                    </div>
-
-                    {/* Source Badge */}
-                    {map.source === 'vault' && (
-                      <div className="absolute top-1.5 right-1.5 bg-[#caa055] text-black text-[8px] font-black px-1.5 py-0.5 rounded tracking-wide">
-                        VAULT
-                      </div>
-                    )}
-                    {map.source === 'community' && (
-                      <div className="absolute top-1.5 right-1.5 bg-sky-500/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded tracking-wide">
-                        CLOUD
-                      </div>
-                    )}
-
-                    {/* Quick Card Action Buttons */}
-                    <div className="absolute bottom-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/75 rounded p-0.5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewMap(map);
-                        }}
-                        className="p-1 hover:text-[#caa055] text-gray-300 transition-colors"
-                        title="Preview Fullscreen Map"
-                      >
-                        <Maximize2 className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => handleStartEdit(map, e)}
-                        className="p-1 hover:text-[#caa055] text-gray-300 transition-colors"
-                        title="Edit Map Info"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => handleDeleteMap(map, e)}
-                        className="p-1 hover:text-red-400 text-gray-300 transition-colors"
-                        title="Delete Map"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card Content & Add Action */}
-                  <div className="p-2 flex-1 flex flex-col justify-between space-y-1">
-                    <div>
-                      <div className="text-[11px] font-bold text-white group-hover:text-[#caa055] transition-colors truncate">
-                        {map.name}
-                      </div>
-                      <div className="text-[9px] text-gray-400 line-clamp-1 leading-snug">
-                        {map.description || 'Tactical VTT Battle Map'}
-                      </div>
-                    </div>
-                    
-                    <div className="pt-1 flex items-center justify-between border-t border-white/5">
-                      <span className="text-[8px] text-gray-500 font-mono">1-inch grid ready</span>
-                      <span className="text-[9px] font-bold text-[#caa055] flex items-center gap-1 group-hover:underline">
-                        <span>+</span> Add Layer
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
