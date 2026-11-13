@@ -143,7 +143,7 @@ export function FullscreenContent() {
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } : undefined}
           >
             <div className="flex items-center gap-1.5 select-none">
-              <span className="text-xs font-semibold text-white">🗺️ Battle Maps & Layers Library</span>
+              <span className="text-xs font-semibold text-white">🗺️ Battle Maps</span>
             </div>
             <button
               onClick={() => window.close()}
@@ -154,7 +154,7 @@ export function FullscreenContent() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
-            <BackgroundLayersPanel />
+            <BackgroundLayersPanel standalone />
           </div>
         </div>
         <Toaster position="top-right" />
