@@ -43,6 +43,7 @@ export function RadialContextMenu() {
   // waiting on the 3rd-level tool submenu to finish the selection.
   const [pendingEffectCategory, setPendingEffectCategory] = useState(null);
   const menuRef = useRef(null);
+  const bandRef = useRef(null);
 
   // Vault effects live in Firestore, so only subscribe while the final
   // (effect list) step is showing the Vault category.
@@ -97,9 +98,26 @@ export function RadialContextMenu() {
   }, []);
   useEffect(() => {
     if (!radialMenuOpen) return;
-    const DEAD = 36;
+    const DEAD = 18; // just a flick: no need to reach the button
     const SUB_FOR = { measure: 'measure', beacon: 'beacon', library: 'library', draw: 'draw', effects: 'effects', mask: 'mask', maps: 'mapimport', fog: 'fog', token: 'token', photo: null, group: null };
     const LEAF = ['beacon', 'library', 'maps', 'group', 'photo'];
+    let lastKey = null;
+    const setHot = (el) => {
+      const m = menuRef.current;
+      if (!m) return;
+      m.querySelectorAll('[data-hot]').forEach((n) => n.removeAttribute('data-hot'));
+      if (el) el.setAttribute('data-hot', '1');
+    };
+    const setBand = (dx, dy, dist) => {
+      const b = bandRef.current;
+      if (!b) return;
+      if (dist < DEAD) { b.style.opacity = '0'; return; }
+      b.style.opacity = '1';
+      b.style.width = Math.min(dist, RING_R - BTN / 2 + 4) + 'px';
+      b.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    };
+    // Direction decides the choice: the nearest button *by angle*, however far
+    // the pointer has travelled. Over a submenu, the item under the pointer.
     const pick = (e) => {
       const m = menuRef.current;
       if (!m) return null;
@@ -107,13 +125,16 @@ export function RadialContextMenu() {
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       const dx = e.clientX - cx, dy = e.clientY - cy;
       const dist = Math.hypot(dx, dy);
-      if (dist < DEAD) return { dist, kind: 'none' };
+      if (dist < DEAD) return { dist, dx, dy, kind: 'none' };
       const el = document.elementFromPoint(e.clientX, e.clientY);
-      const slotEl = el && el.closest && el.closest('[data-slot]');
-      if (slotEl && m.contains(slotEl)) return { dist, kind: 'slot', key: slotEl.getAttribute('data-slot'), el: slotEl };
-      const btn = el && el.closest && el.closest('button');
-      if (btn && m.contains(btn)) return { dist, kind: 'sub', el: btn };
-      // Not over anything: choose the slot whose direction best matches.
+      if (el && m.contains(el)) {
+        const inSlot = el.closest('[data-slot]');
+        if (!inSlot) {
+          const btn = el.closest('button');
+          if (btn) return { dist, dx, dy, kind: 'sub', el: btn };
+          if (el.closest('.z-30')) return { dist, dx, dy, kind: 'keep' };
+        }
+      }
       let best = null, bestD = 1e9;
       const a = Math.atan2(dy, dx);
       m.querySelectorAll('[data-slot]').forEach((n) => {
@@ -122,18 +143,30 @@ export function RadialContextMenu() {
         let d = Math.abs(a - ang); if (d > Math.PI) d = 2 * Math.PI - d;
         if (d < bestD) { bestD = d; best = n; }
       });
-      if (best && bestD < Math.PI / 4) return { dist, kind: 'slot', key: best.getAttribute('data-slot'), el: best, byAngle: true };
-      return { dist, kind: 'keep' };
+      if (best) return { dist, dx, dy, kind: 'slot', key: best.getAttribute('data-slot'), el: best };
+      return { dist, dx, dy, kind: 'keep' };
     };
     const onMove = (e) => {
       if (!(e.buttons & 2)) return;
       const c = pick(e);
-      if (c && c.kind === 'slot' && c.byAngle && c.key in SUB_FOR) setActiveSubMenu(SUB_FOR[c.key]);
+      if (!c) return;
+      setBand(c.dx, c.dy, c.dist);
+      if (c.kind === 'none') { setHot(null); lastKey = null; return; }
+      if (c.kind === 'slot') {
+        setHot(c.el);
+        if (c.key !== lastKey) {
+          lastKey = c.key;
+          if (c.key in SUB_FOR) setActiveSubMenu(SUB_FOR[c.key]);
+        }
+      } else if (c.kind === 'sub') {
+        // keep the parent lit while choosing inside its submenu
+      }
     };
     const onUp = (e) => {
       if (e.button !== 2 || !rightDownRef.current) return;
       rightDownRef.current = false;
       const c = pick(e);
+      setHot(null);
       if (!c) return;
       if (c.kind === 'sub') { c.el.click(); return; }
       if (c.kind === 'slot' && LEAF.includes(c.key)) c.el.click();
@@ -344,6 +377,20 @@ export function RadialContextMenu() {
     };
   };
 
+  // Submenus open just outside the ring, in the direction of their button,
+  // so the stroke "continues outward" like a Maya marking menu.
+  const panelStyle = (key) => {
+    const i = Math.max(0, slotKeys.indexOf(key));
+    const ang = (i / slotKeys.length) * Math.PI * 2 - Math.PI / 2;
+    const c = Math.cos(ang), sn = Math.sin(ang);
+    const r = RING_R + BTN / 2 + 10;
+    return {
+      left: `calc(50% + ${(c * r).toFixed(1)}px)`,
+      top: `calc(50% + ${(sn * r).toFixed(1)}px)`,
+      transform: `translate(${(-50 + c * 50).toFixed(1)}%, ${(-50 + sn * 50).toFixed(1)}%)`,
+    };
+  };
+
   // Portal to <body> so the menu sits above the fog / weather / spell layers
   // (they are fixed overlays; inside the grid canvas this menu was trapped
   // under their stacking context).
@@ -361,6 +408,12 @@ export function RadialContextMenu() {
           <div className="absolute inset-2 rounded-full border border-[#caa055]/15 pointer-events-none" />
           <div className="absolute rounded-full border border-[#caa055]/20 pointer-events-none" style={{ width: RING_R * 2, height: RING_R * 2, left: `calc(50% - ${RING_R}px)`, top: `calc(50% - ${RING_R}px)` }} />
 
+          <style>{`[data-slot][data-hot="1"] > div { background: rgba(202,160,85,0.38) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.18) !important; }`}</style>
+          <div
+            ref={bandRef}
+            className="absolute pointer-events-none z-[5]"
+            style={{ left: '50%', top: '50%', height: 3, marginTop: -1.5, width: 0, opacity: 0, transformOrigin: '0 50%', borderRadius: 2, background: 'linear-gradient(90deg, rgba(202,160,85,0), #caa055)' }}
+          />
           {/* Quadrant Crosshair Lines */}
 
           {/* MAIN QUADRANT 1: TOP (Measure Submenu) */}
@@ -562,7 +615,7 @@ export function RadialContextMenu() {
 
           {/* TOP SUBMENU: MEASURE SUB-MENU (Line on Left, Radial on Top, Cone on Right, Off on Bottom) */}
           {activeSubMenu === 'measure' && (
-            <div className="absolute -top-20 left-1/2 -translate-x-1/2 flex items-center justify-center w-72 h-20 bg-black/80 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150">
+            <div style={panelStyle('measure')} className="absolute flex items-center justify-center w-72 h-20 bg-black/80 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150">
               <div className="relative w-full h-full flex items-center justify-around px-2">
                 
                 {/* Line (Left) */}
@@ -614,7 +667,7 @@ export function RadialContextMenu() {
 
           {/* LEFT SUBMENU: DRAW SUB-MENU (Draw, Erase, Clear, Off) */}
           {activeSubMenu === 'draw' && (
-            <div className="absolute -left-28 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-24 h-64 bg-black/80 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2">
+            <div style={panelStyle('draw')} className="absolute flex flex-col items-center justify-center w-24 py-3 bg-black/80 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-2">
               
               {/* Draw (Pen) */}
               <button
@@ -664,7 +717,7 @@ export function RadialContextMenu() {
 
           {/* TOKEN SUBMENU */}
           {activeSubMenu === 'token' && activeToken && (
-            <div className="absolute -left-52 top-1/2 -translate-y-1/2 w-48 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-3 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2 max-h-80 overflow-y-auto">
+            <div style={panelStyle('token')} className="absolute w-48 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-3 shadow-2xl z-30 animate-in fade-in duration-150 space-y-2 max-h-80 overflow-y-auto">
               
               <p className="text-[9px] text-[#caa055] font-bold uppercase tracking-wider">Token Label</p>
               {showLabelEdit ? (
@@ -729,7 +782,7 @@ export function RadialContextMenu() {
 
           {/* TOP-LEFT SUBMENU: GRID MASK */}
           {activeSubMenu === 'mask' && (
-            <div className="absolute top-0 -left-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+            <div style={panelStyle('mask')} className="absolute flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-1.5">
               <button onClick={() => handleMaskSelect('brush')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-brush"><span>🖌️</span><span>Brush</span></button>
               <button onClick={() => handleMaskSelect('rect')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-rect"><span>▭</span><span>Rectangle</span></button>
               <button onClick={() => handleMaskSelect('circle')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-circle"><span>◯</span><span>Circle</span></button>
@@ -743,7 +796,7 @@ export function RadialContextMenu() {
 
           {/* BOTTOM-LEFT SUBMENU: FOG OF WAR */}
           {activeSubMenu === 'fog' && (
-            <div className="absolute bottom-0 -left-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+            <div style={panelStyle('fog')} className="absolute flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-1.5">
               <div className="w-full grid grid-cols-2 gap-1">
                 <button onClick={() => updateSettings({ fogMode: 'reveal' })} className={`p-1 rounded-md border text-[8px] uppercase font-bold ${(settings.fogMode || 'reveal') === 'reveal' ? 'bg-[#caa055]/30 border-[#caa055] text-[#f1d9a0]' : 'border-[#caa055]/30 text-[#caa055]'}`} data-testid="radial-fog-reveal">Reveal</button>
                 <button onClick={() => updateSettings({ fogMode: 'hide' })} className={`p-1 rounded-md border text-[8px] uppercase font-bold ${settings.fogMode === 'hide' ? 'bg-[#caa055]/30 border-[#caa055] text-[#f1d9a0]' : 'border-[#caa055]/30 text-[#caa055]'}`} data-testid="radial-fog-hide">Cover</button>
@@ -765,7 +818,7 @@ export function RadialContextMenu() {
 
           {/* BOTTOM-RIGHT SUBMENU (LEVEL 2): EFFECTS CATEGORY */}
           {activeSubMenu === 'effects' && (
-            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+            <div style={panelStyle('effects')} className="absolute flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-1.5">
               {EFFECT_CATEGORIES.map((cat) => (
                 <button
                   key={cat.key}
@@ -792,7 +845,7 @@ export function RadialContextMenu() {
 
           {/* BOTTOM-RIGHT SUBMENU (LEVEL 3): PAINT TOOL — reached after a category is picked */}
           {activeSubMenu === 'effectsTool' && (
-            <div className="absolute bottom-0 -right-32 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-1.5">
+            <div style={panelStyle('effects')} className="absolute flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-1.5">
               <button
                 onClick={() => setActiveSubMenu('effects')}
                 className="w-full flex items-center justify-center gap-1 p-1 rounded-lg text-[8px] uppercase font-bold text-[#caa055]/60 hover:text-[#caa055] cursor-pointer"
@@ -820,7 +873,7 @@ export function RadialContextMenu() {
 
           {/* BOTTOM-RIGHT SUBMENU (LEVEL 4, LAST): scrollable list of effects in the chosen category */}
           {activeSubMenu === 'effectsList' && (
-            <div className="absolute bottom-0 -right-44 flex flex-col w-40 max-h-72 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150">
+            <div style={panelStyle('effects')} className="absolute flex flex-col w-40 max-h-72 bg-black/90 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150">
               <button
                 onClick={() => setActiveSubMenu('effectsTool')}
                 className="w-full flex items-center justify-center p-1 text-[8px] uppercase font-bold text-[#caa055]/60 hover:text-[#caa055] cursor-pointer shrink-0"
@@ -856,7 +909,7 @@ export function RadialContextMenu() {
 
           {/* RIGHT SUBMENU: BEACON */}
           {activeSubMenu === 'beacon' && (
-            <div className="absolute -right-28 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-150 space-y-2">
+            <div style={panelStyle('beacon')} className="absolute flex flex-col items-center justify-center w-28 bg-black/85 border border-[#caa055]/50 rounded-2xl backdrop-blur-md p-2 shadow-2xl z-30 animate-in fade-in duration-150 space-y-2">
               <button
                 onClick={handleBeaconSelect}
                 className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[#caa055] text-black font-bold text-[9px] uppercase tracking-wider hover:bg-[#e2b563] cursor-pointer shadow-lg"
