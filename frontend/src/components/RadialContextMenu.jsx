@@ -29,7 +29,32 @@ import {
 const RING_R = 108;
 const BTN = 52;
 
+// Is the right button held right now? Tracked at module level so the menu knows
+// it even though it mounts a moment AFTER the press that opened it.
+const rightHeld = { v: false };
+if (typeof window !== 'undefined' && !window.__kgRightHeld) {
+  window.__kgRightHeld = true;
+  window.addEventListener('mousedown', (e) => { if (e.button === 2) rightHeld.v = true; }, true);
+  window.addEventListener('mouseup', (e) => { if (e.button === 2) rightHeld.v = false; }, true);
+  window.addEventListener('blur', () => { rightHeld.v = false; });
+}
+
+// The menu body is remounted for every opening (key changes), so no state,
+// refs or half-finished gesture can leak from one opening into the next.
 export function RadialContextMenu() {
+  const { radialMenuOpen, radialMenuPos } = useGrid();
+  const posRef = useRef(null);
+  const epochRef = useRef(0);
+  if (radialMenuOpen && radialMenuPos) {
+    if (posRef.current !== radialMenuPos) { posRef.current = radialMenuPos; epochRef.current += 1; }
+  } else {
+    posRef.current = null;
+  }
+  if (!radialMenuOpen || !radialMenuPos) return null;
+  return <RadialMenuBody key={epochRef.current} />;
+}
+
+function RadialMenuBody() {
   const { 
     radialMenuOpen, radialMenuPos, closeRadialMenu, settings, updateSettings,
     addPing, clearDrawings, clearPings, radialMenuConfig, setShowClipartLibrary,
@@ -53,6 +78,11 @@ export function RadialContextMenu() {
   const subRef = useRef(null);
   const nextLevelRef = useRef(null);
   const hotIdxRef = useRef(-1);
+  // Earlier levels of the current stroke (shown dimmed, with the chosen button lit)
+  const [trail, setTrail] = useState([]);
+  const trailRef = useRef([]);
+  const curRef = useRef({});
+  const api = useRef({});
   // Old-style list panel is only used where a radial can't work (token options, very long lists)
   const [panelFallback, setPanelFallback] = useState(false);
 
@@ -101,16 +131,14 @@ export function RadialContextMenu() {
   // held, moving toward a button highlights it and auto-opens its submenu;
   // releasing selects it (or the submenu item under the pointer). A quick
   // release near the centre leaves the menu open for normal click use.
-  const rightDownRef = useRef(false);
-  useEffect(() => {
-    const down = (e) => { if (e.button === 2) rightDownRef.current = true; };
-    window.addEventListener('mousedown', down, true);
-    return () => window.removeEventListener('mousedown', down, true);
-  }, []);
   const SLOT_FOR = { measure: 'measure', draw: 'draw', mask: 'mask', fog: 'fog', beacon: 'beacon', effects: 'effects', effectsTool: 'effects', effectsList: 'effects', mapimport: 'maps', library: 'library', token: 'token' };
   const NONTERMINAL = ['effects', 'effectsTool'];
   useLayoutEffect(() => {
-    const clear = (fallback = false) => { subRef.current = null; setSub(null); setPanelFallback(fallback); };
+    const clear = (fallback = false) => {
+      subRef.current = null; setSub(null); setPanelFallback(fallback);
+      trailRef.current = []; setTrail([]);
+      menuRef.current?.querySelectorAll('[data-parent]').forEach((n) => n.removeAttribute('data-parent'));
+    };
     const m = menuRef.current;
     if (!radialMenuOpen || !m || !activeSubMenu) return clear();
     if (activeSubMenu === 'token') return clear(true);
@@ -123,8 +151,9 @@ export function RadialContextMenu() {
     const mcx = mr.left + mr.width / 2, mcy = mr.top + mr.height / 2;
     let lvl = nextLevelRef.current;
     nextLevelRef.current = null;
-    const root = !lvl;
+    const root = lvl ? lvl.root === true : true;
     if (!lvl) {
+      trailRef.current = []; setTrail([]);
       const key = SLOT_FOR[activeSubMenu];
       const se = key && m.querySelector(`[data-slot="${key}"]`);
       if (!se) return clear();
@@ -145,7 +174,47 @@ export function RadialContextMenu() {
     const next = { items, cx: lvl.cx, cy: lvl.cy, dir: lvl.dir, step, R2, root };
     subRef.current = next;
     setSub(next);
+    // keep the button that started this stroke lit; everything else fades
+    m.querySelectorAll('[data-parent]').forEach((n) => n.removeAttribute('data-parent'));
+    const first = (trailRef.current[0] && trailRef.current[0].active) || activeSubMenu;
+    const pk = SLOT_FOR[first];
+    const pe = pk && m.querySelector(`[data-slot="${pk}"]`);
+    if (pe) pe.setAttribute('data-parent', '1');
   }, [radialMenuOpen, activeSubMenu, pendingEffectCategory, vaultEffects.length]);
+
+  curRef.current = { activeSubMenu, pendingEffectCategory };
+  api.current = {
+    // choose a non-final item: remember this level (dimmed) and open the next pie on it
+    drill: (idx) => {
+      const sb = subRef.current;
+      const it = sb && sb.items[idx];
+      if (!it) return;
+      trailRef.current = [...trailRef.current, { sb, idx, active: curRef.current.activeSubMenu, pending: curRef.current.pendingEffectCategory }];
+      setTrail(trailRef.current);
+      nextLevelRef.current = { cx: it.x, cy: it.y, dir: it.ang };
+      it.el.click();
+    },
+    // step back one level
+    pop: () => {
+      const t = trailRef.current;
+      if (!t.length) return false;
+      const last = t[t.length - 1];
+      trailRef.current = t.slice(0, -1);
+      setTrail(trailRef.current);
+      nextLevelRef.current = { cx: last.sb.cx, cy: last.sb.cy, dir: last.sb.dir, root: last.sb.root };
+      setPendingEffectCategory(last.pending);
+      setActiveSubMenu(last.active);
+      return true;
+    },
+    // back to a clean main ring
+    reset: () => {
+      trailRef.current = []; setTrail([]);
+      nextLevelRef.current = null;
+      subRef.current = null;
+      setPendingEffectCategory(null);
+      setActiveSubMenu(null);
+    },
+  };
 
   useEffect(() => {
     if (!radialMenuOpen) return;
@@ -154,7 +223,9 @@ export function RadialContextMenu() {
     const OPEN_AT = RING_R - 14; // reach the ring to open that button's fan
     const SUB_FOR = { measure: 'measure', beacon: 'beacon', library: 'library', draw: 'draw', effects: 'effects', mask: 'mask', maps: 'mapimport', fog: 'fog', token: 'token', photo: null, group: null };
     const LEAF = ['beacon', 'library', 'maps', 'group', 'photo'];
+    const OUTER = 430;    // well outside every pie: counts as 'left the menu'
     let openKey = null, exitedKey = null;
+    let held = rightHeld.v; // was the button still down when the menu appeared?
     const setHot = (el) => {
       const m = menuRef.current;
       if (!m) return;
@@ -221,27 +292,33 @@ export function RadialContextMenu() {
       const r = m.getBoundingClientRect();
       const px = e.clientX - (r.left + r.width / 2), py = e.clientY - (r.top + r.height / 2);
 
-      // ── second-level fan is open: track the pointer around its centre ──
+      // ── a pie is open: track the pointer around its centre ──
       const sb = subRef.current;
       if (sb) {
-        const q = nearestItem(sb, px, py);
-        setBand(sb.cx, sb.cy, q.dx, q.dy, q.d, q.d >= SUBDEAD);
-        if (q.d < SUBDEAD) { hotSub(-1); return; }
-        // Pulled back into the middle of the main ring: close this fan
-        if (sb.root && Math.hypot(px, py) < 56) {
+        const dOrigin = Math.hypot(px, py);
+        if (dOrigin > OUTER) {
+          // left the menu entirely: forget the whole stroke, start clean
+          hotSub(-1); setBand(0, 0, 0, 0, 0, false);
+          openKey = null; exitedKey = null;
+          api.current.reset();
+          return;
+        }
+        const tr = trailRef.current;
+        const par = tr.length ? tr[tr.length - 1].sb : null;
+        const toParent = par ? Math.hypot(px - par.cx, py - par.cy) : dOrigin;
+        if (toParent < (par ? 30 : 56)) {
+          // pulled back to where the previous level was: step back
           hotSub(-1);
+          if (par) { api.current.pop(); return; }
           exitedKey = openKey; openKey = null;
-          subRef.current = null;
-          setActiveSubMenu(null);
+          api.current.reset();
         } else {
+          const q = nearestItem(sb, px, py);
+          setBand(sb.cx, sb.cy, q.dx, q.dy, q.d, q.d >= SUBDEAD);
+          if (q.d < SUBDEAD) { hotSub(-1); return; }
           hotSub(q.bi);
           const it = sb.items[q.bi];
-          if (it.nonterminal && q.d >= sb.R2 - 12) {
-            // drill in: this choice opens the next pie, centred on it
-            nextLevelRef.current = { cx: it.x, cy: it.y, dir: it.ang };
-            hotSub(-1);
-            it.el.click();
-          }
+          if (it.nonterminal && q.d >= sb.R2 - 12) { hotSub(-1); api.current.drill(q.bi); }
           return;
         }
       }
@@ -262,13 +339,19 @@ export function RadialContextMenu() {
       }
     };
     const onUp = (e) => {
-      if (e.button !== 2 || !rightDownRef.current) return;
-      rightDownRef.current = false;
+      if (e.button !== 2 || !held) return;
+      held = false;
       const sb = subRef.current;
       if (sb) {
         const idx = hotIdxRef.current;
         hotSub(-1);
-        if (idx >= 0 && sb.items[idx]) sb.items[idx].el.click();
+        const m = menuRef.current;
+        if (idx >= 0 && sb.items[idx]) {
+          if (sb.items[idx].nonterminal) api.current.drill(idx); else sb.items[idx].el.click();
+        } else if (m) {
+          const r = m.getBoundingClientRect();
+          if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) > OUTER) closeRadialMenu();
+        }
         return;
       }
       const c = pick(e);
@@ -283,7 +366,7 @@ export function RadialContextMenu() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [radialMenuOpen]);
+  }, [radialMenuOpen, closeRadialMenu]);
 
   if (!radialMenuOpen || !radialMenuPos) return null;
 
@@ -483,7 +566,7 @@ export function RadialContextMenu() {
 
   // Submenus open just outside the ring, in the direction of their button,
   // so the stroke "continues outward" like a Maya marking menu.
-  const hoverSub = (k) => { if (!rightDownRef.current) setActiveSubMenu(k); };
+  const hoverSub = (k) => { if (!rightHeld.v) setActiveSubMenu(k); };
   const panelStyle = (key) => {
     const i = Math.max(0, slotKeys.indexOf(key));
     const ang = (i / slotKeys.length) * Math.PI * 2 - Math.PI / 2;
@@ -508,13 +591,13 @@ export function RadialContextMenu() {
         style={{ left: clampedX, top: clampedY }}
       >
         {/* Background Outer Ring Halo */}
-        <div className="w-80 h-80 rounded-full border border-[#caa055]/30 bg-[#111214]/90 shadow-[0_0_50px_rgba(202,160,85,0.25)] backdrop-blur-md relative flex items-center justify-center p-3">
+        <div data-subopen={sub ? '1' : '0'} className="w-80 h-80 rounded-full border border-[#caa055]/30 bg-[#111214]/90 shadow-[0_0_50px_rgba(202,160,85,0.25)] backdrop-blur-md relative flex items-center justify-center p-3">
           
           {/* Decorative Ring Slices & Pattern */}
           <div className="absolute inset-2 rounded-full border border-[#caa055]/15 pointer-events-none" />
           <div className="absolute rounded-full border border-[#caa055]/20 pointer-events-none" style={{ width: RING_R * 2, height: RING_R * 2, left: `calc(50% - ${RING_R}px)`, top: `calc(50% - ${RING_R}px)` }} />
 
-          <style>{`[data-subidx] * { pointer-events: none; } [data-subidx] span { white-space: normal !important; overflow-wrap: anywhere; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-subidx] svg { width: 16px !important; height: 16px !important; } [data-subidx][data-hot="1"] { background: rgba(202,160,85,0.45) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.15); }`}</style>
+          <style>{`[data-subidx] *, [data-trail] * { pointer-events: none; } [data-trail] { pointer-events: none; opacity: 0.22; transition: opacity .15s; } [data-trail][data-chosen="1"] { opacity: 1; background: rgba(202,160,85,0.3) !important; border-color: #caa055 !important; } [data-subopen="1"] [data-slot]:not([data-parent="1"]) { opacity: 0.25; transition: opacity .15s; } [data-trail] span { white-space: normal !important; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-trail] svg { width: 16px !important; height: 16px !important; } [data-subidx] span { white-space: normal !important; overflow-wrap: anywhere; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-subidx] svg { width: 16px !important; height: 16px !important; } [data-subidx][data-hot="1"] { background: rgba(202,160,85,0.45) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.15); }`}</style>
           <style>{`[data-slot][data-hot="1"] > div { background: rgba(202,160,85,0.38) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.18) !important; }`}</style>
           <div
             ref={bandRef}
@@ -720,15 +803,24 @@ export function RadialContextMenu() {
 
           {/* DYNAMIC SUB-MENUS */}
 
+          {/* Earlier levels of this stroke, faded; the choice you made stays lit */}
+          {trail.map((t, ti) => t.sb.items.map((it, i) => (
+            <div
+              key={`trail-${ti}-${i}`}
+              data-trail
+              data-chosen={i === t.idx ? '1' : '0'}
+              className="absolute z-20 rounded-full border border-[#caa055]/60 bg-black/90 text-[#caa055] flex flex-col items-center justify-center text-center leading-tight overflow-hidden"
+              style={{ width: 64, height: 64, left: `calc(50% + ${(it.x - 32).toFixed(1)}px)`, top: `calc(50% + ${(it.y - 32).toFixed(1)}px)` }}
+              dangerouslySetInnerHTML={{ __html: it.html }}
+            />
+          )))}
+
           {/* SECOND-LEVEL RADIAL: the open submenu's choices fanned around its button */}
           {sub && sub.items.map((it, i) => (
             <div
               key={`${activeSubMenu}-${pendingEffectCategory || ''}-${i}`}
               data-subidx={i}
-              onClick={() => {
-                if (it.nonterminal) nextLevelRef.current = { cx: it.x, cy: it.y, dir: it.ang };
-                it.el.click();
-              }}
+              onClick={() => { if (it.nonterminal) api.current.drill(i); else it.el.click(); }}
               className="absolute z-40 rounded-full border border-[#caa055]/60 bg-black/90 text-[#caa055] flex flex-col items-center justify-center text-center leading-tight cursor-pointer transition-transform duration-100 overflow-hidden"
               style={{ width: 64, height: 64, left: `calc(50% + ${(it.x - 32).toFixed(1)}px)`, top: `calc(50% + ${(it.y - 32).toFixed(1)}px)` }}
               dangerouslySetInnerHTML={{ __html: it.html }}
