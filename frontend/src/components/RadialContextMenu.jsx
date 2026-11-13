@@ -53,6 +53,8 @@ export function RadialContextMenu() {
   const subRef = useRef(null);
   const nextLevelRef = useRef(null);
   const hotIdxRef = useRef(-1);
+  // Old-style list panel is only used where a radial can't work (token options, very long lists)
+  const [panelFallback, setPanelFallback] = useState(false);
 
   // Vault effects live in Firestore, so only subscribe while the final
   // (effect list) step is showing the Vault category.
@@ -108,17 +110,20 @@ export function RadialContextMenu() {
   const SLOT_FOR = { measure: 'measure', draw: 'draw', mask: 'mask', fog: 'fog', beacon: 'beacon', effects: 'effects', effectsTool: 'effects', effectsList: 'effects', mapimport: 'maps', library: 'library', token: 'token' };
   const NONTERMINAL = ['effects', 'effectsTool'];
   useLayoutEffect(() => {
-    const clear = () => { subRef.current = null; setSub(null); };
+    const clear = (fallback = false) => { subRef.current = null; setSub(null); setPanelFallback(fallback); };
     const m = menuRef.current;
-    if (!radialMenuOpen || !m || !activeSubMenu || activeSubMenu === 'token') return clear();
+    if (!radialMenuOpen || !m || !activeSubMenu) return clear();
+    if (activeSubMenu === 'token') return clear(true);
     const panel = m.querySelector('.z-30');
     if (!panel) return clear();
     const btns = Array.from(panel.querySelectorAll('button')).filter((b) => !b.disabled);
-    if (btns.length < 2 || btns.length > 7) return clear();
+    if (btns.length > 8) return clear(true);
+    if (btns.length < 2) return clear();
     const mr = m.getBoundingClientRect();
     const mcx = mr.left + mr.width / 2, mcy = mr.top + mr.height / 2;
     let lvl = nextLevelRef.current;
     nextLevelRef.current = null;
+    const root = !lvl;
     if (!lvl) {
       const key = SLOT_FOR[activeSubMenu];
       const se = key && m.querySelector(`[data-slot="${key}"]`);
@@ -128,14 +133,16 @@ export function RadialContextMenu() {
       lvl = { cx, cy, dir: Math.atan2(cy, cx) };
     }
     const n = btns.length;
-    const step = Math.min(0.785, (Math.PI * 1.1) / (n - 1));
+    // A full pie: n equal sectors around the whole circle (first one straight up,
+    // then clockwise), so every direction picks something, even unseen.
+    const step = (Math.PI * 2) / n;
     const R2 = n <= 4 ? 84 : 106;
     const nonterminal = NONTERMINAL.includes(activeSubMenu);
     const items = btns.map((b, k) => {
-      const ang = lvl.dir + (k - (n - 1) / 2) * step;
+      const ang = -Math.PI / 2 + k * step;
       return { el: b, html: b.innerHTML, ang, x: lvl.cx + R2 * Math.cos(ang), y: lvl.cy + R2 * Math.sin(ang), nonterminal };
     });
-    const next = { items, cx: lvl.cx, cy: lvl.cy, dir: lvl.dir, step, R2 };
+    const next = { items, cx: lvl.cx, cy: lvl.cy, dir: lvl.dir, step, R2, root };
     subRef.current = next;
     setSub(next);
   }, [radialMenuOpen, activeSubMenu, pendingEffectCategory, vaultEffects.length]);
@@ -220,22 +227,23 @@ export function RadialContextMenu() {
         const q = nearestItem(sb, px, py);
         setBand(sb.cx, sb.cy, q.dx, q.dy, q.d, q.d >= SUBDEAD);
         if (q.d < SUBDEAD) { hotSub(-1); return; }
-        if (q.bd <= sb.step / 2 + 0.6) {
+        // Pulled back into the middle of the main ring: close this fan
+        if (sb.root && Math.hypot(px, py) < 56) {
+          hotSub(-1);
+          exitedKey = openKey; openKey = null;
+          subRef.current = null;
+          setActiveSubMenu(null);
+        } else {
           hotSub(q.bi);
           const it = sb.items[q.bi];
           if (it.nonterminal && q.d >= sb.R2 - 12) {
-            // drill in: this choice opens the next fan, centred on it
+            // drill in: this choice opens the next pie, centred on it
             nextLevelRef.current = { cx: it.x, cy: it.y, dir: it.ang };
             hotSub(-1);
             it.el.click();
           }
           return;
         }
-        // heading back toward the parent: close the fan, resume main ring
-        hotSub(-1);
-        exitedKey = openKey; openKey = null;
-        subRef.current = null;
-        setActiveSubMenu(null);
       }
 
       // ── main ring ──
@@ -485,7 +493,7 @@ export function RadialContextMenu() {
       left: `calc(50% + ${(c * r).toFixed(1)}px)`,
       top: `calc(50% + ${(sn * r).toFixed(1)}px)`,
       transform: `translate(${(-50 + c * 50).toFixed(1)}%, ${(-50 + sn * 50).toFixed(1)}%)`,
-      visibility: sub ? 'hidden' : 'visible',
+      visibility: !sub && panelFallback ? 'visible' : 'hidden',
     };
   };
 
