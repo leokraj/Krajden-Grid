@@ -31,18 +31,64 @@ const BTN = 52;
 
 // Is the right button held right now? Tracked at module level so the menu knows
 // it even though it mounts a moment AFTER the press that opened it.
-const rightHeld = { v: false };
+const rightHeld = { v: false, t: 0, x: 0, y: 0 };
 if (typeof window !== 'undefined' && !window.__kgRightHeld) {
   window.__kgRightHeld = true;
-  window.addEventListener('mousedown', (e) => { if (e.button === 2) rightHeld.v = true; }, true);
+  window.addEventListener('mousedown', (e) => { if (e.button === 2) { rightHeld.v = true; rightHeld.t = performance.now(); rightHeld.x = e.clientX; rightHeld.y = e.clientY; } }, true);
   window.addEventListener('mouseup', (e) => { if (e.button === 2) rightHeld.v = false; }, true);
   window.addEventListener('blur', () => { rightHeld.v = false; });
 }
 
 // The menu body is remounted for every opening (key changes), so no state,
 // refs or half-finished gesture can leak from one opening into the next.
+// Panels, bars, dialogs and form controls keep their normal right-click behaviour.
+const UI_SELECTOR = 'input,textarea,select,button,a,label,[contenteditable="true"],[role="dialog"],[role="menu"],[data-sonner-toast],[data-kg-ui],[data-testid="fullscreen-controls"],[data-testid="dm-screen-bar"],[data-testid="dm-debug-panel"],[data-testid="show-controls-btn"],.glass-panel,[data-radial-menu]';
+const isUiTarget = (t) => !t || !t.closest || !!t.closest(UI_SELECTOR);
+
 export function RadialContextMenu() {
-  const { radialMenuOpen, radialMenuPos } = useGrid();
+  const { radialMenuOpen, radialMenuPos, openRadialMenu, settings } = useGrid();
+
+  // Pressing the right button ANYWHERE on the table opens the menu at once, so
+  // you can hold and drag straight to a tool (Windows would otherwise only
+  // raise 'contextmenu' on release, and active tools would swallow the press).
+  const hookRef = useRef({});
+  hookRef.current = { openRadialMenu, settings };
+  useEffect(() => {
+    let blockUntil = 0;
+    const onDown = (e) => {
+      if (e.button !== 2) return;
+      if (window.__kgLightConfiguring) return;       // right-click confirms a light in Effects
+      if (isUiTarget(e.target)) return;
+      const { openRadialMenu: open, settings: st } = hookRef.current;
+      if (!open) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      blockUntil = Infinity;
+      const canvas = document.querySelector('[data-testid="drawing-canvas"]');
+      const r = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+      const tokEl = e.target.closest && e.target.closest('[data-clipart-id]');
+      const tid = tokEl ? tokEl.getAttribute('data-clipart-id') : null;
+      const cp = tid ? (st.placedCliparts || []).find((c) => c.instanceId === tid) : null;
+      open({
+        x: e.clientX, y: e.clientY,
+        mapX: cp ? cp.x : e.clientX - r.left,
+        mapY: cp ? cp.y : e.clientY - r.top,
+        ...(tid ? { tokenInstanceId: tid } : {}),
+      });
+    };
+    const onUp = (e) => { if (e.button === 2 && blockUntil === Infinity) blockUntil = performance.now() + 700; };
+    // the 'contextmenu' that follows the press must not trigger any tool's own right-click exit
+    const onCtx = (e) => { if (performance.now() < blockUntil) { e.preventDefault(); e.stopImmediatePropagation(); } };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('mouseup', onUp, true);
+    window.addEventListener('contextmenu', onCtx, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('mouseup', onUp, true);
+      window.removeEventListener('contextmenu', onCtx, true);
+    };
+  }, []);
+
   const posRef = useRef(null);
   const epochRef = useRef(0);
   if (radialMenuOpen && radialMenuPos) {
@@ -61,8 +107,10 @@ function RadialMenuBody() {
     broadcastPing, sessionCode, selectedClipartIds = [],
     groupSelectedCliparts, ungroupSelectedCliparts,
     setTokenLabel, toggleTokenStatus, bringTokenToFront, sendTokenToBack,
-    updatePlacedClipart, isDmScreen,
+    updatePlacedClipart, isDmScreen, clearMeasurements,
   } = useGrid();
+  const toolRef = useRef({});
+  toolRef.current = { settings, updateSettings, clearDrawings, clearMeasurements, closeRadialMenu };
 
   const [activeSubMenu, setActiveSubMenu] = useState(null);
   const [labelInput, setLabelInput] = useState('');
@@ -226,6 +274,27 @@ function RadialMenuBody() {
     const OUTER = 430;    // well outside every pie: counts as 'left the menu'
     let openKey = null, exitedKey = null;
     let held = rightHeld.v; // was the button still down when the menu appeared?
+    // pressing again while the menu is already open starts a fresh stroke
+    const onPressAgain = (e) => {
+      if (e.button !== 2) return;
+      held = true; openKey = null; exitedKey = null;
+      hotSub(-1); setHot(null);
+      api.current.reset();
+    };
+    // A quick right-click (no drag) while a tool is active exits that tool, as it always did.
+    const exitActiveTool = () => {
+      const { settings: st, updateSettings: up, clearDrawings: cd, clearMeasurements: cm, closeRadialMenu: close } = toolRef.current;
+      let did = true;
+      if (st.measureMode) { up({ measureMode: false }); if (cm) cm(); }
+      else if (st.drawingEnabled || st.eraserEnabled) { if (cd) cd(); up({ drawingEnabled: false, eraserEnabled: false }); }
+      else if (st.pingMode) up({ pingMode: false });
+      else if (st.maskEnabled) up({ maskEnabled: false });
+      else if (st.effectsEnabled) up({ effectsEnabled: false });
+      else if (st.atmoTool) up({ atmoTool: null });
+      else did = false;
+      if (did) close();
+      return did;
+    };
     const setHot = (el) => {
       const m = menuRef.current;
       if (!m) return;
@@ -341,6 +410,8 @@ function RadialMenuBody() {
     const onUp = (e) => {
       if (e.button !== 2 || !held) return;
       held = false;
+      const quick = performance.now() - rightHeld.t < 230 && Math.hypot(e.clientX - rightHeld.x, e.clientY - rightHeld.y) < 10;
+      if (quick && !subRef.current && exitActiveTool()) return;
       const sb = subRef.current;
       if (sb) {
         const idx = hotIdxRef.current;
@@ -362,7 +433,9 @@ function RadialMenuBody() {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    window.addEventListener('mousedown', onPressAgain, true);
     return () => {
+      window.removeEventListener('mousedown', onPressAgain, true);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -587,6 +660,7 @@ function RadialMenuBody() {
     <div style={{ zIndex: 100000 }} className={`fixed inset-0 pointer-events-auto bg-black/20 ${isDmScreen ? '' : 'backdrop-blur-[2px]'} flex items-center justify-center animate-in fade-in duration-150`}>
       <div 
         ref={menuRef}
+        data-radial-menu
         className="absolute select-none transform -translate-x-1/2 -translate-y-1/2"
         style={{ left: clampedX, top: clampedY }}
       >
