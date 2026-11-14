@@ -2158,7 +2158,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // Painting Mode, unlike a normal right-click).
   const [configuringLightId, setConfiguringLightId] = useState(null);
   const configuringLightIdRef = useRef(null);
-  useEffect(() => { configuringLightIdRef.current = configuringLightId; }, [configuringLightId]);
+  useEffect(() => { configuringLightIdRef.current = configuringLightId; window.__kgLightConfiguring = !!configuringLightId; return () => { window.__kgLightConfiguring = false; }; }, [configuringLightId]);
   const effectPathsRef = useRef(settings.effectPaths || []);
   const selectedIdRef = useRef(settings.selectedEffectPathId);
   useEffect(() => { effectPathsRef.current = settings.effectPaths || []; }, [settings.effectPaths]);
