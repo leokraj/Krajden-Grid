@@ -1299,6 +1299,7 @@ export const PlacedClipart = ({
         touchAction: 'none',
         willChange: isDragging ? 'left, top' : 'auto',
       }}
+      data-clipart-id={clipart.instanceId}
       onMouseDown={handleMouseDown}
       onClick={(e) => {
         e.stopPropagation();
