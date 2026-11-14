@@ -1596,6 +1596,9 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       } else if (settings.maskTool === 'rect') {
         setMaskRectStart(coords);
         setMaskRectPreview(null);
+      } else if (settings.maskTool === 'erase') {
+        maskEraseRef.current = true;
+        eraseMaskAt(coords.x, coords.y);
       } else if (settings.maskTool === 'circle') {
         // Circle fog: add a circle mask rect with type='circle'
         const r = settings.maskBrushSize || 80;
@@ -1614,6 +1617,26 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       });
     }
   }, [interactive, isBlocked, settings, updateSettings, pings, pingMarkers, removePing, addPing, clearPings, clearDrawings, clearMeasurements, broadcastPing, getCanvasCoords, eraseAt, broadcastErase, resetInactivityTimer, sessionCode, broadcastCursor, showMyCursor, measureWaypoints, currentPoint, calculateAccurateDistance, addMeasurement, broadcastMeasurement, setLiveMeasurement, clearLiveMeasurement, broadcastActivityStatus, openRadialMenu, canvasSize]);
+
+  const maskEraseRef = useRef(false);
+  // Grid-mask eraser: removes any painted mask stroke/rectangle/circle the brush touches.
+  const eraseMaskAt = useCallback((x, y) => {
+    const r = Math.max(8, (settings.maskBrushSize || 30) / 2);
+    const paths = settings.maskPaths || [];
+    const rects = settings.maskRects || [];
+    const keepPaths = paths.filter((p) => {
+      const half = (p.size || 30) / 2;
+      return !(p.points || []).some((pt) => Math.hypot(pt.x - x, pt.y - y) <= r + half);
+    });
+    const keepRects = rects.filter((m) => {
+      if (m.type === 'circle' && m.cx !== undefined) return Math.hypot(m.cx - x, m.cy - y) > m.r + r;
+      const w = m.width || m.w || 0, h = m.height || m.h || 0;
+      return !(x >= m.x - r && x <= m.x + w + r && y >= m.y - r && y <= m.y + h + r);
+    });
+    if (keepPaths.length !== paths.length || keepRects.length !== rects.length) {
+      updateSettings({ maskPaths: keepPaths, maskRects: keepRects });
+    }
+  }, [settings.maskPaths, settings.maskRects, settings.maskBrushSize, updateSettings]);
 
   const handleMouseMove = useCallback((e) => {
     const coords = getCanvasCoords(e);
@@ -1642,6 +1665,12 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       broadcastCursor(coords.x, coords.y, isClicking);
     }
     
+    // Mask eraser dragging
+    if (maskEraseRef.current && settings.maskEnabled && settings.maskTool === 'erase') {
+      eraseMaskAt(coords.x, coords.y);
+      return;
+    }
+
     // Mask brush painting
     if (isMaskPainting && settings.maskEnabled && settings.maskTool === 'brush') {
       setCurrentMaskPath(prev => [...prev, coords]);
@@ -1720,7 +1749,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       setCurrentDrawingPath(prev => [...prev, coords]);
       return;
     }
-  }, [isDrawing, isErasing, isMaskPainting, maskRectStart, measureWaypoints, marqueeState.active, settings.drawingEnabled, settings.eraserEnabled, settings.eraserSize, settings.measureMode, settings.maskEnabled, settings.maskTool, getCanvasCoords, eraseAt, broadcastErase, sessionCode, broadcastCursor, showMyCursor, calculateAccurateDistance, setLiveMeasurement, broadcastLiveMeasurement]);
+  }, [isDrawing, isErasing, isMaskPainting, maskRectStart, measureWaypoints, marqueeState.active, settings.drawingEnabled, settings.eraserEnabled, settings.eraserSize, settings.measureMode, settings.maskEnabled, settings.maskTool, getCanvasCoords, eraseMaskAt, eraseAt, broadcastErase, sessionCode, broadcastCursor, showMyCursor, calculateAccurateDistance, setLiveMeasurement, broadcastLiveMeasurement]);
 
   const handleMouseLeave = useCallback(() => {
     setCursorPos(null);
@@ -1736,6 +1765,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   }, [sessionCode, broadcastPing, getCanvasCoords]);
 
   const handleMouseUp = useCallback(() => {
+    maskEraseRef.current = false;
     // When effects painting mode is active, let EffectsDrawingOverlay handle mouse up
     if (settings.effectsEnabled) return;
 
@@ -1865,7 +1895,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
 
   // Determine cursor style
   const getCursorStyle = () => {
-    if (settings.maskEnabled && settings.maskTool === 'brush') return 'none';
+    if (settings.maskEnabled && (settings.maskTool === 'brush' || settings.maskTool === 'erase')) return 'none';
     if (settings.eraserEnabled) return 'none';
     if (settings.drawingEnabled) return 'none';
     if (settings.maskEnabled) return 'crosshair';
@@ -2150,7 +2180,7 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
       )}
 
       {/* Cursor circle — shows tool tip size */}
-      {cursorPos && interactive && (settings.drawingEnabled || settings.eraserEnabled || settings.effectsEnabled || (settings.maskEnabled && settings.maskTool === 'brush')) && (() => {
+      {cursorPos && interactive && (settings.drawingEnabled || settings.eraserEnabled || settings.effectsEnabled || (settings.maskEnabled && (settings.maskTool === 'brush' || settings.maskTool === 'erase'))) && (() => {
         let size = 0;
         let color = 'rgba(255,255,255,0.6)';
         if (settings.eraserEnabled) {
@@ -2159,9 +2189,9 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
         } else if (settings.effectsEnabled) {
           size = settings.effectBrushSize || 60;
           color = 'rgba(202,160,85,0.85)';
-        } else if (settings.maskEnabled && settings.maskTool === 'brush') {
+        } else if (settings.maskEnabled && (settings.maskTool === 'brush' || settings.maskTool === 'erase')) {
           size = settings.maskBrushSize || 30;
-          color = 'rgba(180,120,255,0.7)';
+          color = settings.maskTool === 'erase' ? 'rgba(255,160,60,0.8)' : 'rgba(180,120,255,0.7)';
         } else if (settings.drawingEnabled) {
           size = (settings.drawWidth || 2) * (settings.drawingThickness || 1);
           color = settings.drawingColor || 'rgba(255,255,255,0.7)';
