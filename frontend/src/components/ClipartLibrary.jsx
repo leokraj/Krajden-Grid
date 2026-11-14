@@ -855,19 +855,27 @@ export const ClipartLibrary = ({
         </div>
       </div>
 
-      {/* Search, File Upload & URL Import */}
+      {/* One compact toolbar: search, category, upload, link */}
       <div className="p-2 border-b border-white/10 space-y-2">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-white/40" />
-          <Input
-            placeholder="Search cliparts..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-7 h-7 text-xs bg-white/5 border-white/10 text-white placeholder:text-white/30"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-[110px]">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-white/40" />
+            <Input
+              placeholder="Search tokens…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-7 h-8 text-xs bg-white/5 border-white/10 text-white placeholder:text-white/30"
+            />
+          </div>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="h-8 text-[11px] bg-black/60 border border-white/10 text-gray-200 rounded-md px-2 outline-none max-w-[150px]"
+            title="Category"
+            data-testid="token-category-select"
+          >
+            {CATEGORIES.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+          </select>
           <input
             ref={fileInputRef}
             type="file"
@@ -876,164 +884,126 @@ export const ClipartLibrary = ({
             onChange={handleFileUpload}
             className="hidden"
           />
-          <Button
-            variant="outline"
-            size="sm"
+          <button
             onClick={() => fileInputRef.current?.click()}
-            className="h-7 text-xs border-white/10 hover:bg-white/10 flex items-center justify-center cursor-pointer text-white"
+            className="h-8 w-8 shrink-0 flex items-center justify-center rounded-md border border-white/10 hover:bg-white/10 text-white"
+            title="Upload images or GIFs (select several at once)"
           >
-            <Upload className="w-3 h-3 mr-1" />
-            File Upload
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+            <Upload className="w-3.5 h-3.5" />
+          </button>
+          <button
             onClick={() => setShowUrlForm(!showUrlForm)}
-            className={`h-7 text-xs flex items-center justify-center cursor-pointer ${showUrlForm ? 'bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]/30' : 'border-white/10 hover:bg-white/10 text-white'}`}
+            className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md border text-[12px] ${showUrlForm ? 'bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]/30' : 'border-white/10 hover:bg-white/10 text-white'}`}
+            title="Add from a link / GIF URL"
           >
-            <span className="text-[10px] mr-1">🔗</span>
-            Link / GIF URL
-          </Button>
+            🔗
+          </button>
+          <span className="text-[10px] text-white/40 font-mono shrink-0">{selectedCategory === 'effects' ? '' : filteredCliparts.length}</span>
         </div>
 
         {showUrlForm && (
-          <div className="p-2 bg-black/40 border border-white/5 rounded space-y-2">
-            <div>
-              <label className="text-[9px] text-gray-400 uppercase tracking-widest block mb-0.5">Asset URL (supports .gif, .png, .jpg)</label>
-              <Input
-                type="text"
-                placeholder="e.g. https://example.com/spell.gif"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                className="h-6 text-[10px] bg-white/5 border-white/10 text-white"
-              />
-            </div>
-            <div>
-              <label className="text-[9px] text-gray-400 uppercase tracking-widest block mb-0.5">Clipart Name</label>
-              <Input
-                type="text"
-                placeholder="e.g. Fire Elemental"
-                value={urlNameInput}
-                onChange={(e) => setUrlNameInput(e.target.value)}
-                className="h-6 text-[10px] bg-white/5 border-white/10 text-white"
-              />
-            </div>
+          <div className="p-2 bg-black/40 border border-white/5 rounded flex flex-wrap items-center gap-1.5">
+            <Input
+              type="text"
+              placeholder="Image or GIF URL"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              className="flex-1 min-w-[160px] h-7 text-[11px] bg-white/5 border-white/10 text-white"
+            />
+            <Input
+              type="text"
+              placeholder="Name"
+              value={urlNameInput}
+              onChange={(e) => setUrlNameInput(e.target.value)}
+              className="w-32 h-7 text-[11px] bg-white/5 border-white/10 text-white"
+            />
             <Button
               size="sm"
               onClick={handleAddFromUrl}
-              className="w-full h-6 bg-[#00F0FF]/15 text-[#00F0FF] border border-[#00F0FF]/25 hover:bg-[#00F0FF]/30 hover:text-white cursor-pointer text-[10px] font-semibold"
+              className="h-7 bg-[#00F0FF]/15 text-[#00F0FF] border border-[#00F0FF]/25 hover:bg-[#00F0FF]/30 hover:text-white cursor-pointer text-[11px] font-semibold"
             >
-              Add Clipart to Library
+              Add
             </Button>
           </div>
         )}
-
-        <div className="bg-cyan-950/40 border border-cyan-500/20 rounded p-2 text-[10px] text-cyan-200/90 leading-relaxed flex gap-2 items-start mt-1">
-          <span className="text-[12px] shrink-0">💡</span>
-          <div>
-            <strong className="text-cyan-400">GIF Library Tip:</strong> You can select <span className="font-semibold text-white underline decoration-cyan-400/40">multiple</span> files or animated GIFs at once in the <strong className="text-white">File Upload</strong> dialog to instantly batch-add them! Transparent GIFs look best as tokens.
-          </div>
-        </div>
       </div>
 
-      {/* Categories - All visible with wrapping */}
-      <div className="p-2 border-b border-white/10 flex gap-1 flex-wrap">
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedCategory(cat.id)}
-            className={`px-2 py-0.5 rounded-full text-[9px] font-medium transition-colors whitespace-nowrap ${
-              selectedCategory === cat.id
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                : 'bg-white/5 text-white/60 hover:bg-white/10 border border-transparent'
-            }`}
-          >
-            {cat.id === 'favorites' && '* '}
-            {cat.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Clipart Grid or Effects Panel */}
+      {/* Token grid: responsive, grows with the window */}
       <div className="flex-1 overflow-y-auto p-2">
         {selectedCategory === 'effects' ? (
           <div className="bg-black/40 rounded-xl p-2 border border-white/10">
             <EffectsControlPanel />
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-1.5">
-          {filteredCliparts.map(item => (
-            <div
-              key={item.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, item)}
-              onClick={() => onSelectClipart?.(normalizeClipartItem(item))}
-              className="relative group aspect-square bg-white/5 rounded-lg flex items-center justify-center cursor-grab hover:bg-white/10 transition-colors border border-transparent hover:border-cyan-500/40"
-              title={`${item.name} - Drag to grid or click to place`}
-            >
-              {item.type === 'emoji' ? (
-                <span className="text-2xl">{item.emoji}</span>
-              ) : (
-                <img 
-                  src={resolveAssetUrl(item.imageUrl || item.imageData || item.url || item.src)} 
-                  alt={item.name}
-                  className={`w-10 h-10 ${isTokenAsset(item) ? 'object-cover rounded-full border border-white/30' : 'object-contain rounded'}`}
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = getFallbackTokenSvg(item.name);
-                  }}
-                  referrerPolicy="no-referrer"
-                />
-              )}
-              
-              {/* Vault badge */}
-              {item.isVault && (
-                <span className="absolute top-0.5 left-0.5 bg-yellow-500/80 text-black text-[7px] font-bold px-1 rounded shadow" title="Vault Asset">
-                  VAULT
-                </span>
-              )}
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${isDocked ? 72 : 128}px, 1fr))` }}
+            data-testid="token-grid"
+          >
+            {filteredCliparts.map(item => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, item)}
+                onClick={() => onSelectClipart?.(normalizeClipartItem(item))}
+                className="relative group aspect-square bg-white/5 rounded-lg flex items-center justify-center cursor-grab hover:bg-white/10 transition-colors border border-white/5 hover:border-cyan-500/50 overflow-hidden"
+                title={`${item.name} - drag to the grid or click to place`}
+                data-testid="token-card"
+              >
+                {item.type === 'emoji' ? (
+                  <span className="text-4xl">{item.emoji}</span>
+                ) : (
+                  <img
+                    src={resolveAssetUrl(item.imageUrl || item.imageData || item.url || item.src)}
+                    alt={item.name}
+                    draggable={false}
+                    loading="lazy"
+                    className={`w-[64%] h-[64%] mb-3 ${isTokenAsset(item) ? 'object-cover rounded-full border border-white/30' : 'object-contain rounded'}`}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = getFallbackTokenSvg(item.name);
+                    }}
+                    referrerPolicy="no-referrer"
+                  />
+                )}
 
-              {/* Favorite button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleFavorite?.(item.id);
-                }}
-                className={`absolute top-0 right-0 w-4 h-4 rounded-full flex items-center justify-center transition-opacity ${
-                  favorites.includes(item.id)
-                    ? 'opacity-100 text-yellow-400'
-                    : 'opacity-0 group-hover:opacity-100 text-white/40 hover:text-yellow-400'
-                }`}
-              >
-                <Star className="w-2.5 h-2.5" fill={favorites.includes(item.id) ? 'currentColor' : 'none'} />
-              </button>
-              
-              {/* Delete button for all tokens/cliparts/vault items */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteVaultItem(item);
-                }}
-                className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-200 hover:bg-red-900/80 transition-all bg-black/90 border border-red-500/40 z-20"
-                title="Delete asset from vault"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-        )}
-        
-        {selectedCategory !== 'effects' && filteredCliparts.length === 0 && (
-          <div className="text-center text-white/40 py-4 text-xs">
-            No cliparts found
+                <div className="absolute inset-x-0 bottom-0 px-1.5 pt-3 pb-1 bg-gradient-to-t from-black/85 to-transparent pointer-events-none">
+                  <div className="text-[10px] font-medium text-white/90 truncate text-center">{item.name}</div>
+                </div>
+
+                {item.isVault && (
+                  <span className="absolute top-1 left-1 bg-yellow-500/80 text-black text-[7px] font-bold px-1 rounded shadow" title="Vault Asset">
+                    VAULT
+                  </span>
+                )}
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleFavorite?.(item.id); }}
+                  className={`absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center transition-opacity ${
+                    favorites.includes(item.id)
+                      ? 'opacity-100 text-yellow-400'
+                      : 'opacity-0 group-hover:opacity-100 text-white/50 hover:text-yellow-400'
+                  }`}
+                  title="Favorite"
+                >
+                  <Star className="w-3 h-3" fill={favorites.includes(item.id) ? 'currentColor' : 'none'} />
+                </button>
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteVaultItem(item); }}
+                  className="absolute top-1 left-1/2 -translate-x-1/2 w-5 h-5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-200 hover:bg-red-900/80 transition-all bg-black/80 border border-red-500/40 z-20"
+                  title="Delete asset from library"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
-      </div>
 
-      {/* Footer hint - Compact */}
-      <div className="p-2 border-t border-white/10 text-center text-[10px] text-white/40">
-        Drag onto grid or click to place
+        {selectedCategory !== 'effects' && filteredCliparts.length === 0 && (
+          <div className="text-center text-white/40 py-6 text-xs">No tokens found</div>
+        )}
       </div>
     </div>
   );
