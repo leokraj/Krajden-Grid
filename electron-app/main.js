@@ -310,8 +310,8 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     },
     movable: true,
     resizable: true,
-    minWidth: mode === 'layers' ? 420 : undefined,
-    minHeight: mode === 'layers' ? 400 : undefined,
+    minWidth: (mode === 'layers' || mode === 'clipart') ? 420 : undefined,
+    minHeight: (mode === 'layers' || mode === 'clipart') ? 400 : undefined,
     // The main grid window has no always-on-top setting, so without this,
     // clicking into the grid to place a token or draw would bring it to
     // the front and bury the Controls/Effects/Tokens/Maps windows behind
@@ -511,13 +511,13 @@ ipcMain.on('google-auth', (event, authUrl) => {
 ipcMain.on('open-clipart-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
-  createChildWindow('clipart', 'Krajden Grid - Clipart & Token Library', 520, 720, bounds);
+  createChildWindow('clipart', 'Krajden Grid - Token Library', 820, 800, bounds);
 });
 
 ipcMain.on('open-community-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
-  createChildWindow('clipart', 'Krajden Grid - Community Clipart', 600, 720, bounds);
+  createChildWindow('clipart', 'Krajden Grid - Token Library', 820, 800, bounds);
 });
 
 ipcMain.on('open-layers-window', (event) => {
