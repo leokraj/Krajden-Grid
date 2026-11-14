@@ -671,7 +671,7 @@ function RadialMenuBody() {
           <div className="absolute inset-2 rounded-full border border-[#caa055]/15 pointer-events-none" />
           <div className="absolute rounded-full border border-[#caa055]/20 pointer-events-none" style={{ width: RING_R * 2, height: RING_R * 2, left: `calc(50% - ${RING_R}px)`, top: `calc(50% - ${RING_R}px)` }} />
 
-          <style>{`[data-subidx] *, [data-trail] * { pointer-events: none; } [data-trail] { pointer-events: none; opacity: 0.22; transition: opacity .15s; } [data-trail][data-chosen="1"] { opacity: 1; background: rgba(202,160,85,0.3) !important; border-color: #caa055 !important; } [data-subopen="1"] [data-slot]:not([data-parent="1"]) { opacity: 0.25; transition: opacity .15s; } [data-trail] span { white-space: normal !important; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-trail] svg { width: 16px !important; height: 16px !important; } [data-subidx] span { white-space: normal !important; overflow-wrap: anywhere; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-subidx] svg { width: 16px !important; height: 16px !important; } [data-subidx][data-hot="1"] { background: rgba(202,160,85,0.45) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.15); }`}</style>
+          <style>{`[data-subidx] *, [data-trail] * { pointer-events: none; } [data-trail] { pointer-events: none; opacity: 0.22; transition: opacity .15s; } [data-trail][data-chosen="1"] { opacity: 1; background: rgba(202,160,85,0.3) !important; border-color: #caa055 !important; } [data-subopen="1"] [data-slot]:not([data-parent="1"]) { opacity: 0.12; transition: opacity .15s; } [data-trail] span { white-space: normal !important; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-trail] svg { width: 16px !important; height: 16px !important; } [data-subidx] span { white-space: normal !important; overflow-wrap: anywhere; font-size: 8px !important; line-height: 1.05 !important; max-width: 56px; text-align: center; margin: 0 !important; } [data-subidx] svg { width: 16px !important; height: 16px !important; } [data-subidx][data-hot="1"] { background: rgba(202,160,85,0.45) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.15); }`}</style>
           <style>{`[data-slot][data-hot="1"] > div { background: rgba(202,160,85,0.38) !important; border-color: #caa055 !important; box-shadow: 0 0 20px #caa055 !important; transform: scale(1.18) !important; }`}</style>
           <div
             ref={bandRef}
@@ -878,7 +878,7 @@ function RadialMenuBody() {
           {/* DYNAMIC SUB-MENUS */}
 
           {/* Earlier levels of this stroke, faded; the choice you made stays lit */}
-          {trail.map((t, ti) => t.sb.items.map((it, i) => (
+          {trail.map((t, ti) => t.sb.items.map((it, i) => i !== t.idx ? null : (
             <div
               key={`trail-${ti}-${i}`}
               data-trail
