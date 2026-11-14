@@ -107,7 +107,7 @@ function RadialMenuBody() {
     broadcastPing, sessionCode, selectedClipartIds = [],
     groupSelectedCliparts, ungroupSelectedCliparts,
     setTokenLabel, toggleTokenStatus, bringTokenToFront, sendTokenToBack,
-    updatePlacedClipart, isDmScreen, clearMeasurements,
+    updatePlacedClipart, isDmScreen, clearMeasurements, clearMask,
   } = useGrid();
   const toolRef = useRef({});
   toolRef.current = { settings, updateSettings, clearDrawings, clearMeasurements, closeRadialMenu };
@@ -270,7 +270,7 @@ function RadialMenuBody() {
     const SUBDEAD = 24;   // same for the second-level fan
     const OPEN_AT = RING_R - 14; // reach the ring to open that button's fan
     const SUB_FOR = { measure: 'measure', beacon: 'beacon', library: 'library', draw: 'draw', effects: 'effects', mask: 'mask', maps: 'mapimport', fog: 'fog', token: 'token', photo: null, group: null };
-    const LEAF = ['beacon', 'library', 'maps', 'group', 'photo'];
+    const LEAF = ['library', 'maps', 'group', 'photo'];
     const OUTER = 430;    // well outside every pie: counts as 'left the menu'
     let openKey = null, exitedKey = null;
     let held = rightHeld.v; // was the button still down when the menu appeared?
@@ -372,13 +372,9 @@ function RadialMenuBody() {
           api.current.reset();
           return;
         }
-        const tr = trailRef.current;
-        const par = tr.length ? tr[tr.length - 1].sb : null;
-        const toParent = par ? Math.hypot(px - par.cx, py - par.cy) : dOrigin;
-        if (toParent < (par ? 30 : 56)) {
-          // pulled back to where the previous level was: step back
+        if (dOrigin < 56) {
+          // back at the middle of the menu: start over from a clean main ring
           hotSub(-1);
-          if (par) { api.current.pop(); return; }
           exitedKey = openKey; openKey = null;
           api.current.reset();
         } else {
@@ -1074,6 +1070,8 @@ function RadialMenuBody() {
               <button onClick={() => handleMaskSelect('brush')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-brush"><span>🖌️</span><span>Brush</span></button>
               <button onClick={() => handleMaskSelect('rect')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-rect"><span>▭</span><span>Rectangle</span></button>
               <button onClick={() => handleMaskSelect('circle')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-circle"><span>◯</span><span>Circle</span></button>
+              <button onClick={() => handleMaskSelect('erase')} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-[#caa055]/30 text-[#caa055] hover:bg-[#caa055]/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-erase"><span>🧹</span><span>Erase</span></button>
+              <button onClick={() => { clearMask(); toast.success('Grid mask cleared'); closeRadialMenu(); }} className="w-full flex items-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer transition-all" data-testid="radial-mask-clear"><Trash2 className="w-3.5 h-3.5" /><span>Clear All</span></button>
               {settings.maskEnabled && (
                 <button onClick={handleMaskOff} className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/20 text-[9px] uppercase font-bold cursor-pointer" data-testid="radial-mask-off">
                   <XCircle className="w-3.5 h-3.5" /><span>Off</span>
