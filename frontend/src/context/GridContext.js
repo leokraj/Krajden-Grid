@@ -527,6 +527,33 @@ export const GridProvider = ({ children }) => {
     });
   }, []);
 
+  // ── Live measurement window ───────────────────────────────────────────
+  // Only the windows that own the grid (game + DM Screen) compute live values;
+  // they stream them to the floating Measurement window, which opens when a
+  // measure tool is active and closes when it stops.
+  const measureWinPrevRef = useRef(false);
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.isElectron) return;
+    const qp = new URLSearchParams(window.location.search);
+    const m = qp.get('mode');
+    if ((m && m !== 'dm') || qp.get('section')) return;
+    const on = !!settings.measureMode;
+    if (on !== measureWinPrevRef.current) {
+      measureWinPrevRef.current = on;
+      if (on) api.openMeasureWindow?.(); else api.closeMeasureWindow?.();
+    }
+    const lm = settings.liveMeasurement;
+    api.broadcast('measure-live', {
+      measureMode: settings.measureMode || false,
+      value: lm ? lm.unitDistance : null,
+      segment: lm ? lm.activeSegmentDistance : null,
+      waypoints: lm ? lm.waypointCount : 0,
+      multiplier: settings.measureMultiplier || 1,
+      coneAngle: settings.coneAngle,
+    });
+  }, [settings.liveMeasurement, settings.measureMode, settings.measureMultiplier, settings.coneAngle]);
+
   // ── DM Screen sync ────────────────────────────────────────────────────
   const measurementsRef = useRef(measurements);
   useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
@@ -1088,7 +1115,7 @@ export const GridProvider = ({ children }) => {
     setSettings((prev) => {
       const layers = prev.effectLayers || [];
       let targetId = null;
-      const active = layers.find((l) => l.id === prev.activeEffectLayerId);
+      const active = layers.find((l) => l.id === prev.activeEffectLayerId && !l.locked);
       if (onlyActive) {
         if (!active) return prev;
         targetId = active.id;
@@ -1096,7 +1123,7 @@ export const GridProvider = ({ children }) => {
         targetId = active.id;
       } else {
         // Reuse the most recent layer of the same effect, else start one
-        const same = [...layers].reverse().find((l) => layerIdentity(l) === layerIdentity(template));
+        const same = [...layers].reverse().find((l) => !l.locked && layerIdentity(l) === layerIdentity(template));
         targetId = same ? same.id : null;
       }
       let nextLayers = layers;
