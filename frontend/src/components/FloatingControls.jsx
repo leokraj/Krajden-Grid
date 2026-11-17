@@ -186,7 +186,6 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isMinimized, setIsMinimized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [measurementPopup, setMeasurementPopup] = useState(null);
   const [showCommunityBrowser, setShowCommunityBrowser] = useState(false);
   const [showLayersPanel, setShowLayersPanel] = useState(false);
   const [showScenePanel, setShowScenePanel] = useState(false);
@@ -523,45 +522,27 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
     e.stopPropagation();
   }, []);
 
-  // Open measurement popup window
+  // Open the floating live-measurement window (also opens automatically when
+  // a measure tool is started)
   const openMeasurementPopup = useCallback(() => {
-    // Close existing popup if open
-    if (measurementPopup && !measurementPopup.closed) {
-      measurementPopup.focus();
-      return;
-    }
-    
-    const popup = window.open(
-      '/measurement-popup.html',
-      'Krajden Grid Measurement',
-      'width=300,height=200,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no'
-    );
-    
-    if (popup) {
-      setMeasurementPopup(popup);
-      
-      // Clean up when popup is closed
-      const checkClosed = setInterval(() => {
-        if (popup.closed) {
-          clearInterval(checkClosed);
-          setMeasurementPopup(null);
-        }
-      }, 500);
-    }
-  }, [measurementPopup]);
+    if (window.electronAPI?.openMeasureWindow) window.electronAPI.openMeasureWindow();
+  }, []);
 
-  // Send measurement data to popup
+  // Closing the Measure section (or its torn-off window) resets the tool.
+  const prevMeasureOpenRef = useRef(null);
   useEffect(() => {
-    if (measurementPopup && !measurementPopup.closed && settings.liveMeasurement) {
-      measurementPopup.postMessage({
-        type: 'measurement',
-        measureMode: settings.measureMode,
-        value: settings.liveMeasurement.unitDistance * settings.measureMultiplier,
-        multiplier: settings.measureMultiplier,
-        coneAngle: settings.coneAngle,
-      }, '*');
+    const open = !collapsedSections.measure;
+    if (prevMeasureOpenRef.current === true && !open) {
+      updateSettings({ measureMode: false, liveMeasurement: null });
     }
-  }, [measurementPopup, settings.liveMeasurement, settings.measureMode, settings.measureMultiplier, settings.coneAngle]);
+    prevMeasureOpenRef.current = open;
+  }, [collapsedSections.measure, updateSettings]);
+  useEffect(() => {
+    if (sectionFilter !== 'measure') return undefined;
+    const off = () => updateSettings({ measureMode: false, liveMeasurement: null });
+    window.addEventListener('beforeunload', off);
+    return () => window.removeEventListener('beforeunload', off);
+  }, [sectionFilter, updateSettings]);
 
   const measureModes = [
     { id: 'line', icon: Move, label: 'Line' },
