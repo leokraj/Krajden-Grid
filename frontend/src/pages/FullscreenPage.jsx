@@ -7,6 +7,7 @@ import { Toaster } from '../components/ui/sonner';
 import { toast } from 'sonner';
 import { ClipartLibrary } from '../components/ClipartLibrary';
 import BackgroundLayersPanel from '../components/BackgroundLayersPanel';
+import MeasurementWindow from '../components/MeasurementWindow';
 import { DiceAnimationLayer } from '../components/DiceAnimation';
 import { EffectsDrawingOverlay, EffectsControlPanel } from '../components/EffectsLayer';
 import { AtmosphereLayer } from '../components/AtmosphereLayer';
@@ -132,6 +133,10 @@ export function FullscreenContent() {
         <Toaster position="top-right" />
       </div>
     );
+  }
+
+  if (mode === 'measure') {
+    return <MeasurementWindow />;
   }
 
   if (mode === 'layers') {
