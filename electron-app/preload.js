@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('open-layers-window');
   },
   
+  openMeasureWindow: () => ipcRenderer.send('open-measure-window'),
+  closeMeasureWindow: () => ipcRenderer.send('close-measure-window'),
+
   openEffectsWindow: () => {
     ipcRenderer.send('open-effects-window');
   },
