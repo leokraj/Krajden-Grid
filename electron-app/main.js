@@ -278,7 +278,11 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
   if (senderBounds) {
     const senderDisplay = screen.getDisplayMatching(senderBounds);
     const { x, y, width: dw, height: dh } = senderDisplay.workArea;
-    if (mode === 'controls') {
+    if (mode === 'measure') {
+      // Live measurement readout: small, parked in the top-right corner
+      winX = x + dw - width - 16;
+      winY = y + 16;
+    } else if (mode === 'controls') {
       // The main Controls panel opens flush against the left edge of the
       // display by default, so the grid stays clear on the right/center.
       winX = x + 12;
@@ -362,6 +366,12 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
 
 // IPC Relay: Broadcast messages from one window (e.g. controls/settings) to all others
 ipcMain.on('broadcast', (event, channel, data) => {
+  // Live measurement values from the DM Screen go only to the measure window
+  if (channel === 'measure-live' && dmWindow && !dmWindow.isDestroyed() && event.sender === dmWindow.webContents) {
+    const mw = childWindows['measure'];
+    if (mw && !mw.isDestroyed()) mw.webContents.send(channel, data);
+    return;
+  }
   // The DM Screen is isolated: nothing it does is relayed out, and nothing
   // from the game windows is relayed in. Only the explicit dm-* IPC below
   // moves state between them.
@@ -518,6 +528,17 @@ ipcMain.on('open-community-window', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
   const bounds = senderWin ? senderWin.getBounds() : null;
   createChildWindow('clipart', 'Krajden Grid - Token Library', 820, 800, bounds);
+});
+
+ipcMain.on('open-measure-window', (event) => {
+  const senderWin = BrowserWindow.fromWebContents(event.sender);
+  const bounds = senderWin ? senderWin.getBounds() : null;
+  createChildWindow('measure', 'Krajden Grid - Live Measurement', 300, 230, bounds);
+});
+
+ipcMain.on('close-measure-window', () => {
+  const mw = childWindows['measure'];
+  if (mw && !mw.isDestroyed()) mw.close();
 });
 
 ipcMain.on('open-layers-window', (event) => {
