@@ -173,7 +173,7 @@ import { Slider } from './ui/slider';
 import { Switch } from './ui/switch';
 import { toast } from 'sonner';
 import {
-  Sparkles, Flame, Droplets, Compass, Zap, Shield, Eye, EyeOff,
+  Lock, Unlock, Sparkles, Flame, Droplets, Compass, Zap, Shield, Eye, EyeOff,
   Trash2, Undo, Plus, Upload, Play, Pause, Grid, Layers, RefreshCw,
   Maximize2, Crop, Move, Sliders, Check, Copy, ClipboardPaste
 } from 'lucide-react';
@@ -1260,7 +1260,7 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   // creating a separate object per stroke. Rivers/flow strokes and placed
   // lights keep working as individual paths.
   const effectLayers = settings.effectLayers || [];
-  const activeLayer = effectLayers.find(l => l.id === settings.activeEffectLayerId) || null;
+  const activeLayer = effectLayers.find(l => l.id === settings.activeEffectLayerId && !l.locked) || null;
   const layerPaintMode = hasActiveEffect && !flowModeActive && !activePreset?.isLight
     && effectTool !== 'eraser';
   // Eraser trims the SELECTED layer's mask pixels. With no layer selected it
@@ -2162,6 +2162,33 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
   const effectPathsRef = useRef(settings.effectPaths || []);
   const selectedIdRef = useRef(settings.selectedEffectPathId);
   useEffect(() => { effectPathsRef.current = settings.effectPaths || []; }, [settings.effectPaths]);
+  const effectsOnRef = useRef(!!settings.effectsEnabled);
+  useEffect(() => { effectsOnRef.current = !!settings.effectsEnabled; }, [settings.effectsEnabled]);
+  const effectsLockedRef = useRef(!!settings.effectsLocked);
+  useEffect(() => { effectsLockedRef.current = !!settings.effectsLocked; }, [settings.effectsLocked]);
+
+  // Tokens/clipart always win over the effects layer: when the pointer is over
+  // a placed token, the effects overlay stops catching events so the token can
+  // be selected and dragged. (Skipped mid-stroke so painting isn't interrupted.)
+  useEffect(() => {
+    const overClipart = (x, y) => {
+      const els = document.querySelectorAll('[data-clipart-id]');
+      for (let i = 0; i < els.length; i++) {
+        const r = els[i].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+      }
+      return false;
+    };
+    window.__kgOverClipart = overClipart;
+    const onMove = (e) => {
+      const c = containerRef.current;
+      if (!c) return;
+      if (e.buttons) return; // don't flip while a button is held (drag/paint in progress)
+      c.style.pointerEvents = overClipart(e.clientX, e.clientY) ? 'none' : (effectsOnRef.current ? 'all' : 'none');
+    };
+    window.addEventListener('mousemove', onMove, true);
+    return () => { window.removeEventListener('mousemove', onMove, true); delete window.__kgOverClipart; };
+  }, []);
   useEffect(() => { selectedIdRef.current = settings.selectedEffectPathId; }, [settings.selectedEffectPathId]);
 
   useEffect(() => {
@@ -2178,7 +2205,9 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
 
     const findHit = (pt) => {
       const currentEffectPaths = effectPathsRef.current;
+      if (effectsLockedRef.current) return null;
       return [...currentEffectPaths].reverse().find(ep => {
+        if (ep.locked) return false;
         if (ep.type === 'marquee' && ep.rect) {
           return pt.x >= ep.rect.x && pt.x <= ep.rect.x + ep.rect.width
               && pt.y >= ep.rect.y && pt.y <= ep.rect.y + ep.rect.height;
@@ -2254,6 +2283,8 @@ export function EffectsDrawingOverlay({ canvasSize: canvasSizeProp }) {
       const local = toLocalPt(e);
       if (!local) return;
       const { rect, clientX, clientY, x: ptX, y: ptY } = local;
+      // A token under the pointer always gets the click first
+      if (window.__kgOverClipart && window.__kgOverClipart(clientX, clientY)) return;
       // Ignore clicks outside the grid area entirely
       if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return;
       const pt = { x: ptX, y: ptY };
@@ -3100,6 +3131,10 @@ export function EffectsControlPanel({ onClose }) {
   const effectLayers = settings.effectLayers || [];
   const activeLayerId = settings.activeEffectLayerId || null;
   const [maskClip, setMaskClip] = useState(null); // { name, ops } copied mask
+  const updateLayerLock = (l, isActive) => {
+    const locked = !l.locked;
+    updateEffectLayers(ls => ls.map(x => x.id === l.id ? { ...x, locked } : x), locked && isActive ? { activeEffectLayerId: null } : undefined);
+  };
   const patchLayer = (id, patch) =>
     updateEffectLayers(ls => ls.map(l => l.id === id ? { ...l, ...(typeof patch === 'function' ? patch(l) : patch) } : l));
 
@@ -3804,6 +3839,15 @@ export function EffectsControlPanel({ onClose }) {
             Effect Layers ({effectLayers.length})
           </span>
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => updateSettings({ effectsLocked: !settings.effectsLocked })}
+              className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${settings.effectsLocked ? 'bg-red-500/15 border-red-400/40 text-red-200' : 'bg-white/5 border-white/10 text-gray-300 hover:text-white'}`}
+              title="Lock all placed effects so clicking never selects or drags them"
+              data-testid="effects-lock-all"
+            >
+              {settings.effectsLocked ? <Lock className="w-2.5 h-2.5" /> : <Unlock className="w-2.5 h-2.5" />}
+              {settings.effectsLocked ? 'Effects locked' : 'Lock effects'}
+            </button>
             {activeLayerId && (
               <button
                 onClick={() => updateSettings({ activeEffectLayerId: null })}
@@ -3850,10 +3894,18 @@ export function EffectsControlPanel({ onClose }) {
                 <div key={l.id}>
                   <div
                     className={`flex items-center justify-between p-1.5 rounded border text-[9px] cursor-pointer transition-all ${isActive ? 'bg-[#caa055]/15 border-[#caa055]/50' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
-                    onClick={() => updateSettings({ activeEffectLayerId: isActive ? null : l.id })}
+                    onClick={() => { if (l.locked) return; updateSettings({ activeEffectLayerId: isActive ? null : l.id }); }}
                     data-testid={`effect-layer-${l.id}`}
                   >
                     <div className="flex items-center gap-1.5 truncate">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); updateLayerLock(l, isActive); }}
+                        className={l.locked ? 'text-red-300' : 'text-gray-500 hover:text-gray-200'}
+                        title={l.locked ? 'Unlock layer' : 'Lock layer (can\'t be selected or painted)'}
+                        data-testid={`effect-layer-lock-${l.id}`}
+                      >
+                        {l.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                      </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); patchLayer(l.id, { hidden: !l.hidden }); }}
                         className={l.hidden ? 'text-gray-500' : 'text-[#caa055]'}
@@ -3899,6 +3951,25 @@ export function EffectsControlPanel({ onClose }) {
                         <input type="range" min="0" max="1" step="0.05" value={l.opacity ?? 0.9}
                           onChange={e => patchLayer(l.id, { opacity: parseFloat(e.target.value) })}
                           className="w-full h-1 accent-[#caa055]" />
+                      </div>
+                      <div data-testid="layer-tile-controls">
+                        <label className="flex items-center gap-1.5 cursor-pointer mb-0.5">
+                          <input type="checkbox" checked={l.tile !== false}
+                            onChange={e => patchLayer(l.id, { tile: e.target.checked })}
+                            className="accent-[#caa055]" data-testid="layer-tile-toggle" />
+                          <span className="text-[8px] text-white/50 uppercase tracking-wider">Tile texture</span>
+                        </label>
+                        {l.tile !== false && (
+                          <>
+                            <div className="flex justify-between mb-0.5">
+                              <span className="text-[8px] text-white/50 uppercase tracking-wider">Tile Scale</span>
+                              <span className="text-[8px] text-white/40 font-mono">{l.tileScale ?? 100}%</span>
+                            </div>
+                            <input type="range" min="10" max="400" step="10" value={l.tileScale ?? 100}
+                              onChange={e => patchLayer(l.id, { tileScale: parseInt(e.target.value) })}
+                              className="w-full h-1 accent-[#caa055]" data-testid="layer-tile-scale" />
+                          </>
+                        )}
                       </div>
                       <div>
                         <div className="flex justify-between mb-0.5">
