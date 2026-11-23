@@ -227,7 +227,8 @@ export const PlacedBackgroundImage = ({
           width: `${bgScale}px`,
           height: 'auto',
           transform: `translate(-50%, -50%) rotate(${bgRotation}deg)`,
-          touchAction: 'none'
+          touchAction: 'none',
+          pointerEvents: disabled ? 'none' : undefined,
         }}
       >
         {/* Visual outline if selected - removed per user request */}
