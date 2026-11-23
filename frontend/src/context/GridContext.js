@@ -130,6 +130,7 @@ const defaultSettings = {
   useBackgroundImage: false,
   backgroundLayers: [],
   bgLayersLocked: false,
+  tableRotation: 0,
   liveMeasurement: null,
   placedCliparts: [],
   snapClipartsToGrid: false,
@@ -183,6 +184,8 @@ const DM_LOCAL_KEYS = new Set([
   'tablePhoto', 'tablePhotoOn', 'tablePhotoOpacity', 'tablePhotoCalibrating', 'calibMarkersOn',
   // Seat-placement click mode is transient UI state
   'placingSeat',
+  // Physical orientation of the table projector belongs to the game screen only
+  'tableRotation',
 ]);
 
 const buildDmSnapshot = (settings, measurements) => {
