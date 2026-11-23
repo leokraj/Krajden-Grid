@@ -106,6 +106,15 @@ export const GridCanvas = ({ className = '', interactive = true, fullscreen = fa
   const [startPoint, setStartPoint] = useState(null);
   const [currentPoint, setCurrentPoint] = useState(null);
   const [measureWaypoints, setMeasureWaypoints] = useState([]);
+  // However the measure tool gets turned off (menu, controls, right-click, closing its
+  // section), wipe its half-finished state so the next use starts completely fresh.
+  useEffect(() => {
+    if (settings.measureMode) return;
+    setMeasureWaypoints([]);
+    setCurrentPoint(null);
+    setIsDrawing(false);
+    setLiveMeasurement(null);
+  }, [settings.measureMode]); // eslint-disable-line react-hooks/exhaustive-deps
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 450 });
   const [currentDrawingPath, setCurrentDrawingPath] = useState([]);
   const [bgImage, setBgImage] = useState(null);
