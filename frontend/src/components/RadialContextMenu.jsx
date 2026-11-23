@@ -31,11 +31,11 @@ const BTN = 52;
 
 // Is the right button held right now? Tracked at module level so the menu knows
 // it even though it mounts a moment AFTER the press that opened it.
-const rightHeld = { v: false, t: 0, x: 0, y: 0 };
+const rightHeld = { v: false, t: 0, u: 0, x: 0, y: 0 };
 if (typeof window !== 'undefined' && !window.__kgRightHeld) {
   window.__kgRightHeld = true;
   window.addEventListener('mousedown', (e) => { if (e.button === 2) { rightHeld.v = true; rightHeld.t = performance.now(); rightHeld.x = e.clientX; rightHeld.y = e.clientY; } }, true);
-  window.addEventListener('mouseup', (e) => { if (e.button === 2) rightHeld.v = false; }, true);
+  window.addEventListener('mouseup', (e) => { if (e.button === 2) { rightHeld.v = false; rightHeld.u = performance.now(); } }, true);
   window.addEventListener('blur', () => { rightHeld.v = false; });
 }
 
@@ -403,6 +403,9 @@ function RadialMenuBody() {
         openKey = null; setActiveSubMenu(null);
       }
     };
+    // The menu only lives while the right button is held. Releasing it picks whatever is
+    // highlighted (if anything) and ALWAYS closes the menu - a plain click never leaves it hanging.
+    const finish = () => setTimeout(() => closeRadialMenu(), 0);
     const onUp = (e) => {
       if (e.button !== 2 || !held) return;
       held = false;
@@ -412,21 +415,23 @@ function RadialMenuBody() {
       if (sb) {
         const idx = hotIdxRef.current;
         hotSub(-1);
-        const m = menuRef.current;
-        if (idx >= 0 && sb.items[idx]) {
-          if (sb.items[idx].nonterminal) api.current.drill(idx); else sb.items[idx].el.click();
-        } else if (m) {
-          const r = m.getBoundingClientRect();
-          if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) > OUTER) closeRadialMenu();
-        }
+        if (idx >= 0 && sb.items[idx] && !sb.items[idx].nonterminal) sb.items[idx].el.click();
+        finish();
         return;
       }
       const c = pick(e);
       setHot(null);
-      if (!c) return;
-      if (c.kind === 'sub') { c.el.click(); return; }
-      if (c.kind === 'slot' && LEAF.includes(c.key)) c.el.click();
+      if (c) {
+        if (c.kind === 'sub') c.el.click();
+        else if (c.kind === 'slot' && LEAF.includes(c.key)) c.el.click();
+      }
+      finish();
     };
+    // The button may already have been released before this effect attached (very fast click)
+    if (!held && performance.now() - rightHeld.t < 1500) {
+      const quickMissed = rightHeld.u && rightHeld.u - rightHeld.t < 230;
+      if (!(quickMissed && exitActiveTool())) finish();
+    }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     window.addEventListener('mousedown', onPressAgain, true);
