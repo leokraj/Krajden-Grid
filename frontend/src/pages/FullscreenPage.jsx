@@ -46,6 +46,32 @@ export function FullscreenContent() {
   }, [isDmScreen, dmGameViewport?.w, dmGameViewport?.h]);
   useEffect(() => () => { if (isDmScreen) removeStageFit(); }, [isDmScreen]);
 
+  // Table (game) screen rotation: when the projector is turned sideways or flipped, the
+  // whole table screen is laid out at the rotated size and turned back with a CSS
+  // transform; pointer coordinates are mapped through the same rotation (see stageFit),
+  // so drawing, dragging and the marking menu stay exactly under the mouse.
+  const tableRotation = settings.tableRotation || 0;
+  useEffect(() => {
+    const qp = new URLSearchParams(window.location.search);
+    if (isDmScreen || qp.get('mode') || !window.electronAPI?.isElectron) return undefined;
+    if (!tableRotation) { removeStageFit(); return undefined; }
+    let last = '';
+    const fit = () => {
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      if (!vw || !vh) return;
+      const odd = tableRotation === 90 || tableRotation === 270;
+      const key = `${vw}x${vh}`;
+      if (key === last) return; // applyStageFit fires 'resize' itself; don't loop
+      last = key;
+      applyStageFit(odd ? vh : vw, odd ? vw : vh, tableRotation, true);
+    };
+    fit();
+    let t = null;
+    const onResize = () => { clearTimeout(t); t = setTimeout(fit, 120); };
+    window.addEventListener('resize', onResize);
+    return () => { clearTimeout(t); window.removeEventListener('resize', onResize); removeStageFit(); };
+  }, [isDmScreen, tableRotation]);
+
   // Game (main grid) window: tell the DM Screen our size whenever it changes
   useEffect(() => {
     const qp = new URLSearchParams(window.location.search);
