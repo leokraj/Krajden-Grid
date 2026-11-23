@@ -797,6 +797,22 @@ export const FloatingControls = ({ onClose, sectionFilter }) => {
                       </button>
                     ))}
                   </div>
+                  <div className="bg-black/15 border border-[#caa055]/5 rounded-[4px] p-2.5 space-y-1.5" data-testid="table-rotation-controls">
+                    <Label className="text-[9px] uppercase tracking-wider text-slate-cool font-outfit font-semibold">Table screen rotation</Label>
+                    <div className="flex gap-1.5">
+                      {[0, 90, 180, 270].map((deg) => (
+                        <button
+                          key={deg}
+                          onClick={() => updateSettings({ tableRotation: deg })}
+                          className={`flex-1 text-[9px] font-mono font-semibold h-6 rounded-[4px] border cursor-pointer ${(settings.tableRotation || 0) === deg ? 'bg-[#caa055] text-black border-[#caa055]' : 'border-[#caa055]/20 text-[#caa055]/80 hover:text-white hover:border-[#caa055]/60 bg-black/10'}`}
+                          data-testid={`table-rotation-${deg}`}
+                        >
+                          {deg}°
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-slate-cool/70 leading-snug">For a sideways or flipped projector: turns the table screen (and the mouse on it) so the map shows upright on the table.</p>
+                  </div>
 
                   {/* Electron Monitor Selection */}
                   {!!window.electronAPI && displays.length > 0 && (
