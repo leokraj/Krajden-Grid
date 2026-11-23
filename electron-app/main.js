@@ -299,6 +299,22 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
     winY = primary.y + Math.round((primary.height - height) / 2);
   }
 
+  // The live-measurement window remembers where you dragged it (even across screens)
+  const boundsFile = path.join(app.getPath('userData'), `window-${mode}.json`);
+  if (mode === 'measure') {
+    try {
+      const sb = JSON.parse(fs.readFileSync(boundsFile, 'utf8'));
+      const vis = screen.getAllDisplays().some((d) => {
+        const w = d.workArea;
+        return sb.x + 40 > w.x && sb.x < w.x + w.width - 40 && sb.y + 20 > w.y && sb.y < w.y + w.height - 40;
+      });
+      if (vis && Number.isFinite(sb.x) && Number.isFinite(sb.y)) {
+        winX = sb.x; winY = sb.y;
+        if (Number.isFinite(sb.width) && Number.isFinite(sb.height)) { width = sb.width; height = sb.height; }
+      }
+    } catch (_) { /* first run: use the default corner */ }
+  }
+
   const win = new BrowserWindow({
     x: winX,
     y: winY,
@@ -337,6 +353,18 @@ function createChildWindow(mode, title, width = 450, height = 650, senderBounds 
   win.loadURL(modeUrl);
 
   childWindows[mode] = win;
+
+  if (mode === 'measure') {
+    let saveT = null;
+    const saveBounds = () => {
+      if (win.isDestroyed() || win.isMinimized()) return;
+      try { fs.writeFileSync(boundsFile, JSON.stringify(win.getBounds())); } catch (_) {}
+    };
+    const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveBounds, 250); };
+    win.on('move', saveSoon);
+    win.on('resize', saveSoon);
+    win.on('close', saveBounds);
+  }
 
   // Keep tool windows above everything (including the fullscreen grid and
   // other always-on-top apps) unless the user minimizes them.
