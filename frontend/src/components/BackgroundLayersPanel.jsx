@@ -765,12 +765,23 @@ export function BackgroundLayersPanel({ onUndock, standalone = false }) {
             <span>🎛️</span> Active Layers ({layers.length})
           </Label>
           {layers.length > 0 && (
+            <div className="flex items-center gap-2">
+            <button
+              onClick={toggleBgLayersLocked}
+              className={`flex items-center gap-1 text-[10px] font-medium transition-colors ${locked ? 'text-[#caa055]' : 'text-gray-400 hover:text-white'}`}
+              title="Lock every map so none can be selected or moved on the grid"
+              data-testid="lock-all-maps-btn"
+            >
+              {locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              {locked ? 'All maps locked' : 'Lock all maps'}
+            </button>
             <button
               onClick={clearAllBackgroundLayers}
               className="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors"
             >
               Clear All Layers
             </button>
+            </div>
           )}
         </div>
 
@@ -805,6 +816,17 @@ export function BackgroundLayersPanel({ onUndock, standalone = false }) {
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          updateBackgroundLayer(layer.id, { locked: !layer.locked });
+                          if (!layer.locked && selectedBgLayerId === layer.id) setSelectedBgLayerId(null);
+                        }}
+                        className={`p-1 rounded transition-colors ${layer.locked ? 'text-[#caa055]' : 'text-gray-500 hover:text-white'}`}
+                        title={layer.locked ? 'Unlock this map' : 'Lock this map (not selectable on the grid)'}
+                        data-testid={`layer-lock-${layer.id}`}
+                      >
+                        {layer.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                      </button>
                       <button
                         onClick={() => updateBackgroundLayer(layer.id, { visible: !layer.visible })}
                         className={`p-1 rounded transition-colors ${
